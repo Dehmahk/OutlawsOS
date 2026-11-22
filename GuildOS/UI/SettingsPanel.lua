@@ -443,7 +443,7 @@ PAGES.interface = function(F)
             function() return GuildOS.GuildMap:IsMinimapDots() end,
             function(checked) GuildOS.GuildMap:SetMinimapDots(checked) end)
     end
-    F:Check(L["Guild button opens Guild OS"], L["Off: the game's guild button opens the game's own guild window."],
+    F:Check(L["Guild button opens OutlawsOS"], L["Off: the game's guild button opens the game's own guild window."],
         function() return GuildOS:IsGuildButtonHijacked() end,
         function(checked) GuildOS:SetSetting("hijackGuildButton", checked) end)
 

@@ -6,6 +6,7 @@
 -- Primary slash command: /guildos and /gos
 SLASH_GUILDOS1 = "/guildos"
 SLASH_GUILDOS2 = "/gos"
+SLASH_OUTLAWSOS1 = "/outlawsos"
 
 
 local L = GuildOS.L

@@ -32,14 +32,14 @@ L["Usage: /gos ban <name> [reason]"] = "Uso: /gos ban <nome> [motivo]"
 L["Usage: /gos tempban <name> <days> [reason]"] = "Uso: /gos tempban <nome> <dias> [motivo]"
 
 -- Guild-button takeover (opt-out) + native <-> Guild OS toggle
-L["Guild button opens Guild OS"] = "Botão de guilda abre o Guild OS"
+L["Guild button opens OutlawsOS"] = "Botão de guilda abre o OutlawsOS"
 L["Guild info on item tooltips"] = "Informações da guilda no tooltip de itens"
 L["Only while holding Shift"] = "Só segurando Shift"
 L["Use the game's font"] = "Usar a fonte do jogo"
 L["Reload to apply"] = "Recarregar para aplicar"
 L["The guild button"] = "O botão de guilda"
-L["By default the guild button (and \"J\") opens Guild OS. Prefer Blizzard's own guild window — chat history, news? Turn this off; you can still open Guild OS from the minimap button."] =
-    "Por padrão o botão de guilda (e o \"J\") abre o Guild OS. Prefere a janela de guilda da Blizzard — histórico de chat, novidades? Desligue isto; você ainda abre o Guild OS pelo botão do minimapa."
+L["By default the guild button (and \"J\") opens OutlawsOS. Prefer Blizzard's own guild window for chat history and news? Turn this off; you can still open OutlawsOS from the minimap button."] =
+    "Por padrão o botão de guilda (e o \"J\") abre o OutlawsOS. Prefere a janela de guilda da Blizzard — histórico de chat, novidades? Desligue isto; você ainda abre o OutlawsOS pelo botão do minimapa."
 
 -- Resistances (Audit sub-tab)
 L["Resistances"] = "Resistências"
@@ -1225,13 +1225,13 @@ L["Debug mode OFF."] = "Modo debug DESLIGADO."
 L["Debug mode ON."] = "Modo debug LIGADO."
 L["Finish"] = "Concluir"
 L["Getting started"] = "Primeiros passos"
-L["Open it anytime with /guildos, the minimap button, or a key binding. Click any guildmate to see their full character — gear, professions and attunements."] = "Abra quando quiser com /guildos, o botão do minimapa ou um atalho de tecla. Clique em qualquer membro para ver o personagem completo — equipamento, profissões e attunements."
-L["Open it anytime with /guildos, the minimap button, or a key binding. Click any guildmate to see their full character — gear, spec and professions."] = "Abra quando quiser com /guildos, o botão do minimapa ou um atalho de tecla. Clique em qualquer membro para ver o personagem completo — equipamento, spec e profissões."
+L["Open it anytime with /outlawsos, the minimap button, or a key binding. Click any guildmate to see their full character — gear, professions and attunements."] = "Abra quando quiser com /guildos, o botão do minimapa ou um atalho de tecla. Clique em qualquer membro para ver o personagem completo — equipamento, profissões e attunements."
+L["Open it anytime with /outlawsos, the minimap button, or a key binding. Click any guildmate to see their full character — gear, spec and professions."] = "Abra quando quiser com /guildos, o botão do minimapa ou um atalho de tecla. Clique em qualquer membro para ver o personagem completo — equipamento, spec e profissões."
 L["Officer tools"] = "Ferramentas de oficial"
 L["As an officer you unlock leadership tools. In Settings -> Officer, set which guild ranks count as officers. In Settings -> Loot, choose how the guild hands out loot: /roll, TMB, Wishlist or DKP."] = "Como oficial você desbloqueia ferramentas de liderança. Em Settings -> Oficial, defina quais ranks contam como oficiais. Em Settings -> Loot, escolha como a guilda distribui loot: /roll, TMB, Wishlist ou DKP."
 L["Guild OS Links"] = "Links do Guild OS"
-L["Guild OS shares your gear, professions, attunements, spec and wishlist with guildmates running the addon, so everyone sees the same roster. Officer notes and trials stay officer-only."] = "O Guild OS compartilha seu equipamento, profissões, attunements, spec e wishlist com os membros que usam o addon, então todos veem o mesmo roster. Notas de officer e trials permanecem só para officers."
-L["Guild OS shares your gear, professions, spec and wishlist with guildmates running the addon, so everyone sees the same roster. Officer notes and trials stay officer-only."] = "O Guild OS compartilha seu equipamento, profissões, spec e wishlist com os membros que usam o addon, então todos veem o mesmo roster. Notas de officer e trials permanecem só para officers."
+L["OutlawsOS shares your gear, professions, attunements, spec and wishlist with guildmates running the addon, so everyone sees the same roster. Officer notes and trials stay officer-only."] = "O OutlawsOS compartilha seu equipamento, profissões, attunements, spec e wishlist com os membros que usam o addon, então todos veem o mesmo roster. Notas de officer e trials permanecem só para officers."
+L["OutlawsOS shares your gear, professions, spec and wishlist with guildmates running the addon, so everyone sees the same roster. Officer notes and trials stay officer-only."] = "O OutlawsOS compartilha seu equipamento, profissões, spec e wishlist com os membros que usam o addon, então todos veem o mesmo roster. Notas de officer e trials permanecem só para officers."
 L["Guild OS syncs your gear, professions, attunements, spec and wishlist with guildmates running the addon. Officer notes and trials stay officer-only."] = "O Guild OS sincroniza seu equipamento, profissões, attunements, spec e wishlist com os membros que usam o addon. Notas de officer e trials permanecem só para officers."
 L["Guild OS syncs your gear, professions, spec and wishlist with guildmates running the addon. Officer notes and trials stay officer-only."] = "O Guild OS sincroniza seu equipamento, profissões, spec e wishlist com os membros que usam o addon. Notas de officer e trials permanecem só para officers."
 L["Links"] = "Links"
@@ -1243,7 +1243,7 @@ L["Open it anytime with /guildos, the minimap button, or a key binding. Officers
 L["Project page, bug reports and updates"] = "Página do projeto, bugs e atualizações"
 L["Step %d of %d"] = "Passo %d de %d"
 L["Toggle Guild OS"] = "Abrir/fechar Guild OS"
-L["Welcome to Guild OS"] = "Bem-vindo ao Guild OS"
+L["Welcome to OutlawsOS"] = "Bem-vindo ao OutlawsOS"
 
 -- Modules/BanList.lua
 L["Banned %s (%s) — banned by %s on %s"] = "Banido %s (%s) — banido por %s em %s"
@@ -2140,7 +2140,7 @@ L["Opted out"] = "Fora"
 L["Poisons"] = "Venenos"
 
 -- Interface styles (#122)
-L["Flat and dark: the look Guild OS was made with."] = "Plano e escuro: o visual com que o Guild OS foi feito."
+L["Flat and dark: the classic look."] = "Plano e escuro: o visual com que o OutlawsOS foi feito."
 L["The game's own bronze frames, tabs and buttons. A beta: tell us what looks off."] = "As molduras, abas e botões de bronze do próprio jogo. Em beta: conte o que parecer estranho."
 L["The %s style is not available on this client; using %s."] = "O estilo %s não está disponível neste cliente; usando %s."
 L["The %s style is not available on this client."] = "O estilo %s não está disponível neste cliente."
@@ -3158,7 +3158,7 @@ L["led by %s"] = "liderado por %s"
 L["Earned %s"] = "Conquistada em %s"
 L["by %s"] = "por %s"
 L["Choose your style"] = "Escolha o seu estilo"
-L["How should Guild OS look? You can change it later in %s > %s."] = "Como o Guild OS deve ficar? Você pode mudar depois em %s > %s."
+L["How should OutlawsOS look? You can change it later in %s > %s."] = "Como o OutlawsOS deve ficar? Você pode mudar depois em %s > %s."
 L["Finish and reload"] = "Concluir e recarregar"
 
 -- Groups: the party forms itself, a notice for the guild, the line again in guild chat (#378)
