@@ -2947,11 +2947,17 @@ function EKO:BuildDeskSub(panel)
         ht:ClearAllPoints(); ht:SetPoint("LEFT", b3, "RIGHT", 10, 0)
         y = y + 32
 
-        -- Who has OutlawOS
-        local users = EKO:PatchUsers()
+        -- Who has OutlawOS: leadership only (the Leadership tab's list and the roster's Leadership ranks).
+        -- Everyone's install status is on the roster.
+        local LEAD_RANKS = { ["guild master"] = true, ["gm alt"] = true, ["co-guild master"] = true, ["officer"] = true,
+            ["recruiter"] = true, ["herald"] = true, ["raid marshal"] = true }
+        local users = {}
+        for _, u in ipairs(EKO:PatchUsers()) do
+            if EKO:IsLeader(u.name) or (u.rank and LEAD_RANKS[u.rank:lower()]) then users[#users + 1] = u end
+        end
         local onl = 0
         for _, u in ipairs(users) do if u.online then onl = onl + 1 end end
-        local wh = sectionAt(child, string.format("OUTLAWOS INSTALLED  ·  %d seen, %d online now", #users, onl), y)
+        local wh = sectionAt(child, string.format("OutlawOS INSTALLED  ·  %d seen, %d online now", #users, onl), y)
         local chk = btn(wh, "Check who's online", 140, function() EKO:CheckPatch() end)
         chk:SetPoint("TOPRIGHT", 0, 2)
         y = y + 26

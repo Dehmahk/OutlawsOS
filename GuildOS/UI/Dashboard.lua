@@ -404,7 +404,7 @@ function GuildOS:CreateDashboardPanel(panel)
         local stats = {
             { tostring(total), L["members"] },
             { tostring(online), L["online"] },
-            { tostring(gosUsers), "OutlawsOS" },   -- EKO patch (was avg iLvl)
+            { tostring(gosUsers), "OutlawOS" },   -- EKO patch (was avg iLvl)
         }
         local chipW = math.max(34, math.floor((w - 2 * PAD) / 3))
         card.chips = {}

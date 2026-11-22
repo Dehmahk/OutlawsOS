@@ -18,29 +18,29 @@ local STEPS = {
         -- First, where the client draws both styles (#375): the look, before anything else. A pick is
         -- saved at once; the reload it needs waits until the wizard is finished.
         title = L["Choose your style"],
-        body  = string.format(L["How should OutlawsOS look? You can change it later in %s > %s."], L["Settings"], L["Interface"]),
+        body  = string.format(L["How should OutlawOS look? You can change it later in %s > %s."], L["Settings"], L["Interface"]),
         styleStep = true,
     },
     {
-        title = L["Welcome to OutlawsOS"],
+        title = L["Welcome to OutlawOS"],
         body  = (RETAIL and L["An all-in-one guild suite: roster, raid attendance, cores, recruitment, professions, leadership tools and audits — all synced between guildmates who run the addon."]
             or L["An all-in-one guild suite: roster, raid attendance, loot, wishlists, attunements, leadership tools and audits — all synced between guildmates who run the addon."])
             .. "\n\n|cff888888" .. L["Made with care by "] .. "|cffFFD700Chehul|r, rehauled for EKO by |cffFFD700Vyctoria|r|r",
     },
     {
         title = L["Getting started"],
-        body  = RETAIL and L["Open it anytime with /outlawsos, the minimap button, or a key binding. Click any guildmate to see their full character — gear, spec and professions."]
-            or L["Open it anytime with /outlawsos, the minimap button, or a key binding. Click any guildmate to see their full character — gear, professions and attunements."],
+        body  = RETAIL and L["Open it anytime with /outlawos, the minimap button, or a key binding. Click any guildmate to see their full character — gear, spec and professions."]
+            or L["Open it anytime with /outlawos, the minimap button, or a key binding. Click any guildmate to see their full character — gear, professions and attunements."],
     },
     {
         title = L["The guild button"],
-        body  = L["By default the guild button (and \"J\") opens OutlawsOS. Prefer Blizzard's own guild window for chat history and news? Turn this off; you can still open OutlawsOS from the minimap button."],
+        body  = L["By default the guild button (and \"J\") opens OutlawOS. Prefer Blizzard's own guild window for chat history and news? Turn this off; you can still open OutlawOS from the minimap button."],
         guildButtonToggle = true,  -- render the hijack checkbox on this step
     },
     {
         title = L["Data & privacy"],
-        body  = RETAIL and L["OutlawsOS shares your gear, professions, spec and wishlist with guildmates running the addon, so everyone sees the same roster. Officer notes and trials stay officer-only."]
-            or L["OutlawsOS shares your gear, professions, attunements, spec and wishlist with guildmates running the addon, so everyone sees the same roster. Officer notes and trials stay officer-only."],
+        body  = RETAIL and L["OutlawOS shares your gear, professions, spec and wishlist with guildmates running the addon, so everyone sees the same roster. Officer notes and trials stay officer-only."]
+            or L["OutlawOS shares your gear, professions, attunements, spec and wishlist with guildmates running the addon, so everyone sees the same roster. Officer notes and trials stay officer-only."],
     },
     {
         title = L["Your raid roles"],
@@ -86,7 +86,7 @@ local function BuildFrame()
 
     -- Per-step interactive control: the guild-button takeover toggle. Only shown on the
     -- step flagged guildButtonToggle; applies immediately (default on = opens Guild OS).
-    local gbToggle = UI:CreateCheckbox(f, L["Guild button opens OutlawsOS"], 18)
+    local gbToggle = UI:CreateCheckbox(f, L["Guild button opens OutlawOS"], 18)
     gbToggle:SetPoint("TOPLEFT", 24, -196)
     gbToggle.checkbox.onChanged = function(_, checked)
         GuildOS:SetSetting("hijackGuildButton", checked and true or false)

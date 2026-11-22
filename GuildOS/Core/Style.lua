@@ -16,7 +16,7 @@ Style.ORDER = { "guildos", "forever" }
 Style.current = Style.DEFAULT
 
 local INFO = {
-    guildos = { name = "OutlawsOS", desc = L["Flat and dark: the classic look."] },
+    guildos = { name = "OutlawOS", desc = L["Flat and dark: the classic look."] },
     forever = { name = "WoW: Forever",
                 desc = L["The game's own bronze frames, tabs and buttons. A beta: tell us what looks off."] },
 }

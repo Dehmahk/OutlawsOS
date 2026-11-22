@@ -595,7 +595,7 @@ function GuildOS:CreateRosterPanel(parent, host)
                       MakeKpiCard("activity", "AVG ACTIVITY", C.online, "last 7 days")   -- EKO patch
     host.kpiIlvl    = MakeKpiCard("ilvl",    L["AVG iLVL"],       C.text)
     host.kpiAtt     = MakeKpiCard("att",     L["AVG ATTENDANCE"], C.text)
-    host.kpiAddon   = MakeKpiCard("addon",   L["WITH OUTLAWSOS"],  C.text)
+    host.kpiAddon   = MakeKpiCard("addon",   L["WITH OutlawOS"],  C.text)
 
     -- KPI band bottom separator
     local bandLine = UI:CreateSeparator(parent)

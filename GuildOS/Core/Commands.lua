@@ -7,6 +7,7 @@
 SLASH_GUILDOS1 = "/guildos"
 SLASH_GUILDOS2 = "/gos"
 SLASH_OUTLAWSOS1 = "/outlawsos"
+SLASH_OUTLAWOS1 = "/outlawos"
 
 
 local L = GuildOS.L

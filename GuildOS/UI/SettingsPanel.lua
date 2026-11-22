@@ -443,7 +443,7 @@ PAGES.interface = function(F)
             function() return GuildOS.GuildMap:IsMinimapDots() end,
             function(checked) GuildOS.GuildMap:SetMinimapDots(checked) end)
     end
-    F:Check(L["Guild button opens OutlawsOS"], L["Off: the game's guild button opens the game's own guild window."],
+    F:Check(L["Guild button opens OutlawOS"], L["Off: the game's guild button opens the game's own guild window."],
         function() return GuildOS:IsGuildButtonHijacked() end,
         function(checked) GuildOS:SetSetting("hijackGuildButton", checked) end)
 
@@ -995,17 +995,17 @@ PAGES.data = function(F, isOfficer)
     end
 
     F:Section(L["About"])
-    local ver = UI:CreateText(F.content, "OutlawsOS v" .. (GuildOS.VERSION or "?"), 12, C.text.r, C.text.g, C.text.b)
+    local ver = UI:CreateText(F.content, "OutlawOS v" .. (GuildOS.VERSION or "?"), 12, C.text.r, C.text.g, C.text.b)
     F:Row(ver, { h = 16 })
     F:Note(L["Made with care by "] .. "Chehul, rehauled for EKO by Vyctoria")
     -- Retail has no attunements (ADR-0026, issue #177); its wishlist came with issue #185.
     F:Note(GuildOS.Client.isRetail
-        and L["OutlawsOS syncs your gear, professions, spec and wishlist with guildmates running the addon. Officer notes and trials stay officer-only."]
-        or L["OutlawsOS syncs your gear, professions, attunements, spec and wishlist with guildmates running the addon. Officer notes and trials stay officer-only."],
+        and L["OutlawOS syncs your gear, professions, spec and wishlist with guildmates running the addon. Officer notes and trials stay officer-only."]
+        or L["OutlawOS syncs your gear, professions, attunements, spec and wishlist with guildmates running the addon. Officer notes and trials stay officer-only."],
         { gap = 8 })
-    F:Note(L["Type /outlawsos help to see every command."], { gap = 8 })
+    F:Note(L["Type /outlawos help to see every command."], { gap = 8 })
     F:Buttons({ { L["Links"], function()
-        GuildOS:ShowExportPopup(L["OutlawsOS Links"],
+        GuildOS:ShowExportPopup(L["OutlawOS Links"],
             -- The site first: it is the one link here that does something for the person reading it.
             "App:  https://guildos.me\n"
             .. "GitHub:  https://github.com/danielcosta42/GuildOS\n"

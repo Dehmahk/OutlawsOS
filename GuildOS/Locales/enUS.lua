@@ -879,8 +879,8 @@ L["You offered %s to the raid."] = "You offered %s to the raid."
 L["You won %s: %s will trade it to you."] = "You won %s: %s will trade it to you."
 L["Your guild hands out loot outside Guild OS (External / Off)."] = "Your guild hands out loot outside Guild OS (External / Off)."
 L["[Loot] %s goes to %s: %s trades it to them."] = "[Loot] %s goes to %s: %s trades it to them."
-L["OutlawsOS shares your gear, professions, spec and wishlist with guildmates running the addon, so everyone sees the same roster. Officer notes and trials stay officer-only."] = "OutlawsOS shares your gear, professions, spec and wishlist with guildmates running the addon, so everyone sees the same roster. Officer notes and trials stay officer-only."
-L["OutlawsOS syncs your gear, professions, spec and wishlist with guildmates running the addon. Officer notes and trials stay officer-only."] = "OutlawsOS syncs your gear, professions, spec and wishlist with guildmates running the addon. Officer notes and trials stay officer-only."
+L["OutlawOS shares your gear, professions, spec and wishlist with guildmates running the addon, so everyone sees the same roster. Officer notes and trials stay officer-only."] = "OutlawOS shares your gear, professions, spec and wishlist with guildmates running the addon, so everyone sees the same roster. Officer notes and trials stay officer-only."
+L["OutlawOS syncs your gear, professions, spec and wishlist with guildmates running the addon. Officer notes and trials stay officer-only."] = "OutlawOS syncs your gear, professions, spec and wishlist with guildmates running the addon. Officer notes and trials stay officer-only."
 -- A rolagem do servidor no conselho de loot (issue #185).
 L["Chat is locked during the encounter: answer once it ends."] = "Chat is locked during the encounter: answer once it ends."
 -- A resposta de quem recebeu a entrega fica (issue #185).
