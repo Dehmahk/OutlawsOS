@@ -77,11 +77,55 @@ local function parseTime(s)
     return hh, mm
 end
 
+-- The colours an event may take (its Color), in the order the editor's swatches show them.
+local PALETTE = {
+    { key = "RED",    r = 0.86, g = 0.34, b = 0.34 },
+    { key = "ORANGE", r = 0.92, g = 0.56, b = 0.22 },
+    { key = "GOLD",   r = 0.95, g = 0.85, b = 0.40 },
+    { key = "GREEN",  r = 0.46, g = 0.78, b = 0.48 },
+    { key = "BLUE",   r = 0.40, g = 0.68, b = 0.92 },
+    { key = "PURPLE", r = 0.74, g = 0.48, b = 0.92 },
+}
+local PALETTE_BY_KEY = {}
+for _, p in ipairs(PALETTE) do PALETTE_BY_KEY[p.key] = p end
+
+-- The colour an event is drawn in: its own pick, else its kind's.
+local function eventColor(e)
+    return (e.color and PALETTE_BY_KEY[e.color]) or kindColor(e.kind)
+end
+
 local editor   -- lazily-built singleton
+
+-- The cycle buttons' rows. An event's value that is not one of them (one set from another client)
+-- joins the row as "Custom", so it reads true and survives a save.
+local CLOSE_OPTIONS = {   -- sign-ups close this many seconds before the start; nil stays open
+    { lead = nil,   label = L["Stay open"] },
+    { lead = 3600,  label = L["Close 1 hr before"] },
+    { lead = 86400, label = L["Close 1 day before"] },
+    { lead = 0,     label = L["Close at start"] },
+}
+local REMIND_OPTIONS = {  -- the reminder a member gets when signed up, seconds before the start
+    { lead = nil,   label = L["No reminder"] },
+    { lead = 900,   label = L["15 min before"] },
+    { lead = 3600,  label = L["1 hour before"] },
+    { lead = 86400, label = L["1 day before"] },
+}
+local function optionsWith(opts, value)
+    local list, idx = {}, nil
+    for i, o in ipairs(opts) do
+        list[i] = o
+        if o.lead == value then idx = i end
+    end
+    if not idx then
+        list[#list + 1] = { lead = value, label = L["Custom"] }
+        idx = #list
+    end
+    return list, idx
+end
 
 local function buildEditor()
     local f = CreateFrame("Frame", "GuildOSEventEditor", UIParent, "BackdropTemplate")
-    f:SetSize(360, 392)
+    f:SetSize(652, 470)
     f:SetPoint("CENTER")
     f:SetFrameStrata("DIALOG")
     f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = GuildOS.UI:Edge(f) })
@@ -100,19 +144,25 @@ local function buildEditor()
     close:SetScript("OnClick", function() f:Hide() end)
 
     -- A labelled field (single- or multi-line): the shared field under a form label (#371).
-    local function fieldBox(x, y, w, labelText, multiline, maxLetters)
+    local function fieldBox(x, y, w, labelText, multiline, maxLetters, h)
         local lbl = UI:CreateText(f, labelText, 11)
         lbl:SetPoint("TOPLEFT", x, y)
-        local box = UI:CreateInput(f, w, multiline and 84 or 22, { multiline = multiline, max = maxLetters })
+        local box = UI:CreateInput(f, w, h or (multiline and 84 or 22), { multiline = multiline, max = maxLetters })
         box:SetPoint("TOPLEFT", x, y - 14)
         return box
     end
 
-    local dateBox  = fieldBox(14,  -42, 118, L["Date (YYYY-MM-DD)"], false, 10)
-    local timeBox  = fieldBox(140, -42, 66,  L["Time (HH:MM)"],      false, 5)
-    local sizeLbl  = UI:CreateText(f, L["Size"], 11)
+    -- The preview card's refresh: the fields call it as they change; it is defined below.
+    local refreshPreview
+
+    ------------------------------------------------------------------
+    -- Left column: when, what, where, who, and its colour.
+    ------------------------------------------------------------------
+    local dateBox = fieldBox(14,  -42, 118, L["Date (YYYY-MM-DD)"], false, 10)
+    local timeBox = fieldBox(140, -42, 66,  L["Time (HH:MM)"],      false, 5)
+    local sizeLbl = UI:CreateText(f, L["Size"], 11)
     sizeLbl:SetPoint("TOPLEFT", 216, -42)
-    local sizeBtn  = UI:CreateButton(f, tostring(DEFAULT_SIZE), 44, 22)
+    local sizeBtn = UI:CreateButton(f, tostring(DEFAULT_SIZE), 44, 22)
     sizeBtn:SetPoint("TOPLEFT", 216, -56)
     sizeBtn.sizeVal = DEFAULT_SIZE
     sizeBtn:SetScript("OnClick", function()
@@ -121,6 +171,7 @@ local function buildEditor()
         for i, v in ipairs(sizes) do if v == sizeBtn.sizeVal then idx = i break end end
         sizeBtn.sizeVal = sizes[(idx % #sizes) + 1]
         sizeBtn.label:SetText(tostring(sizeBtn.sizeVal))
+        refreshPreview()
     end)
 
     -- Category picker: one button per kind, the chosen one marked as every selection is (#371).
@@ -140,8 +191,7 @@ local function buildEditor()
     do
         local kinds = (CAL() and CAL().KINDS) or { "RAID", "DUNGEON", "PVP", "FARM", "SOCIAL", "OTHER" }
         for i, k in ipairs(kinds) do
-            -- Six fixed 52px places in the 360px editor, as before: a long translation ("Schlachtzug",
-            -- "Подземелье") is shortened to fit rather than pushing the row past the popup's edge.
+            -- Six fixed 52px places: a long translation is shortened to fit rather than pushing the row past the edge.
             local p = UI:CreateButton(f, "", 52, 20)
             GuildOS:ApplyFont(p.label, 11, "button")
             p:SetPoint("TOPLEFT", 14 + (i - 1) * 55, -98)
@@ -166,6 +216,7 @@ local function buildEditor()
                     sizeBtn.sizeVal = (k == "DUNGEON") and sizes[1] or DEFAULT_SIZE
                     sizeBtn.label:SetText(tostring(sizeBtn.sizeVal))
                 end
+                refreshPreview()
             end)
             kindPills[#kindPills + 1] = p
         end
@@ -224,16 +275,74 @@ local function buildEditor()
         titleBox:SetWidth(show and 222 or 332)
         if not show then hideDungeonList() end
     end
-    local descBox  = fieldBox(14, -178, 332, L["Description (optional)"], true, 500)
+
+    local locBox  = fieldBox(14, -172, 332, L["Location"], false, 48)
+    local descBox = fieldBox(14, -216, 332, L["Description (optional)"], true, 500, 56)
+    local leadBox = fieldBox(14,  -296, 162, L["Lead"],    false, 32)
+    local coBox   = fieldBox(184, -296, 162, L["Co-host"], false, 32)
+
+    -- Colour: a default that follows the kind, or one of six. The chosen swatch is outlined in gold.
+    local colorLbl = UI:CreateText(f, L["Color"], 11)
+    colorLbl:SetPoint("TOPLEFT", 14, -344)
+    local SWATCHES = {
+        { key = nil, r = 0.45, g = 0.46, b = 0.50 },   -- follows the kind
+        { key = "RED",    r = 0.86, g = 0.34, b = 0.34 },
+        { key = "ORANGE", r = 0.92, g = 0.56, b = 0.22 },
+        { key = "GOLD",   r = 0.95, g = 0.85, b = 0.40 },
+        { key = "GREEN",  r = 0.46, g = 0.78, b = 0.48 },
+        { key = "BLUE",   r = 0.40, g = 0.68, b = 0.92 },
+        { key = "PURPLE", r = 0.74, g = 0.48, b = 0.92 },
+    }
+    local swatches = {}
+    local function refreshSwatches()
+        for _, s in ipairs(swatches) do
+            local on = (s.key or false) == (f.colorKey or false)
+            local edge = on and C.gold or C.line
+            s:SetBackdropBorderColor(edge.r, edge.g, edge.b, 1)
+        end
+    end
+    for i, sw in ipairs(SWATCHES) do
+        local s = CreateFrame("Button", nil, f, "BackdropTemplate")
+        s:SetSize(18, 18)
+        s:SetPoint("TOPLEFT", 14 + (i - 1) * 24, -358)
+        s:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = GuildOS.UI:Edge(s) })
+        s:SetBackdropColor(sw.r, sw.g, sw.b, 1)
+        s.key = sw.key
+        s:SetScript("OnClick", function()
+            f.colorKey = s.key
+            refreshSwatches(); refreshPreview()
+        end)
+        swatches[i] = s
+    end
+
+    ------------------------------------------------------------------
+    -- Right column: when it repeats, who may come, and what it asks of them.
+    ------------------------------------------------------------------
+    -- Quick times (UI only): the usual start hours, one click each; the one the time box holds is lit.
+    local QUICK = { "18:00", "19:00", "20:00", "21:00", "22:00" }
+    local quickLbl = UI:CreateText(f, L["Quick times"], 11)
+    quickLbl:SetPoint("TOPLEFT", 368, -42)
+    local quickBtns = {}
+    for i, t in ipairs(QUICK) do
+        local b = UI:CreateButton(f, t, 50, 22)
+        b:SetPoint("TOPLEFT", 368 + (i - 1) * 54, -56)
+        b.time = t
+        b:SetScript("OnClick", function() timeBox:SetText(t) end)
+        quickBtns[i] = b
+    end
+    local function refreshQuick()
+        local now = strtrim(timeBox:GetText() or "")
+        for _, b in ipairs(quickBtns) do UI:SetSelected(b, b.time == now) end
+    end
 
     -- Repeating (#267). A new event cycles through the repeats its date allows; an event of a series
     -- offers to change every later date instead.
     local repLbl = UI:CreateText(f, L["Repeat"], 11)
-    repLbl:SetPoint("TOPLEFT", 14, -284)
-    local repBtn = UI:CreateButton(f, "", 260, 22)
-    repBtn:SetPoint("TOPLEFT", 70, -280)
+    repLbl:SetPoint("TOPLEFT", 368, -88)
+    local repBtn = UI:CreateButton(f, "", 270, 22)
+    repBtn:SetPoint("TOPLEFT", 368, -102)
     local laterCb = UI:CreateCheckbox(f, L["Change every later date in this series"], 18)
-    laterCb:SetPoint("TOPLEFT", 14, -282)
+    laterCb:SetPoint("TOPLEFT", 368, -102)
     local REPEATS = (CAL() and CAL().REPEATS) or { "none" }
     f.rep = "none"
     local function repDate()
@@ -258,38 +367,259 @@ local function buildEditor()
         for i, v in ipairs(REPEATS) do if v == f.rep then idx = i break end end
         f.rep = REPEATS[(idx % #REPEATS) + 1]
         refreshRep()
+        refreshPreview()
     end)
     dateBox:HookScript("OnTextChanged", refreshRep)
-    local REP_ROW = 32   -- the room the repeat row takes
 
-    -- Alliance sharing. The whole block only exists while this guild is in a
-    -- pact: with no alliance there is nothing to share with, and an unexplained
-    -- checkbox is worse than no checkbox.
+    -- Alliance sharing. The whole block only exists while this guild is in a pact: with no alliance
+    -- there is nothing to share with, and an unexplained checkbox is worse than no checkbox.
     local shareCb = UI:CreateCheckbox(f, L["Share with the alliance"], 18)
-    shareCb:SetPoint("TOPLEFT", 14, -276 - REP_ROW)
+    shareCb:SetPoint("TOPLEFT", 368, -132)
     local shareHint = UI:CreateText(f,
         L["Allied guilds see this event and can request a slot. Unchecked, it stays in the guild."],
         9, C.textDim.r, C.textDim.g, C.textDim.b)
-    shareHint:SetPoint("TOPLEFT", 34, -296 - REP_ROW)
-    shareHint:SetWidth(310)
+    shareHint:SetPoint("TOPLEFT", 388, -150)
+    shareHint:SetWidth(250)
     shareHint:SetJustifyH("LEFT")
     shareHint:SetWordWrap(true)
 
+    -- Minimum level, and the spots each role has (blank: open).
+    local levelBox = fieldBox(368, -172, 64, L["Min level"], false, 2)
+    local tankBox  = fieldBox(446, -172, 52, L["Tank"],     false, 2)
+    local healBox  = fieldBox(506, -172, 56, L["Healer"],   false, 2)
+    local dpsBox   = fieldBox(576, -172, 50, L["DPS"],      false, 2)
+
+    -- Sign-ups close and the reminder: each a cycle button over its options.
+    local closeLbl = UI:CreateText(f, L["Sign-ups"], 11)
+    closeLbl:SetPoint("TOPLEFT", 368, -218)
+    local closeBtn = UI:CreateButton(f, "", 130, 22)
+    closeBtn:SetPoint("TOPLEFT", 368, -232)
+    local remindLbl = UI:CreateText(f, L["Reminder"], 11)
+    remindLbl:SetPoint("TOPLEFT", 508, -218)
+    local remindBtn = UI:CreateButton(f, "", 130, 22)
+    remindBtn:SetPoint("TOPLEFT", 508, -232)
+    f.closeOpts, f.closeIdx = CLOSE_OPTIONS, 1
+    f.remindOpts, f.remindIdx = REMIND_OPTIONS, 1
+    local function refreshCycles()
+        closeBtn.label:SetText(f.closeOpts[f.closeIdx].label)
+        remindBtn.label:SetText(f.remindOpts[f.remindIdx].label)
+    end
+    closeBtn:SetScript("OnClick", function()
+        f.closeIdx = (f.closeIdx % #f.closeOpts) + 1
+        refreshCycles(); refreshPreview()
+    end)
+    remindBtn:SetScript("OnClick", function()
+        f.remindIdx = (f.remindIdx % #f.remindOpts) + 1
+        refreshCycles(); refreshPreview()
+    end)
+
+    -- The preview card (UI only): what the event will read as, kept up as the form changes.
+    local card = CreateFrame("Frame", nil, f, "BackdropTemplate")
+    card:SetPoint("TOPLEFT", 368, -266)
+    card:SetSize(270, 82)
+    card:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = GuildOS.UI:Edge(card) })
+    card:SetBackdropColor(0.09, 0.09, 0.11, 1)
+    card:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, C.border.a)
+    local cardBar = card:CreateTexture(nil, "ARTWORK")
+    cardBar:SetTexture("Interface\\Buttons\\WHITE8x8")
+    cardBar:SetPoint("TOPLEFT", 0, 0)
+    cardBar:SetPoint("BOTTOMLEFT", 0, 0)
+    cardBar:SetWidth(3)
+    local function cardLine(y, size, dim)
+        local fs = dim and UI:CreateText(card, "", size, C.textDim.r, C.textDim.g, C.textDim.b)
+            or UI:CreateText(card, "", size)
+        fs:SetPoint("TOPLEFT", 12, y)
+        fs:SetWidth(246)
+        fs:SetJustifyH("LEFT")
+        fs:SetWordWrap(false)
+        return fs
+    end
+    local cardHead  = cardLine(-8, 9, true)
+    cardHead:SetText(L["Preview"])
+    local cardTitle = cardLine(-22, 12)
+    local cardMeta  = cardLine(-40, 10, true)
+    local cardExtra = cardLine(-54, 10, true)
+    local cardZone  = cardLine(-68, 9, true)
+
+    -- Overlaps with the guild's own events, named before the event is made (it is still made).
+    local conflictFS = UI:CreateText(f, "", 10, C.danger.r, C.danger.g, C.danger.b)
+    conflictFS:SetPoint("TOPLEFT", 368, -356)
+    conflictFS:SetWidth(270)
+    conflictFS:SetJustifyH("LEFT")
+    conflictFS:SetWordWrap(true)
+
+    -- The clock the times are read on: the member's own offset from UTC.
+    local function zoneText()
+        local now = time()
+        local off = now - time(date("!*t", now))
+        local sign = off < 0 and "-" or "+"
+        off = math.abs(off)
+        return string.format(L["Your clock: UTC%s%02d:%02d"], sign, math.floor(off / 3600), math.floor((off % 3600) / 60))
+    end
+
+    ------------------------------------------------------------------
+    -- Reading and writing the extra fields.
+    ------------------------------------------------------------------
+    local function extraForm()
+        return {
+            level = tonumber(levelBox:GetText()),
+            location = locBox:GetText(),
+            lead = leadBox:GetText(),
+            coHost = coBox:GetText(),
+            slots = { TANK = tonumber(tankBox:GetText()), HEALER = tonumber(healBox:GetText()), DPS = tonumber(dpsBox:GetText()) },
+            color = f.colorKey,
+            closeLead = f.closeOpts[f.closeIdx].lead,
+            remind = f.remindOpts[f.remindIdx].lead,
+        }
+    end
+
+    local function setExtraForm(x)
+        levelBox:SetText(x.level and tostring(x.level) or "")
+        locBox:SetText(x.location or "")
+        leadBox:SetText(x.lead or "")
+        coBox:SetText(x.coHost or "")
+        local s = x.slots or {}
+        tankBox:SetText(s.TANK and tostring(s.TANK) or "")
+        healBox:SetText(s.HEALER and tostring(s.HEALER) or "")
+        dpsBox:SetText(s.DPS and tostring(s.DPS) or "")
+        f.colorKey = x.color
+        f.closeOpts, f.closeIdx = optionsWith(CLOSE_OPTIONS, x.closeLead)
+        f.remindOpts, f.remindIdx = optionsWith(REMIND_OPTIONS, x.remind)
+        refreshSwatches(); refreshCycles()
+    end
+
+    function refreshPreview()
+        local title = strtrim(titleBox:GetText() or "")
+        cardTitle:SetText(title ~= "" and title or tint(L["Untitled event"], C.textDim))
+        local p = (f.colorKey and PALETTE_BY_KEY[f.colorKey]) or KIND_COLOR[f.kind] or KIND_COLOR.RAID
+        cardBar:SetVertexColor(p.r, p.g, p.b, 1)
+
+        local y, m, d = parseDate(dateBox:GetText())
+        local hh, mm = parseTime(timeBox:GetText())
+        local ts = (y and hh) and time({ year = y, month = m, day = d, hour = hh, min = mm }) or nil
+        local meta = {}
+        meta[#meta + 1] = ts and (GuildOS:LocalDate("%a %d %b", ts) .. string.format(" %02d:%02d", hh, mm)) or L["Enter a date and time"]
+        meta[#meta + 1] = kindLabel(f.kind)
+        meta[#meta + 1] = tostring(sizeBtn.sizeVal)
+        if f.rep and f.rep ~= "none" and not f.editId then meta[#meta + 1] = repLabel(f.rep) end
+        cardMeta:SetText(table.concat(meta, " - "))
+
+        local bits = {}
+        local loc = strtrim(locBox:GetText() or "")
+        if loc ~= "" then bits[#bits + 1] = loc end
+        local lead = strtrim(leadBox:GetText() or "")
+        if lead ~= "" then bits[#bits + 1] = L["Lead: "] .. lead end
+        local co = strtrim(coBox:GetText() or "")
+        if co ~= "" then bits[#bits + 1] = L["Co-host: "] .. co end
+        local lvl = tonumber(levelBox:GetText())
+        if lvl then bits[#bits + 1] = string.format(L["Level %d+"], lvl) end
+        cardExtra:SetText(table.concat(bits, "  -  "))
+        cardZone:SetText(zoneText())
+
+        local clash = ts and CAL():ConflictsFor(ts, f.editId) or {}
+        if #clash > 0 then
+            local parts = {}
+            for i, o in ipairs(clash) do
+                if i <= 3 then parts[#parts + 1] = (o.title or "?") .. " " .. date("%H:%M", o.when) end
+            end
+            conflictFS:SetText(L["Overlaps: "] .. table.concat(parts, ", "))
+        else
+            conflictFS:SetText("")
+        end
+    end
+
+    titleBox:HookScript("OnTextChanged", function() refreshPreview() end)
+    dateBox:HookScript("OnTextChanged", function() refreshPreview() end)
+    timeBox:HookScript("OnTextChanged", function() refreshPreview(); refreshQuick() end)
+    for _, b in ipairs({ locBox, descBox, leadBox, coBox, levelBox, tankBox, healBox, dpsBox }) do
+        b:HookScript("OnTextChanged", function() refreshPreview() end)
+    end
+
+    ------------------------------------------------------------------
+    -- Footer: the save and close buttons, the templates, and the note on where the event lives.
+    ------------------------------------------------------------------
     local saveBtn = UI:CreateButton(f, L["Create"], 110, 24)
     saveBtn:SetPoint("BOTTOMLEFT", 14, 14)
     local cancelBtn = UI:CreateButton(f, L["Cancel"], 80, 24)
     cancelBtn:SetPoint("LEFT", saveBtn, "RIGHT", 8, 0)
+    local loadBtn = UI:CreateButton(f, L["Load template"], 130, 24)
+    loadBtn:SetPoint("LEFT", cancelBtn, "RIGHT", 8, 0)
+    local tplBtn = UI:CreateButton(f, L["Save as template"], 150, 24)
+    tplBtn:SetPoint("LEFT", loadBtn, "RIGHT", 8, 0)
+    cancelBtn:SetScript("OnClick", function() f:Hide() end)
 
     -- An event made here never becomes a raid on the site or a Discord post (spec 075 in guildos-web):
     -- said where it is made, since "the bot didn't post my dungeon" is the question it answers.
-    local HINT_ROW = 28
     local gameOnly = UI:CreateText(f, L["Events made here stay in the game. For signups on Discord, create the raid on guildos.me or with /raid create."], 9, C.textDim.r, C.textDim.g, C.textDim.b)
     gameOnly:SetPoint("BOTTOMLEFT", saveBtn, "TOPLEFT", 0, 6)
-    gameOnly:SetWidth(332)
+    gameOnly:SetWidth(624)
     gameOnly:SetJustifyH("LEFT")
     gameOnly:SetWordWrap(true)
-    cancelBtn:SetScript("OnClick", function() f:Hide() end)
 
+    -- Templates: the list opens above its button. Picking a name fills the form (not the date);
+    -- the x removes it.
+    local tplList
+    local function hideTplList() if tplList then tplList:Hide() end end
+    local function loadTemplate(name)
+        local t = CAL():Templates()[name]
+        if not t then return end
+        titleBox:SetText(name)
+        descBox:SetText(t.note or "")
+        f.kind = t.kind or f.kind
+        refreshKinds()
+        if t.size then
+            sizeBtn.sizeVal = t.size
+            sizeBtn.label:SetText(tostring(t.size))
+        end
+        setExtraForm(t.extra or {})
+        refreshPreview()
+    end
+    loadBtn:SetScript("OnClick", function()
+        if tplList and tplList:IsShown() then tplList:Hide(); return end
+        local names = {}
+        for n in pairs(CAL():Templates()) do names[#names + 1] = n end
+        table.sort(names)
+        if #names == 0 then
+            GuildOS:Print(L["No templates yet. Fill in an event and use Save as template."])
+            return
+        end
+        hideTplList()
+        tplList = CreateFrame("Frame", nil, f, "BackdropTemplate")
+        tplList:SetFrameStrata("DIALOG")
+        tplList:SetFrameLevel(f:GetFrameLevel() + 10)
+        tplList:SetPoint("BOTTOMLEFT", loadBtn, "TOPLEFT", 0, 4)
+        tplList:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = GuildOS.UI:Edge(tplList) })
+        tplList:SetBackdropColor(0.058, 0.058, 0.075, 0.98)
+        tplList:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, C.border.a)
+        for i, name in ipairs(names) do
+            local b = UI:CreateButton(tplList, name, 180, 20)
+            b:SetPoint("TOPLEFT", 6, -6 - (i - 1) * 22)
+            b:SetScript("OnClick", function() loadTemplate(name); tplList:Hide() end)
+            local x = UI:CreateButton(tplList, "x", 22, 20)
+            x:SetPoint("LEFT", b, "RIGHT", 4, 0)
+            x:SetScript("OnClick", function()
+                CAL():DeleteTemplate(name)
+                tplList:Hide()
+                GuildOS:Print(string.format(L["Deleted template \"%s\"."], name))
+            end)
+        end
+        tplList:SetSize(214, 12 + #names * 22)
+        tplList:Show()
+    end)
+    tplBtn:SetScript("OnClick", function()
+        local name = strtrim(titleBox:GetText() or "")
+        if name == "" then
+            GuildOS:Print(L["Give the event a title to save it as a template."])
+            return
+        end
+        if CAL():SaveTemplate(name, { kind = f.kind, size = sizeBtn.sizeVal, note = descBox:GetText() or "", extra = extraForm() }) then
+            GuildOS:Print(string.format(L["Saved template \"%s\"."], name))
+        end
+    end)
+
+    ------------------------------------------------------------------
+    -- Save: create, edit, or make a series from the form.
+    ------------------------------------------------------------------
     local function commit()
         local y, m, d = parseDate(dateBox:GetText())
         if not y then GuildOS:Print(L["Enter a date as YYYY-MM-DD."]); return end
@@ -300,17 +630,15 @@ local function buildEditor()
         local when = time({ year = y, month = m, day = d, hour = hh, min = mm })
         local inAlliance = GuildOS.Alliance and GuildOS.Alliance:Get() ~= nil
         local share = inAlliance and shareCb.checkbox:GetChecked() or nil
+        local x = extraForm()
         if f.editId and f.inSeries and laterCb.checkbox:GetChecked() then
-            CAL():UpdateSeries(f.editId, title, when, sizeBtn.sizeVal, descBox:GetText() or "", f.kind, share)
+            CAL():UpdateSeries(f.editId, title, when, sizeBtn.sizeVal, descBox:GetText() or "", f.kind, share, x)
         elseif f.editId then
-            CAL():Update(f.editId, title, when, sizeBtn.sizeVal, descBox:GetText() or "",
-                f.kind, share)
+            CAL():Update(f.editId, title, when, sizeBtn.sizeVal, descBox:GetText() or "", f.kind, share, x)
         elseif f.rep ~= "none" then
-            CAL():CreateSeries(title, when, sizeBtn.sizeVal, descBox:GetText() or "",
-                f.kind, share and true or false, f.rep)
+            CAL():CreateSeries(title, when, sizeBtn.sizeVal, descBox:GetText() or "", f.kind, share and true or false, f.rep, x)
         else
-            CAL():Create(title, when, sizeBtn.sizeVal, descBox:GetText() or "",
-                f.kind, share and true or false)
+            CAL():Create(title, when, sizeBtn.sizeVal, descBox:GetText() or "", f.kind, share and true or false, x)
         end
         f:Hide()
     end
@@ -319,14 +647,17 @@ local function buildEditor()
     timeBox:SetScript("OnEnterPressed", commit)
     titleBox:SetScript("OnEnterPressed", commit)
 
-    function f:Open(dk, event)
-        f.editId = event and event.id or nil
-        titleFS:SetText(event and L["Edit Event"] or L["New Event"])
-        saveBtn.label:SetText(event and L["Save"] or L["Create"])
+    -- Opens the editor. An event edits it; `asCopy` makes a new event from it (a duplicate, whose date
+    -- the form still shows, to be changed before it is made).
+    function f:Open(dk, event, asCopy)
+        local editing = event and not asCopy or false
+        f.editId = editing and event.id or nil
+        titleFS:SetText(editing and L["Edit Event"] or L["New Event"])
+        saveBtn.label:SetText(editing and L["Save"] or L["Create"])
         -- A new event starts on a kind this rank creates (#308): a raid, else the first one open.
         local first = CAL():MayCreateKind("RAID") and "RAID" or CAL():CreatableKinds()[1] or "RAID"
         f.kind = (event and event.kind and KIND_COLOR[event.kind]) and event.kind or first
-        hideDungeonList()
+        hideDungeonList(); hideTplList()
         refreshKinds()
         local y, m, d, hh, mm, size, title, note
         if event then
@@ -340,12 +671,11 @@ local function buildEditor()
         local inAlliance = GuildOS.Alliance and GuildOS.Alliance:Get() ~= nil
         shareCb:SetShown(inAlliance)
         shareHint:SetShown(inAlliance)
-        f:SetHeight((inAlliance and 392 or 336) + REP_ROW + HINT_ROW)
         -- New: pick a repeat. An event of a series: change only it, or every later date too.
-        f.inSeries = event and type(event.series) == "table" or false
+        f.inSeries = editing and type(event.series) == "table" or false
         f.rep = "none"
-        repLbl:SetShown(not event)
-        repBtn:SetShown(not event)
+        repLbl:SetShown(not editing)
+        repBtn:SetShown(not editing)
         laterCb:SetShown(f.inSeries)
         laterCb.checkbox:SetChecked(false)
         shareCb.checkbox:SetChecked((event and event.shareAlliance) and true or false)
@@ -356,6 +686,9 @@ local function buildEditor()
         sizeBtn.sizeVal = size; sizeBtn.label:SetText(tostring(size))
         titleBox:SetText(title)
         descBox:SetText(note)
+        setExtraForm(event and CAL().ExtraOf(event) or {})
+        refreshQuick()
+        refreshPreview()
         f:Show(); f:Raise()
         titleBox:SetFocus()
     end
@@ -363,10 +696,17 @@ local function buildEditor()
     return f
 end
 
-local function openEditor(dk, event)
-    if not editor then editor = buildEditor() end
-    editor:Open(dk, event)
+-- The label of a reminder setting, as the editor names it.
+local function remindText(sec)
+    for _, o in ipairs(REMIND_OPTIONS) do if o.lead == sec then return o.label end end
+    return L["Custom"]
 end
+
+local function openEditor(dk, event, asCopy)
+    if not editor then editor = buildEditor() end
+    editor:Open(dk, event, asCopy)
+end
+
 
 -- Delete confirmation (standard Blizzard popup; avoids accidental loss).
 GuildOS.Dialogs["GUILDOS_CALENDAR_DELETE"] = {
@@ -524,7 +864,7 @@ function GuildOS:CreateCalendarSub(panel)
                     local line = date("%H:%M ", evs[1].when) .. (evs[1].title or "")
                     if #evs > 1 then line = "+" .. #evs .. " " .. line end
                     cell.evtFS:SetText(line)
-                    local kc = kindColor(evs[1].kind)
+                    local kc = eventColor(evs[1])
                     cell.evtFS:SetTextColor(kc.r, kc.g, kc.b)
                 else
                     cell.evtFS:SetText("")
@@ -589,7 +929,7 @@ function GuildOS:CreateCalendarSub(panel)
             local mine = CAL():MyRsvp(e)
 
             -- The kind keeps its colour: it is the same one the grid marks the day with.
-            local tag = tint("[" .. kindLabel(e.kind) .. "]", kindColor(e.kind)) .. " "
+            local tag = tint("[" .. kindLabel(e.kind) .. "]", eventColor(e)) .. " "
             -- Shared events carry a mark so an officer can see what is exposed
             -- without opening each one. Marking the SHARED ones (not the
             -- private ones) because exposure is the state that wants attention.
@@ -611,10 +951,13 @@ function GuildOS:CreateCalendarSub(panel)
                 local editBtn = UI:CreateButton(child, L["Edit"], 48, 18)
                 editBtn:SetPoint("RIGHT", delBtn, "LEFT", -6, 0)
                 editBtn:SetScript("OnClick", function() openEditor(nil, ev) end)
+                local copyBtn = UI:CreateButton(child, L["Copy"], 48, 18)
+                copyBtn:SetPoint("RIGHT", editBtn, "LEFT", -6, 0)
+                copyBtn:SetScript("OnClick", function() openEditor(nil, ev, true) end)
                 if inSeries then
                     -- This date and every later one of the series go (#267).
                     local endBtn = UI:CreateButton(child, L["End series"], 80, 18)
-                    endBtn:SetPoint("RIGHT", editBtn, "LEFT", -6, 0)
+                    endBtn:SetPoint("RIGHT", copyBtn, "LEFT", -6, 0)
                     endBtn:SetScript("OnClick", function() confirmEndSeries(ev) end)
                 end
             end
@@ -625,6 +968,37 @@ function GuildOS:CreateCalendarSub(panel)
                 11, soft.r, soft.g, soft.b)
             compFS:SetPoint("TOPLEFT", 0, -yy)
             yy = yy + 18
+
+            -- What the event asks of its people: where, who leads, the level, the spots, the sign-ups and
+            -- the reminder. Each line is shown only when the event sets it.
+            local facts = {}
+            if e.location and e.location ~= "" then facts[#facts + 1] = L["Where: "] .. e.location end
+            local who = {}
+            if e.lead and e.lead ~= "" then who[#who + 1] = L["Lead: "] .. e.lead end
+            if e.coHost and e.coHost ~= "" then who[#who + 1] = L["Co-host: "] .. e.coHost end
+            if #who > 0 then facts[#facts + 1] = table.concat(who, "  -  ") end
+            if e.level then facts[#facts + 1] = string.format(L["Level %d+"], e.level) end
+            if e.slots then
+                local spots = {}
+                for _, r in ipairs({ "TANK", "HEALER", "DPS" }) do
+                    if e.slots[r] then spots[#spots + 1] = roleLabel(r) .. " " .. (comp.roles[r] or 0) .. "/" .. e.slots[r] end
+                end
+                if #spots > 0 then facts[#facts + 1] = L["Spots: "] .. table.concat(spots, ", ") end
+            end
+            if e.closeLead then
+                local closeAt = (e.when or 0) - e.closeLead
+                if GetServerTime() >= closeAt then
+                    facts[#facts + 1] = L["Sign-ups are closed."]
+                else
+                    facts[#facts + 1] = string.format(L["Sign-ups close %s."], GuildOS:LocalDate("%a %d %b %H:%M", closeAt))
+                end
+            end
+            if e.remind then facts[#facts + 1] = L["Reminder: "] .. remindText(e.remind) end
+            for _, line in ipairs(facts) do
+                local factFS = UI:CreateText(child, line, 11, soft.r, soft.g, soft.b)
+                across(factFS, yy)
+                yy = yy + math.max(14, (factFS:GetStringHeight() or 12) + 4)
+            end
 
             if e.note and e.note ~= "" then
                 local noteFS = UI:CreateText(child, e.note, 11, soft.r, soft.g, soft.b)
@@ -720,6 +1094,15 @@ function GuildOS:CreateCalendarSub(panel)
                     local goFS = UI:CreateText(child, L["Going: "] .. table.concat(going, ", "), 11, soft.r, soft.g, soft.b)
                     across(goFS, yy)
                     yy = yy + math.max(14, (goFS:GetStringHeight() or 12) + 4)
+                end
+                local standby = {}
+                for _, r in pairs(e.rsvps or {}) do
+                    if r.status == "wait" then standby[#standby + 1] = r.name or "?" end
+                end
+                if #standby > 0 then
+                    local sbFS = UI:CreateText(child, L["Standby: "] .. table.concat(standby, ", "), 11, soft.r, soft.g, soft.b)
+                    across(sbFS, yy)
+                    yy = yy + math.max(14, (sbFS:GetStringHeight() or 12) + 4)
                 end
             end
 

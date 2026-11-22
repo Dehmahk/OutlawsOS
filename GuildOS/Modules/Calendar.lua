@@ -218,6 +218,9 @@ function Calendar:Initialize()
             end,
         })
     end
+    if C_Timer and C_Timer.NewTicker then
+        C_Timer.NewTicker(60, function() Calendar:CheckReminders() end)
+    end
     self:_RegisterTests()
 end
 
@@ -428,8 +431,55 @@ end
 ----------------------------------------------------------------------
 -- Mutations (officer: create/cancel · member: rsvp)
 ----------------------------------------------------------------------
-local function newEvent(title, when, size, note, kind, shareAlliance)
-    return {
+-- The fields an event carries besides its core: what a member needs to know and what the sign-up
+-- checks read (the editor's Location, Lead, Co-host, Min level, Spots, Sign-ups, Color, Reminder).
+-- They travel with the event as `xv = 1`; a client from before them keeps what the event had.
+local EXTRA_KEYS = { "level", "lead", "coHost", "location", "slots", "closeLead", "color", "remind" }
+Calendar.PALETTE_KEYS = { RED = true, ORANGE = true, GOLD = true, GREEN = true, BLUE = true, PURPLE = true }
+local MAX_LEAD = 7 * 86400
+
+-- Pure: the extras of `x`, cleaned like anything off the guild channel. A missing or junk value drops.
+function Calendar.CleanExtra(x)
+    local out = {}
+    if type(x) ~= "table" then return out end
+    local lvl = tonumber(x.level)
+    if lvl and lvl >= 1 and lvl <= 80 then out.level = math.floor(lvl) end
+    for _, k in ipairs({ "lead", "coHost", "location" }) do
+        if type(x[k]) == "string" then
+            local s = strtrim(x[k])
+            if s ~= "" then out[k] = GuildOS:SanitizeUserText(s, k == "location" and 48 or 32) end
+        end
+    end
+    if type(x.slots) == "table" then
+        local s = {}
+        for _, r in ipairs(Calendar.ROLES) do
+            local n = tonumber(x.slots[r])
+            if n and n >= 1 then s[r] = math.min(math.floor(n), 40) end
+        end
+        if next(s) then out.slots = s end
+    end
+    local cl = tonumber(x.closeLead)
+    if cl and cl >= 0 and cl <= MAX_LEAD then out.closeLead = math.floor(cl) end
+    local rm = tonumber(x.remind)
+    if rm and rm >= 0 and rm <= MAX_LEAD then out.remind = math.floor(rm) end
+    if type(x.color) == "string" and Calendar.PALETTE_KEYS[x.color] then out.color = x.color end
+    return out
+end
+
+-- The extras an event carries, as a table of its own.
+function Calendar.ExtraOf(e)
+    local x = {}
+    for _, k in ipairs(EXTRA_KEYS) do x[k] = e[k] end
+    return x
+end
+
+local function setExtra(e, x)
+    local c = Calendar.CleanExtra(x)
+    for _, k in ipairs(EXTRA_KEYS) do e[k] = c[k] end
+end
+
+local function newEvent(title, when, size, note, kind, shareAlliance, extra)
+    local e = {
         id = newId(), title = title, when = when, size = tonumber(size) or GuildOS.Client.defaultRaidSize,
         note = note or "", kind = normalizeKind(kind),
         author = GuildOS.Compat.PlayerName(), createdAt = GetServerTime(),
@@ -439,6 +489,8 @@ local function newEvent(title, when, size, note, kind, shareAlliance)
         -- before this feature stays inside the guild.
         shareAlliance = shareAlliance and true or false,
     }
+    if extra then setExtra(e, extra) end
+    return e
 end
 
 -- Stores a new event and tells the guild.
@@ -449,7 +501,9 @@ function Calendar:_Add(e)
         GuildOS.SyncService:Publish("event", "create", { event = {
             id = e.id, title = e.title, when = e.when, size = e.size,
             note = e.note, kind = e.kind, author = e.author, createdAt = e.createdAt,
-            shareAlliance = e.shareAlliance, series = e.series,
+            shareAlliance = e.shareAlliance, series = e.series, xv = 1,
+            level = e.level, lead = e.lead, coHost = e.coHost, location = e.location,
+            slots = e.slots, closeLead = e.closeLead, color = e.color, remind = e.remind,
         } }, { rev = rev })
     end
 end
@@ -474,10 +528,10 @@ local function validNew(title, when, kind)
     return title, when
 end
 
-function Calendar:Create(title, when, size, note, kind, shareAlliance)
+function Calendar:Create(title, when, size, note, kind, shareAlliance, extra)
     title, when = validNew(title, when, kind)
     if not title then return end
-    local e = newEvent(title, when, size, note, kind, shareAlliance)
+    local e = newEvent(title, when, size, note, kind, shareAlliance, extra)
     self:_Add(e)
     self:Refresh()
     return e
@@ -580,7 +634,7 @@ function Calendar:_FillSeries(template, now)
     for _, ts in ipairs(Calendar._Occurrences(s, s.first, from, to, yearly and YEARLY_CAP or SERIES_CAP)) do
         local id = occurrenceId(s.id, ts)
         if not self:GetEvents()[id] and not self:IsDeleted(id) then
-            local e = newEvent(template.title, ts, template.size, template.note, template.kind, template.shareAlliance)
+            local e = newEvent(template.title, ts, template.size, template.note, template.kind, template.shareAlliance, Calendar.ExtraOf(template))
             e.id = id
             e.series = cleanSeries(s)
             self:_Add(e)
@@ -592,14 +646,14 @@ end
 
 -- An officer's event that repeats: `rep` one of REPEATS. "none" is an ordinary event. Returns how
 -- many dates were created, nil when nothing could be.
-function Calendar:CreateSeries(title, when, size, note, kind, shareAlliance, rep)
+function Calendar:CreateSeries(title, when, size, note, kind, shareAlliance, rep, extra)
     if not knownRep(rep) then
-        return self:Create(title, when, size, note, kind, shareAlliance) and 1 or nil
+        return self:Create(title, when, size, note, kind, shareAlliance, extra) and 1 or nil
     end
     title, when = validNew(title, when, kind)
     if not title then return nil end
     local t = date("*t", when)
-    local template = newEvent(title, when, size, note, kind, shareAlliance)
+    local template = newEvent(title, when, size, note, kind, shareAlliance, extra)
     template.series = { id = newId(), rep = rep, first = when, hour = t.hour, min = t.min }
     local n = self:_FillSeries(template, GetServerTime())
     self:Refresh()
@@ -630,6 +684,7 @@ function Calendar:TopUpSeries()
             local template = { title = e.title, size = e.size, note = e.note, kind = e.kind,
                                shareAlliance = e.shareAlliance, series = cleanSeries(e.series) }
             template.series.untilT = untilT[sid]
+            for k, v in pairs(Calendar.ExtraOf(e)) do template[k] = v end
             n = n + self:_FillSeries(template, GetServerTime())
         end
     end
@@ -641,10 +696,10 @@ local function sameSeries(e, sid) return type(e.series) == "table" and e.series.
 
 -- An officer's edit of one date and every later one of its series: each keeps its own day and takes
 -- the new hour, title and the rest. Earlier dates stay; answers survive. Not a series: Update.
-function Calendar:UpdateSeries(id, title, when, size, note, kind, shareAlliance)
+function Calendar:UpdateSeries(id, title, when, size, note, kind, shareAlliance, extra)
     local e = self:GetEvents()[id]
     if not e or type(e.series) ~= "table" or not self:MayManage(e) then
-        return self:Update(id, title, when, size, note, kind, shareAlliance)
+        return self:Update(id, title, when, size, note, kind, shareAlliance, extra)
     end
     when = tonumber(when) or e.when
     local t = date("*t", when)
@@ -658,7 +713,7 @@ function Calendar:UpdateSeries(id, title, when, size, note, kind, shareAlliance)
         local d = date("*t", o.when)
         local at = oid == id and when or time({ year = d.year, month = d.month, day = d.day, hour = t.hour, min = t.min })
         o.series.hour, o.series.min = t.hour, t.min
-        self:Update(oid, title, at, size, note, kind, shareAlliance)
+        self:Update(oid, title, at, size, note, kind, shareAlliance, extra)
     end
 end
 
@@ -772,12 +827,15 @@ end
 -- client. Left out, a field goes: the site's list once did, and what the raid was put in the game's
 -- calendar as would (#263).
 local function wireOf(e)
-    return {
+    local w = {
         id = e.id, title = e.title, when = e.when, size = e.size,
         note = e.note, kind = e.kind, author = e.author, createdAt = e.createdAt,
         shareAlliance = e.shareAlliance, signups = e.signups, signupsAt = e.signupsAt,
         game = e.game, gameAt = e.gameAt, clock = e.clock, series = e.series,
+        xv = 1,
     }
+    for _, k in ipairs(EXTRA_KEYS) do w[k] = e[k] end
+    return w
 end
 
 -- The raid's time on the clock it was created on (guildos-web #411): { year, month, day, hour, minute },
@@ -908,7 +966,7 @@ end
 
 -- Officer edit of an existing event (title / date+time / size / description).
 -- RSVPs are preserved; a fresh revision makes the change win on every client.
-function Calendar:Update(id, title, when, size, note, kind, shareAlliance)
+function Calendar:Update(id, title, when, size, note, kind, shareAlliance, extra)
     if not self:MayManage(self:GetEvents()[id]) then
         GuildOS:Print(L["|cffFF4444Officers only.|r"])
         return
@@ -937,6 +995,8 @@ function Calendar:Update(id, title, when, size, note, kind, shareAlliance)
     if shareAlliance ~= nil then
         e.shareAlliance = shareAlliance and true or false
     end
+    -- nil extras leave the event's own alone, so a caller that does not know about them cannot clear them.
+    if extra ~= nil then setExtra(e, extra) end
     if GuildOS.SyncService then
         local rev = GuildOS.SyncService:NextRevision("event", id)
         -- An edit replaces the event on every client: wireOf leaves nothing behind.
@@ -966,6 +1026,15 @@ end
 function Calendar:Rsvp(id, status, role)
     local e = self:GetEvents()[id]
     if not e or e.canceled then return end
+    if status ~= "no" then
+        local why = self:SignupBlock(e)
+        if why then GuildOS:Print(why); return end
+        -- A role whose spots are taken waits in standby, not in the raid.
+        if status == "yes" and role and e.slots and e.slots[role] and self:TakenSpots(e, role) >= e.slots[role] then
+            status = "wait"
+            GuildOS:Print(L["The spots for this role are full: you are on standby."])
+        end
+    end
     e.rsvps = e.rsvps or {}
     local _, class = UnitClass("player")
     e.rsvps[keyOf(GuildOS.Compat.PlayerName())] = {
@@ -980,6 +1049,90 @@ end
 
 function Calendar:MyRsvp(e)
     return e and e.rsvps and e.rsvps[keyOf(GuildOS.Compat.PlayerName())] or nil
+end
+
+-- Why this member may not sign up to `e` now, or nil when they may: the sign-ups closed, or below the
+-- event's required level.
+function Calendar:SignupBlock(e)
+    if e.closeLead and GetServerTime() >= (e.when or 0) - e.closeLead then
+        return L["Sign-ups for this event are closed."]
+    end
+    if e.level and (UnitLevel("player") or 0) < e.level then
+        return string.format(L["This event needs level %d or higher."], e.level)
+    end
+    return nil
+end
+
+-- How many others are going in `role` (this member's own answer is not counted, so a repeat click
+-- does not fill its own spot twice).
+function Calendar:TakenSpots(e, role)
+    local me, n = keyOf(GuildOS.Compat.PlayerName()), 0
+    for k, r in pairs(e.rsvps or {}) do
+        if k ~= me and r.status == "yes" and r.role == role then n = n + 1 end
+    end
+    return n
+end
+
+-- The events of this guild that start within the conflict window of `when`, soonest first. `id` is
+-- the event being made or edited, and is left out.
+function Calendar:ConflictsFor(when, id)
+    local out = {}
+    for _, o in pairs(self:GetEvents()) do
+        if o.id ~= id and not o.canceled and math.abs((o.when or 0) - (when or 0)) < Calendar.CONFLICT_WINDOW then
+            out[#out + 1] = o
+        end
+    end
+    table.sort(out, function(a, b) return (a.when or 0) < (b.when or 0) end)
+    return out
+end
+
+-- Event reminders: a member signed up yes or tentative gets a line in chat before an event that asks
+-- for one (`remind`, seconds before the start). Each event reminds once per session.
+Calendar._reminded = {}
+function Calendar:CheckReminders()
+    local now = GetServerTime()
+    local me = keyOf(GuildOS.Compat.PlayerName())
+    for id, e in pairs(self:GetEvents()) do
+        local mine = e.rsvps and e.rsvps[me]
+        if e.remind and not e.canceled and e.when and now < e.when and now >= e.when - e.remind
+            and not self._reminded[id] and mine and (mine.status == "yes" or mine.status == "tentative") then
+            self._reminded[id] = true
+            local mins = math.max(1, math.ceil((e.when - now) / 60))
+            GuildOS:Print(string.format(L["Reminder: %s starts in %d min."], e.title or "?", mins))
+        end
+    end
+end
+
+-- Officer templates: a saved event's shape (kind, size, note and extras) under its name. Kept on this
+-- account, not synced: a template is a shortcut for the one who writes the events.
+local TEMPLATE_MAX = 30
+function Calendar:Templates()
+    GuildOS.db.calendarTemplates = GuildOS.db.calendarTemplates or {}
+    return GuildOS.db.calendarTemplates
+end
+
+function Calendar:SaveTemplate(name, data)
+    name = GuildOS:SanitizeUserText(strtrim(tostring(name or "")), 48)
+    if name == "" then return nil end
+    local all = self:Templates()
+    local count = 0
+    for _ in pairs(all) do count = count + 1 end
+    if not all[name] and count >= TEMPLATE_MAX then
+        GuildOS:Print(string.format(L["You can keep %d templates. Delete one first."], TEMPLATE_MAX))
+        return nil
+    end
+    data = data or {}
+    all[name] = {
+        kind = normalizeKind(data.kind),
+        size = tonumber(data.size),
+        note = tostring(data.note or ""):sub(1, 500),
+        extra = Calendar.CleanExtra(data.extra),
+    }
+    return all[name]
+end
+
+function Calendar:DeleteTemplate(name)
+    self:Templates()[name] = nil
 end
 
 ----------------------------------------------------------------------
@@ -1027,6 +1180,13 @@ function Calendar:OnSync(env, sender)
             e.rsvps    = (existing and existing.rsvps) or {}
             e.canceled = (existing and existing.canceled) or false
             e.shareAlliance = e.shareAlliance and true or false
+            -- A current client's extras are cleaned as they arrive; an older one's edit carries none,
+            -- and keeps what the event had.
+            if e.xv then
+                setExtra(e, e)
+            else
+                for _, k in ipairs(EXTRA_KEYS) do e[k] = existing and existing[k] or nil end
+            end
             if self:IsWebEvent(e) then
                 -- Forward only here too: an officer's old inbox, or an edit from a client before
                 -- this one that sends no list, does not take back what the guild already has.
