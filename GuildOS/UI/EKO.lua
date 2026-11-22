@@ -2407,6 +2407,7 @@ local function gazetteLine(raw)
     s = s:gsub("%*(.-)%*", "%1")
     return s
 end
+EKO.GazetteLine = gazetteLine   -- the Now tab's preview styles its lines the same way
 
 function EKO:ShowGazettePopup(gz)
     local UI, C = GuildOS.UI, GuildOS.Colors

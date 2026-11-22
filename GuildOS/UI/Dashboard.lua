@@ -583,17 +583,27 @@ function GuildOS:CreateDashboardPanel(panel)
             local spot = spots[t] or {}
             local finders = spot.finders or {}
             local tierName = L[t:sub(1, 1):upper() .. t:sub(2)]
-            local status = #finders > 0
-                and ("|cff66dd66" .. L["Solved"] .. "|r  " .. truncate(table.concat(finders, ", "), 30))
-                or ("|cffe6b84a" .. L["Available"] .. "|r")
+            -- Three prize places (1st, 2nd, 3rd), in the order of the finders: solved only once all three are taken.
+            local found = #finders
+            local names = truncate(table.concat(finders, ", "), 30)
+            local status
+            if found >= 3 then
+                status = "|cff66dd66" .. L["Solved"] .. "|r  " .. names
+            elseif found > 0 then
+                status = "|cffe6b84a" .. string.format(L["%d of 3 found"], found) .. "|r  " .. names
+            else
+                status = "|cffe6b84a" .. L["Available"] .. "|r"
+            end
             line(tierName .. "  " .. status, 0, C.text, "caption")
             local hint = truncate(GuildOS:SanitizeUserText(spot.hint or ""), 52)
             if hint ~= "" then line(hint, 0, C.textSoft, "caption") end
+            y = y + 6   -- room between the riddles
         end
 
         -- Bounty Board: the six dungeons, two to a row, with how many verified clears each has.
         local bt = EKO:Bounties()
         local list = bt and EKO:ParseBounties(bt.text) or {}
+        y = y + 6
         line(L["Bounty Board"], 0, C.label, "caption")
         if #list == 0 then
             line(L["No bounties set yet"], 0, C.textSoft, "caption")
@@ -634,6 +644,7 @@ function GuildOS:CreateDashboardPanel(panel)
         for _, e in ipairs((EKO:ParseRaffle(EKO:Raffle().text))) do
             if e.name == me then tickets = e.n end
         end
+        y = y + 10
         line(string.format(L["Bounty points %d  ·  Raffle tickets %d"], pts, tickets), 0, C.text, "tableNum")
         line(string.format(L["%d clear(s) this week"], clears), 0, C.textSoft, "caption")
 
@@ -642,6 +653,7 @@ function GuildOS:CreateDashboardPanel(panel)
         local daysToSun = (7 - tonumber(date("%w", t))) % 7
         local drawTxt = daysToSun == 0 and L["Raffle draw: today"]
             or string.format(L["Next raffle draw: %s"], GuildOS:LocalDate("%a %d %b", t + daysToSun * 86400))
+        y = y + 6
         line(drawTxt, 0, C.label, "caption")
     end
 
@@ -657,10 +669,20 @@ function GuildOS:CreateDashboardPanel(panel)
         -- Preview: as many lines of the Gazette as the card has room for above the Open button.
         -- Height is measured, so wrapped lines count and nothing runs under the button.
         local lines = {}
+        local style = GuildOS.EKO and GuildOS.EKO.GazetteLine
         for raw in (gz .. "\n"):gmatch("([^\n]*)\n") do
-            local s = raw:gsub("%*%*(.-)%*%*", "%1"):gsub("%*(.-)%*", "%1")
-            s = s:gsub(":%w+:", ""):gsub("^%s+", ""):gsub("%s+$", "")
-            if s ~= "" then lines[#lines + 1] = s end
+            local s
+            if style then
+                s = style(raw)   -- the popup's styling: gold labels, bold kept, emoji codes dropped
+            else
+                s = raw:gsub("%*%*(.-)%*%*", "%1"):gsub("%*(.-)%*", "%1")
+                s = s:gsub(":%w+:", ""):gsub("^%s+", ""):gsub("%s+$", "")
+            end
+            if s ~= "" then
+                -- A gap before each labelled item, as the popup spaces them.
+                if #lines > 0 and s:find("^|cffffd100") then s = "\n" .. s end
+                lines[#lines + 1] = s
+            end
         end
         local BUTTON_H, GAP = 22, STACK
         local avail = (card.innerH or (CARD_H - BUTTON_H - BODY_TOP)) - BUTTON_H - GAP
