@@ -474,22 +474,26 @@ function GuildOS:CreateDashboardPanel(panel)
             text(body, "The Gazette is empty this week.", 0, 0, w, C.textSoft, nil, true)
             return
         end
-        -- Preview: first lines of the Gazette, capped by characters so long lines
-        -- can't wrap past the card and under the Open button
-        local PREVIEW_CHARS = 1000
-        local lines, used = {}, 0
+        -- Preview: as many lines of the Gazette as the card has room for above the Open button.
+        -- Height is measured, so wrapped lines count and nothing runs under the button.
+        local lines = {}
         for raw in (gz .. "\n"):gmatch("([^\n]*)\n") do
-            local s = raw:gsub("%*%*", ""):gsub(":%w+:", ""):gsub("^%s+", ""):gsub("%s+$", "")
-            if s ~= "" then
-                local room = PREVIEW_CHARS - used
-                if room <= 0 then break end
-                if #s > room then s = s:sub(1, room):gsub("%s+$", "") .. "..." end
-                lines[#lines + 1] = s
-                used = used + #s
-                if #lines >= 5 or used >= PREVIEW_CHARS then break end
-            end
+            local s = raw:gsub("%*%*(.-)%*%*", "%1"):gsub("%*(.-)%*", "%1")
+            s = s:gsub(":%w+:", ""):gsub("^%s+", ""):gsub("%s+$", "")
+            if s ~= "" then lines[#lines + 1] = s end
         end
-        text(body, table.concat(lines, "\n"), 0, 0, w, C.text, nil, true)
+        local BUTTON_H, GAP = 22, STACK
+        local avail = (card.innerH or (CARD_H - BUTTON_H - BODY_TOP)) - BUTTON_H - GAP
+        local fs = text(body, "", 0, 0, w, C.text, nil, true)
+        local n = #lines
+        local function build(k)
+            return table.concat(lines, "\n", 1, k) .. (k < #lines and "..." or "")
+        end
+        fs:SetText(build(n))
+        while n > 1 and fs:GetStringHeight() > avail do
+            n = n - 1
+            fs:SetText(build(n))
+        end
         local open = UI:CreateButton(body, "Open the Gazette", 150, 22)
         open:SetPoint("BOTTOMLEFT", 0, 0)
         open:SetScript("OnClick", function() GuildOS.EKO:ShowGazettePopup(gz) end)
