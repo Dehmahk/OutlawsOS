@@ -261,7 +261,7 @@ function GuildOS:CreateDashboardPanel(panel)
 
     -- WoW: Forever, until a week after the raids open (issue #207): the countdown in the readiness
     -- card's place. Readiness:Countdown counts; this only draws.
-    local function fillCountdown(card, cd)
+    local function fillCountdown(card, cd, rows)
         local body = card.body
         clearBody(body)
         local title = cd.open and L["RAIDS ARE OPEN"]
@@ -313,6 +313,66 @@ function GuildOS:CreateDashboardPanel(panel)
                 mine = L["Ready"]
             end
             line(L["You"], mine)
+
+            -- Your checklist: what is still missing for you, one line each.
+            local R = GuildOS.Readiness
+            local avail = card.innerH or 0
+            local function fits() return y + LINE_H <= avail end
+            local minIlvl = R and R.GetMinIlvl and R:GetMinIlvl() or nil
+            local lv, ilvl, missEnch = me.level or 0, me.ilvl or 0, me.missEnch or 0
+            if fits() then
+                y = y + 6
+                text(body, L["Your checklist"], 0, y, w, C.label, "caption")
+                y = y + LINE_H
+            end
+            if fits() then
+                line(L["Level"], lv >= cd.cap and L["Done"] or string.format("%d / %d", lv, cd.cap))
+            end
+            if fits() then
+                local enchVal = not me.hasGear and L["No gear scanned yet"]
+                    or missEnch == 0 and L["Done"]
+                    or string.format(L["%d missing"], missEnch)
+                line(L["Enchants"], enchVal)
+            end
+            if fits() then
+                local ilvlVal = (minIlvl and ilvl < minIlvl) and string.format("%d / %d", ilvl, minIlvl)
+                    or (minIlvl and L["Done"]) or tostring(ilvl)
+                line(L["Item level"], ilvlVal)
+            end
+
+            -- Closest to ready: the members short of readiness, the nearest first, five at most.
+            if R and R.ForeverStatus and rows then
+                local near = {}
+                for _, r in ipairs(rows) do
+                    local st, why = R.ForeverStatus(r, minIlvl, cd.cap)
+                    if st ~= "ready" and why then near[#near + 1] = { r = r, why = why } end
+                end
+                local rank = { level = 1, ilvl = 2, enchants = 3 }
+                table.sort(near, function(a, b)
+                    if rank[a.why] ~= rank[b.why] then return rank[a.why] < rank[b.why] end
+                    return (a.r.level or 0) > (b.r.level or 0)
+                end)
+                if #near > 0 and fits() then
+                    y = y + 6
+                    text(body, L["Closest to ready"], 0, y, w, C.label, "caption")
+                    y = y + LINE_H
+                end
+                for i, n in ipairs(near) do
+                    if i > 5 or not fits() then break end
+                    local r = n.r
+                    local nm = truncate(r.name or "?", 16)
+                    local hex = GuildOS:GetClassColorHex(r.class or "")
+                    local detail
+                    if n.why == "level" then
+                        detail = string.format("%d / %d", r.level or 0, cd.cap)
+                    elseif n.why == "ilvl" then
+                        detail = string.format(L["ilvl %d / %d"], r.ilvl or 0, minIlvl or 0)
+                    else
+                        detail = string.format(L["%d enchants missing"], r.missEnch or 0)
+                    end
+                    line("|cff" .. hex .. nm .. "|r", detail)
+                end
+            end
         end
     end
 
@@ -320,13 +380,15 @@ function GuildOS:CreateDashboardPanel(panel)
     local function fillPulse(card, rows)
         local body, w = card.body, card.innerW
         clearBody(body)
-        local total, online, iSum, iN = 0, 0, 0, 0
+        local total, online = 0, 0
+        local classOnline = {}
         for _, r in ipairs(rows or {}) do
             total = total + 1
-            if r.online then online = online + 1 end
-            if (r.ilvl or 0) > 0 then iSum = iSum + r.ilvl; iN = iN + 1 end
+            if r.online then
+                online = online + 1
+                if r.class and r.class ~= "" then classOnline[r.class] = (classOnline[r.class] or 0) + 1 end
+            end
         end
-        local avgIlvl = iN > 0 and math.floor(iSum / iN) or 0
         -- EKO patch: a leveling guild's pulse. GuildOS users instead of item level, the level spread under it.
         local gosUsers, band = 0, { 0, 0, 0, 0 }
         local saved = (GuildOS.db and GuildOS.db.members) or {}
@@ -339,18 +401,10 @@ function GuildOS:CreateDashboardPanel(panel)
             band[b] = band[b] + 1
         end
 
-        -- Raid-ready = max-level members (70, or 60 on Forever), counted straight from the guild
-        -- roster so offline members count too: a stable, motivating number even with the guild
-        -- offline. Level is a roster field known for everyone, so this needs no synced data.
-        local ready = 0
-        for i = 1, GetNumGuildMembers() or 0 do
-            local _, _, _, level = GetGuildRosterInfo(i)
-            if (level or 0) >= GuildOS.Client.maxLevel then ready = ready + 1 end
-        end
         local stats = {
             { tostring(total), L["members"] },
             { tostring(online), L["online"] },
-            { tostring(gosUsers), "GuildOS" },   -- EKO patch (was avg iLvl)
+            { tostring(gosUsers), "OutlawsOS" },   -- EKO patch (was avg iLvl)
         }
         local chipW = math.max(34, math.floor((w - 2 * PAD) / 3))
         card.chips = {}
@@ -364,9 +418,82 @@ function GuildOS:CreateDashboardPanel(panel)
             chip.label:SetJustifyH("LEFT")
             card.chips[i] = chip
         end
-        local foot = text(body, string.format("Lv 1-19: %d  ·  20-39: %d  ·  40-59: %d  ·  %d: %d", band[1], band[2], band[3], GuildOS.Client.maxLevel, band[4]), 0, 0, w, C.label, "caption")   -- EKO patch (was raid-ready)
-        foot:ClearAllPoints()
-        foot:SetPoint("BOTTOMLEFT", 0, 0)
+
+        local avail = card.innerH or (CARD_H - BODY_TOP - PAD)
+        local y = 56
+        local ROW, LINE = 14, 6
+
+        -- Level bands as bars: how many members sit in each band, against the whole guild.
+        local bandLabels = { "Lv 1-19", "Lv 20-39", "Lv 40-59", "Lv " .. GuildOS.Client.maxLevel }
+        local barX = 64
+        local barW = math.max(40, math.floor(w * 0.42))
+        for b = 1, 4 do
+            if y + ROW > avail then break end
+            text(body, bandLabels[b], 0, y, 60, C.label, "caption")
+            local bar = UI:CreateProgressBar(body, barW, 8)
+            bar:SetPoint("TOPLEFT", barX, -(y + 4))
+            bar:SetProgress(total > 0 and band[b] / total or 0)
+            text(body, tostring(band[b]), barX + barW + 8, y, 40, C.textSoft, "caption")
+            y = y + ROW + LINE
+        end
+
+        -- Online by class: the biggest groups first, in their class colours.
+        local list = {}
+        for class, n in pairs(classOnline) do list[#list + 1] = { class = class, n = n } end
+        table.sort(list, function(a, b)
+            if a.n ~= b.n then return a.n > b.n end
+            return a.class < b.class
+        end)
+        if #list > 0 and y + ROW <= avail then
+            y = y + 4
+            text(body, L["Online by class"], 0, y, w, C.label, "caption")
+            y = y + ROW + 2
+            local parts = {}
+            for i, c in ipairs(list) do
+                if i > 6 then break end
+                local nm = (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[c.class]) or c.class
+                parts[#parts + 1] = "|cff" .. GuildOS:GetClassColorHex(c.class) .. nm .. "|r " .. c.n
+            end
+            local fs = text(body, table.concat(parts, "  ·  "), 0, y, w, C.text, "caption", true)
+            local h = fs:GetStringHeight() or 0
+            if y + h <= avail then y = y + h + LINE else fs:Hide() end
+        end
+
+        -- Daily trend: one saved count a day, the last seven, so the bars build up as days pass.
+        local db = GuildOS.db
+        if db and total > 0 then
+            db.pulseDays = db.pulseDays or {}
+            db.pulseDays[date("%Y-%m-%d", nowT())] = { members = total, online = online }
+            local keys = {}
+            for k in pairs(db.pulseDays) do keys[#keys + 1] = k end
+            table.sort(keys)
+            while #keys > 14 do db.pulseDays[table.remove(keys, 1)] = nil end
+        end
+        if db and db.pulseDays and y + 40 <= avail then
+            y = y + 4
+            text(body, L["Online, last 7 days"], 0, y, w, C.label, "caption")
+            y = y + ROW + 2
+            local days, maxOn = {}, 1
+            for i = 6, 0, -1 do
+                local t = nowT() - i * 86400
+                local rec = db.pulseDays[date("%Y-%m-%d", t)]
+                days[#days + 1] = { t = t, on = rec and rec.online or 0 }
+                if days[#days].on > maxOn then maxOn = days[#days].on end
+            end
+            local gap = 6
+            local colW = math.max(4, math.floor((w - 6 * gap) / 7))
+            local barArea = 24
+            for i, d in ipairs(days) do
+                local x = (i - 1) * (colW + gap)
+                local bh = math.max(2, math.floor(barArea * d.on / maxOn))
+                local bar = body:CreateTexture(nil, "ARTWORK")
+                bar:SetTexture(WHITE)
+                bar:SetSize(colW, bh)
+                bar:SetPoint("TOPLEFT", x, -(y + barArea - bh))
+                bar:SetVertexColor(C.label.r, C.label.g, C.label.b, 1)
+                text(body, GuildOS:Utf8Head(GuildOS:LocalDate("%a", d.t), 2), x, y + barArea + 2, colW + gap, C.textSoft, "caption")
+            end
+        end
     end
 
     local function fillRecruit(card)
@@ -432,13 +559,66 @@ function GuildOS:CreateDashboardPanel(panel)
         local EKO = GuildOS.EKO
         if not EKO then return end
         local me = GuildOS.Compat.PlayerName()
+        local avail = card.innerH or (CARD_H - BODY_TOP - PAD)
+        local LINE = 4
+        local y = 0
 
+        -- Each block is placed top to bottom while it fits the card; what doesn't fit is hidden.
+        local function line(str, x, col, role, width, wrap)
+            local fs = text(body, str, x, y, width or w, col, role, wrap == true)
+            local h = fs:GetStringHeight() or 0
+            if y + h > avail then fs:Hide() return false end
+            y = y + h + LINE
+            return true
+        end
+
+        -- Location of the Week: the theme, then each riddle with who solved it or that it is open.
         local lotw = EKO:Lotw()
         local theme = lotw and type(lotw.text) == "string" and lotw.text:match("Theme:%s*([^|\n]+)")
-        text(body, L["Location of the Week"], 0, 0, w, C.label, "caption")
         local themeTxt = theme and theme:match("^%s*(.-)%s*$") or ""
-        text(body, themeTxt ~= "" and truncate(GuildOS:SanitizeUserText(themeTxt), 30) or L["No location posted yet"],
-            0, 16, w, C.text, "memberName")
+        line(L["Location of the Week"], 0, C.label, "caption")
+        line(themeTxt ~= "" and truncate(GuildOS:SanitizeUserText(themeTxt), 30) or L["No location posted yet"], 0, C.text, "memberName")
+        local spots = EKO:ParseLotw(lotw and lotw.text or "")
+        for _, t in ipairs({ "easy", "medium", "hard" }) do
+            local spot = spots[t] or {}
+            local finders = spot.finders or {}
+            local tierName = L[t:sub(1, 1):upper() .. t:sub(2)]
+            local status = #finders > 0
+                and ("|cff66dd66" .. L["Solved"] .. "|r  " .. truncate(table.concat(finders, ", "), 30))
+                or ("|cffe6b84a" .. L["Available"] .. "|r")
+            line(tierName .. "  " .. status, 0, C.text, "caption")
+            local hint = truncate(GuildOS:SanitizeUserText(spot.hint or ""), 52)
+            if hint ~= "" then line(hint, 0, C.textSoft, "caption") end
+        end
+
+        -- Bounty Board: the six dungeons, two to a row, with how many verified clears each has.
+        local bt = EKO:Bounties()
+        local list = bt and EKO:ParseBounties(bt.text) or {}
+        line(L["Bounty Board"], 0, C.label, "caption")
+        if #list == 0 then
+            line(L["No bounties set yet"], 0, C.textSoft, "caption")
+        else
+            local colW = math.max(1, math.floor((w - 12) / 2))
+            for i = 1, #list, 2 do
+                local rowH, cells = 0, {}
+                for k = 0, 1 do
+                    local b = list[i + k]
+                    if b then
+                        local done = EKO:BountyClaims(b.name)
+                        local st = #done > 0 and ("|cff66dd66" .. #done .. "x|r") or "|cff888888-|r"
+                        local str = (b.tier and ("|cffe6b84a" .. b.tier .. "|r  ") or "") .. truncate(b.name, 20) .. "  " .. st
+                        local fs = text(body, str, k * (colW + 12), y, colW, C.text, "caption")
+                        cells[#cells + 1] = fs
+                        rowH = math.max(rowH, fs:GetStringHeight() or 0)
+                    end
+                end
+                if y + rowH > avail then
+                    for _, fs in ipairs(cells) do fs:Hide() end
+                    break
+                end
+                y = y + rowH + LINE
+            end
+        end
 
         -- Your points: one per dungeon clear, two when the party was a full five. Tickets: the raffle list.
         local pts, clears = 0, 0
@@ -454,15 +634,15 @@ function GuildOS:CreateDashboardPanel(panel)
         for _, e in ipairs((EKO:ParseRaffle(EKO:Raffle().text))) do
             if e.name == me then tickets = e.n end
         end
-        text(body, string.format(L["Bounty points %d  ·  Raffle tickets %d"], pts, tickets), 0, 40, w, C.text, "tableNum")
-        text(body, string.format(L["%d clear(s) this week"], clears), 0, 60, w, C.textSoft, "caption")
+        line(string.format(L["Bounty points %d  ·  Raffle tickets %d"], pts, tickets), 0, C.text, "tableNum")
+        line(string.format(L["%d clear(s) this week"], clears), 0, C.textSoft, "caption")
 
         -- Raffle draws run on Sundays: the next one, today included.
         local t = nowT()
         local daysToSun = (7 - tonumber(date("%w", t))) % 7
         local drawTxt = daysToSun == 0 and L["Raffle draw: today"]
             or string.format(L["Next raffle draw: %s"], GuildOS:LocalDate("%a %d %b", t + daysToSun * 86400))
-        text(body, drawTxt, 0, 80, w, C.label, "caption")
+        line(drawTxt, 0, C.label, "caption")
     end
 
     -- The Outlaw Gazette (OutlawOS): the first lines of this week's post, with the full text one click away.
@@ -627,7 +807,7 @@ function GuildOS:CreateDashboardPanel(panel)
         -- If the countdown fails, the card it replaced: the rest of the cards still draw (issue #232).
         local R, ok, countdown = GuildOS.Readiness, false, nil
         if R and R.Countdown then ok, countdown = GuildOS:SafeCall(R.Countdown, R, rows, GetServerTime()) end
-        if not (ok and countdown and GuildOS:SafeCall(fillCountdown, cReady, countdown)) then
+        if not (ok and countdown and GuildOS:SafeCall(fillCountdown, cReady, countdown, rows)) then
             cReady.hdr:SetText(L["YOUR READINESS"])
             fillReady(cReady, myRow)
         end

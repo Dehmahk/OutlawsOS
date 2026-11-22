@@ -34,6 +34,8 @@ local RECENT        = 48 * 3600  -- how far back the activity goes
 local ANSWER_WITHIN = 7 * 86400  -- a raid this close asks for an answer
 local MAX_NEEDS     = 5
 local MAX_FEED      = 12
+local UPCOMING_SHOWN = 3         -- the next events under Needs me
+local RAFFLE_SHOWN   = 5         -- the top ticket holders, EKO builds only
 local LOADING_BARS  = { 180, 130, 160 }
 local DASH          = "\226\128\148"
 local DOT           = " \194\183 "
@@ -378,7 +380,7 @@ local function paintRow(r, kind, value, last)
             r.text:SetPoint("LEFT", r, "LEFT", MARK + 8, 0)
             right = ARROW_W + 8
         else
-            r.time:SetText(stamp(value.ts))
+            r.time:SetText(value.label or stamp(value.ts))
             r.time:Show()
             r.text:SetPoint("LEFT", r, "LEFT", 0, 0)
             right = TIME_W + 8
@@ -454,6 +456,10 @@ function GuildOS:CreateNowPanel(panel, win)
 
     local needsTitle = UI:CreateSectionTitle(column, L["Needs me"])
     local needsList = newList(column)
+    local upTitle = UI:CreateSectionTitle(column, L["Upcoming"])
+    local upList = newList(column)
+    local raffleTitle = UI:CreateSectionTitle(column, L["Raffle leaders"])
+    local raffleList = newList(column)
     local feedTitle = UI:CreateSectionTitle(column, L["Activity"])
     local feedList = newList(column)
     panel.needsTitle, panel.needsList = needsTitle, needsList
@@ -527,6 +533,48 @@ function GuildOS:CreateNowPanel(panel, win)
         fill(needsList, rows)
         place(needsList, y, true)
         y = y + needsList:GetHeight()
+
+        -- Upcoming: the next few calendar items; a row opens the calendar on that day.
+        y = y + SECTION_GAP + RULE_GAP
+        place(upTitle, y)
+        y = y + lineH(upTitle, 14) + TITLE_GAP
+        rows = {}
+        local upcoming = GuildOS.Calendar and GuildOS.Calendar:GetUpcoming(false) or {}
+        for i, e in ipairs(upcoming) do
+            if i > UPCOMING_SHOWN then break end
+            rows[#rows + 1] = { "feed", {
+                text = GuildOS.SanitizeUserText and GuildOS:SanitizeUserText(e.title or "?") or (e.title or "?"),
+                label = GuildOS:LocalDate("%a %d", e.when), id = "guild", sub = "calendar", filter = e.when,
+            } }
+        end
+        if #rows == 0 then rows[1] = { "empty", L["No upcoming events scheduled."] } end
+        fill(upList, rows)
+        place(upList, y, true)
+        y = y + upList:GetHeight()
+
+        -- Raffle leaders (EKO): the most tickets this week; a row opens the Gilded Feather raffle.
+        local eko = GuildOS.EKO
+        raffleTitle:SetShown(eko ~= nil)
+        raffleList:SetShown(eko ~= nil)
+        if eko then
+            y = y + SECTION_GAP + RULE_GAP
+            place(raffleTitle, y)
+            y = y + lineH(raffleTitle, 14) + TITLE_GAP
+            local entries = eko:ParseRaffle(eko:Raffle().text)
+            table.sort(entries, function(a, b)
+                if a.n ~= b.n then return a.n > b.n end
+                return a.name < b.name
+            end)
+            rows = {}
+            for i, e in ipairs(entries) do
+                if i > RAFFLE_SHOWN then break end
+                rows[#rows + 1] = { "feed", { text = e.name, label = tostring(e.n), id = "guild", sub = "raffle" } }
+            end
+            if #rows == 0 then rows[1] = { "empty", L["No raffle entries yet"] } end
+            fill(raffleList, rows)
+            place(raffleList, y, true)
+            y = y + raffleList:GetHeight()
+        end
 
         y = y + SECTION_GAP + RULE_GAP
         place(feedTitle, y)
