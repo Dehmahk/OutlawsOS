@@ -995,17 +995,17 @@ PAGES.data = function(F, isOfficer)
     end
 
     F:Section(L["About"])
-    local ver = UI:CreateText(F.content, "Guild OS v" .. (GuildOS.VERSION or "?"), 12, C.text.r, C.text.g, C.text.b)
+    local ver = UI:CreateText(F.content, "OutlawsOS v" .. (GuildOS.VERSION or "?"), 12, C.text.r, C.text.g, C.text.b)
     F:Row(ver, { h = 16 })
-    F:Note(L["Made with care by "] .. "Chehul")
+    F:Note(L["Made with care by "] .. "Chehul, rehauled for EKO by Vyctoria")
     -- Retail has no attunements (ADR-0026, issue #177); its wishlist came with issue #185.
     F:Note(GuildOS.Client.isRetail
-        and L["Guild OS syncs your gear, professions, spec and wishlist with guildmates running the addon. Officer notes and trials stay officer-only."]
-        or L["Guild OS syncs your gear, professions, attunements, spec and wishlist with guildmates running the addon. Officer notes and trials stay officer-only."],
+        and L["OutlawsOS syncs your gear, professions, spec and wishlist with guildmates running the addon. Officer notes and trials stay officer-only."]
+        or L["OutlawsOS syncs your gear, professions, attunements, spec and wishlist with guildmates running the addon. Officer notes and trials stay officer-only."],
         { gap = 8 })
-    F:Note(L["Type /gos help to see every command."], { gap = 8 })
+    F:Note(L["Type /outlawsos help to see every command."], { gap = 8 })
     F:Buttons({ { L["Links"], function()
-        GuildOS:ShowExportPopup(L["Guild OS Links"],
+        GuildOS:ShowExportPopup(L["OutlawsOS Links"],
             -- The site first: it is the one link here that does something for the person reading it.
             "App:  https://guildos.me\n"
             .. "GitHub:  https://github.com/danielcosta42/GuildOS\n"

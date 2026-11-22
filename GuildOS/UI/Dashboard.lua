@@ -155,6 +155,8 @@ function GuildOS:CreateDashboardPanel(panel)
     local cReady    = makeCard(L["YOUR READINESS"],  "raids")
     local cPulse    = makeCard(L["GUILD PULSE"],     "roster")
     local cRecruit  = makeCard(L["RECRUITMENT"],     "recruitment")
+    -- EKO patch: this week's Location of the Week and your bounty board, in Recruitment's place.
+    local cEvents   = makeCard("EVENTS",             "guild",       "raffle")
     local cLoot     = makeCard("THE OUTLAW GAZETTE")
     -- The guild's chat (#126), where "Guild activity" repeated the Activity column beside it.
     local cChat     = makeCard(L["GUILD CHAT"],      "guild",       "chat", true)
@@ -162,7 +164,7 @@ function GuildOS:CreateDashboardPanel(panel)
     -- The guild's setup, for its GM and officers (issue #217), over the grid while due. WoW: Forever only.
     local cSetup = GuildOS.Activation and makeCard(L["SET UP GUILD OS FOR YOUR GUILD"]) or nil
     if cSetup then cSetup:Hide() end   -- frames are born shown: only Layout decides it is due
-    local grid = { cNext, cReady, cPulse, cRecruit, cLoot, cChat }
+    local grid = { cNext, cReady, cPulse, cEvents, cRecruit, cLoot, cChat }
 
     ------------------------------------------------------------------
     -- Card fills (each clears its body and rebuilds from live data)
@@ -422,6 +424,47 @@ function GuildOS:CreateDashboardPanel(panel)
         card.action = b
     end
 
+    -- EKO patch: the Events card. This week's Location of the Week theme, your bounty points and raffle
+    -- tickets, the clears you are in this week, and the next Sunday raffle draw.
+    local function fillEvents(card)
+        local body, w = card.body, card.innerW
+        clearBody(body)
+        local EKO = GuildOS.EKO
+        if not EKO then return end
+        local me = GuildOS.Compat.PlayerName()
+
+        local lotw = EKO:Lotw()
+        local theme = lotw and type(lotw.text) == "string" and lotw.text:match("Theme:%s*([^|\n]+)")
+        text(body, L["Location of the Week"], 0, 0, w, C.label, "caption")
+        local themeTxt = theme and theme:match("^%s*(.-)%s*$") or ""
+        text(body, themeTxt ~= "" and truncate(GuildOS:SanitizeUserText(themeTxt), 30) or L["No location posted yet"],
+            0, 16, w, C.text, "memberName")
+
+        -- Your points: one per dungeon clear, two when the party was a full five. Tickets: the raffle list.
+        local pts, clears = 0, 0
+        for _, c in ipairs(EKO:VerifiedClears()) do
+            local who, mine = c.who or {}, false
+            for _, name in ipairs(who) do if name == me then mine = true break end end
+            if mine then
+                clears = clears + 1
+                pts = pts + ((#who >= 5) and 2 or 1)
+            end
+        end
+        local tickets = 0
+        for _, e in ipairs((EKO:ParseRaffle(EKO:Raffle().text))) do
+            if e.name == me then tickets = e.n end
+        end
+        text(body, string.format(L["Bounty points %d  ·  Raffle tickets %d"], pts, tickets), 0, 40, w, C.text, "tableNum")
+        text(body, string.format(L["%d clear(s) this week"], clears), 0, 60, w, C.textSoft, "caption")
+
+        -- Raffle draws run on Sundays: the next one, today included.
+        local t = nowT()
+        local daysToSun = (7 - tonumber(date("%w", t))) % 7
+        local drawTxt = daysToSun == 0 and L["Raffle draw: today"]
+            or string.format(L["Next raffle draw: %s"], GuildOS:LocalDate("%a %d %b", t + daysToSun * 86400))
+        text(body, drawTxt, 0, 80, w, C.label, "caption")
+    end
+
     -- The Outlaw Gazette (OutlawOS): the first lines of this week's post, with the full text one click away.
     local function fillGazette(card)
         local body, w = card.body, card.innerW
@@ -528,6 +571,8 @@ function GuildOS:CreateDashboardPanel(panel)
         end
         -- OutlawOS: the Gazette card replaces Your Loot, shown whenever EKO is loaded.
         cLoot:SetShown(GuildOS.EKO ~= nil)
+        cEvents:SetShown(GuildOS.EKO ~= nil)
+        cRecruit:SetShown(GuildOS.EKO == nil)
         local shown = {}
         for _, card in ipairs(grid) do
             if card:IsShown() then shown[#shown + 1] = card end
@@ -584,6 +629,7 @@ function GuildOS:CreateDashboardPanel(panel)
         end
         fillPulse(cPulse, rows)
         fillRecruit(cRecruit)
+        fillEvents(cEvents)
         if cLoot:IsShown() then fillGazette(cLoot) end
         chatRefresh()
     end

@@ -443,6 +443,15 @@ function GuildOS:CreateNowPanel(panel, win)
     panel.raidTitle, panel.raidName, panel.raidMeta = raidTitle, raidName, raidMeta
     panel.clock, panel.openCalendar = clock, openCal
 
+    -- The Discord invite: the link as text, and a Copy button that opens it in a copy box (as Settings > Links does).
+    local DISCORD_INVITE = "discord.gg/AdD9kFnQWu"
+    local discordTitle = UI:CreateSectionTitle(column, L["Discord"])
+    local discordLink = newText(column, nil, "memberName", C.text)
+    local discordCopy = UI:SetButtonVariant(UI:CreateButton(column, L["Copy"], 40, 26), "ghost")
+    discordCopy:SetWidth(math.ceil(discordCopy.label:GetStringWidth() or 0) + 8)
+    discordCopy:SetScript("OnClick", function() GuildOS:ShowExportPopup(L["Discord invite"], "https://" .. DISCORD_INVITE) end)
+    panel.discordTitle, panel.discordLink, panel.discordCopy = discordTitle, discordLink, discordCopy
+
     local needsTitle = UI:CreateSectionTitle(column, L["Needs me"])
     local needsList = newList(column)
     local feedTitle = UI:CreateSectionTitle(column, L["Activity"])
@@ -492,6 +501,15 @@ function GuildOS:CreateNowPanel(panel, win)
             place(openCal, y + LINE_GAP + 2)
             y = y + LINE_GAP + 2 + openCal:GetHeight()
         end
+
+        y = y + SECTION_GAP + RULE_GAP
+        place(discordTitle, y)
+        y = y + lineH(discordTitle, 14) + TITLE_GAP
+        discordLink:SetText(DISCORD_INVITE)
+        place(discordLink, y)
+        y = y + lineH(discordLink, 12) + LINE_GAP
+        place(discordCopy, y)
+        y = y + discordCopy:GetHeight()
 
         y = y + SECTION_GAP + RULE_GAP
         place(needsTitle, y)
