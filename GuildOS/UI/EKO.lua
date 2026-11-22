@@ -1449,6 +1449,20 @@ function EKO:Bounties()
     return b
 end
 
+-- Whether a dungeon is on this week's Bounty Board. The board's lines read "Low: The Hall of Thanes", matched
+-- by name either way round, as the sheet's clears are (BountyClaims).
+function EKO:BoardHas(dungeonName)
+    local b = self:Bounties()
+    if not b or type(b.text) ~= "string" then return false end
+    local key = tostring(dungeonName or ""):lower():gsub("^the ", "")
+    if key == "" then return false end
+    for line in b.text:gmatch("[^\n]+") do
+        local name = line:gsub("^%s*%a+:%s*", ""):lower():gsub("^%s*the ", ""):gsub("%s+$", "")
+        if name ~= "" and (name == key or name:find(key, 1, true) or key:find(name, 1, true)) then return true end
+    end
+    return false
+end
+
 local function sendBounty(b)
     if GuildOS.SyncService and b then
         GuildOS.SyncService:Publish("ekobounty", "set", { text = b.text, rev = b.rev, by = b.by, week = b.week }, { priority = "BULK" })

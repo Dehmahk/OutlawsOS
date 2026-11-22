@@ -76,6 +76,17 @@ function DungeonLog:OnLogout(now)
     if run and not run.leftAt then run.leftAt = now end
 end
 
+-- Guild members in my party, me included, as the client can read them. A member it keeps secret is not
+-- counted, so this can only come out low.
+local function partyOutlaws()
+    local members = Compat.GroupRoster()
+    local outlaws = IsInGuild() and 1 or 0
+    for key in pairs(members) do
+        if GuildOS.db.members and GuildOS.db.members[key] then outlaws = outlaws + 1 end
+    end
+    return outlaws
+end
+
 -- A boss down in my run; its final boss down is the clear, written once into my journal.
 function DungeonLog:OnEncounterEnd(encounterID, success)
     local run = GuildOS.db.dungeonRun
@@ -98,6 +109,7 @@ function DungeonLog:OnEncounterEnd(encounterID, success)
     run.cleared = true
     local e = GuildOS.Journal and GuildOS.Journal:Add("dungeon.clear", {
         dungeonId = d.id, dungeonName = d.name, bosses = n, fullClear = n == #d.bosses, runId = run.runId,
+        outlaws = partyOutlaws(), onBoard = GuildOS.EKO and GuildOS.EKO:BoardHas(d.name) or false,
     })
     run.entry = e and e.id
     -- The first this client knows of, said to whoever was in it (issue #211): hopeful, local.

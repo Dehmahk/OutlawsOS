@@ -155,6 +155,9 @@ local function keptOf(e)
     elseif e.type == "dungeon.clear" then
         data.dungeonId, data.runId, data.bosses, data.fullClear = d.dungeonId, d.runId, d.bosses, d.fullClear
         if type(d.dungeonName) == "string" then data.dungeonName = d.dungeonName:sub(1, 100) end
+        -- Guild members in the party (me included) and whether the dungeon was on the Bounty Board.
+        data.outlaws = isInt(d.outlaws, 0, 40) and d.outlaws or nil
+        data.onBoard = d.onBoard == true or nil
     end
     return { id = e.id, subjectKey = GuildOS:LocalMemberKey(e.subjectKey), at = e.at, type = e.type, data = data }
 end
