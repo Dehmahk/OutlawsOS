@@ -935,6 +935,22 @@ function RaidTracker:GetMissedStreak(playerKey, groupTag, cap)
     return missed
 end
 
+-- The raids each player is locked to this reset week: a set of raid names per player key, from the
+-- guild-raid sessions they attended. A raid counts once however many nights it took.
+function RaidTracker:LockoutsThisWeek()
+    local week = self:GetWeekNum(GetServerTime())
+    local byKey = {}
+    for _, session in pairs(GuildOS.db.raidTracker.sessions) do
+        if session.name and session.isGuildRaid ~= false and self:GetWeekNum(session.startTime or 0) == week then
+            for key in pairs(session.players or {}) do
+                byKey[key] = byKey[key] or {}
+                byKey[key][session.name] = true
+            end
+        end
+    end
+    return byKey
+end
+
 function RaidTracker:GetRecentSessions(limit, only25, guildOnly)
     limit = limit or 20
     local sessions = {}

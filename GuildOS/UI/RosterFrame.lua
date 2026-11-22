@@ -3284,6 +3284,47 @@ function GuildOS:CreateRecruitmentPanel(parent, _mainFrame)
         end
     end)
 
+    -- The ad checklist under the ad, and the week's numbers under the channels (#ops). Each is a note:
+    -- its text is painted here, and the tab is laid out again when its height changes.
+    local checkNote = Note(recruitContent, "", 0, 0)
+    local lastCheckH = 0
+    local function paintChecklist()
+        local text = msgBox:GetText() or ""
+        local lines = {}
+        if text == "" then
+            lines[1] = L["Ad check: write the ad to see the checklist."]
+        else
+            lines[1] = L["Ad check:"]
+            for _, item in ipairs(GuildOS.Recruitment:AdChecklist(text)) do
+                local col = item.ok and hex(C.ok) or hex(C.warn)
+                lines[#lines + 1] = "|cff" .. col .. (item.ok and "+ " or "- ") .. item.label .. "|r"
+            end
+        end
+        lines[#lines + 1] = L["Fill-ins, filled in when the ad goes out: {guild} {members} {online} {discord}"]
+        checkNote:SetText(table.concat(lines, "\n"))
+        local h = noteH(checkNote)
+        if h ~= lastCheckH then lastCheckH = h; if relayout then relayout() end end
+    end
+
+    local statsNote = Note(recruitContent, "", 0, 0)
+    local function paintStats()
+        local s = GuildOS.Recruitment:Summary()
+        local lines = { string.format(L["This week: %d posts, %d join requests, %d invited."], s.posts, s.requests, s.invited) }
+        local chans = {}
+        for ch, n in pairs(s.perChannel) do chans[#chans + 1] = string.format("%s %d", ch, n) end
+        table.sort(chans)
+        lines[#lines + 1] = L["Posts by channel this week:"] .. " " .. (#chans > 0 and table.concat(chans, ", ") or L["none"])
+        if s.last then
+            lines[#lines + 1] = string.format(L["Last post: %s, by %s"], date("%a %H:%M", s.last.at), s.last.by or "")
+        else
+            lines[#lines + 1] = L["No posts logged yet."]
+        end
+        lines[#lines + 1] = L["Joins are not counted by channel: WoW does not say which channel a player read the ad in."]
+        statsNote:SetText(table.concat(lines, "\n"))
+        if relayout then relayout() end   -- not yet declared on the first build
+    end
+    paintStats()
+
     local previewCap = UI:CreateHeaderText(adBlock, L["Preview"])
     local previewBox = UI:CreateDarkPanel(adBlock, nil, adBlock:GetFrameLevel() + 1)
     local previewText = UI:CreateText(previewBox, "", 12, C.text.r, C.text.g, C.text.b)
@@ -3307,7 +3348,7 @@ function GuildOS:CreateRecruitmentPanel(parent, _mainFrame)
             if (tonumber(id) or 0) > 0 then name, num, label = n, tonumber(id), full; break end
         end
         if not name then return nil end
-        local msg = GuildOS:SanitizeUserText(text, R.MSG_MAX)
+        local msg = GuildOS:SanitizeUserText(R:ExpandFields(text), R.MSG_MAX)
         if GuildOS.Compat.ChannelHidesRaidIcons(name, num) then msg = R:_StripRaidIcons(msg) end
         local where = string.format("[%d. %s]", num, type(label) == "string" and label ~= "" and label or name)
         return where .. " " .. (GuildOS.Compat.PlayerName() or "") .. ":", msg
@@ -3325,12 +3366,13 @@ function GuildOS:CreateRecruitmentPanel(parent, _mainFrame)
         else
             previewText:SetText(soft .. L["Join a channel to post the recruitment message."] .. "|r")
         end
-        local n = #text
+        local n = #R:ExpandFields(text)
         countText:SetText(string.format("%d/%d", n, R.MSG_MAX))
         local col = (n > R.MSG_MAX and C.danger) or (n >= COUNT_WARN and C.warn) or C.textSoft
         countText:SetTextColor(col.r, col.g, col.b)
         -- A longer line wraps onto more lines: the preview grows, and everything under it moves.
         if previewHeight() ~= previewH then relayout() end
+        paintChecklist()
     end
     msgBox:HookScript("OnTextChanged", function() updatePreview() end)
 
@@ -3440,21 +3482,11 @@ function GuildOS:CreateRecruitmentPanel(parent, _mainFrame)
         customBtns[i] = b
     end
 
-    -- Which members post the guild's message: every rank, or up to one. It travels with the ad, and a
-    -- member past it is never asked (#150). Each click moves one member rank down, then back to every rank.
+    -- Who posts the guild's message: fixed in the addon (Recruitment.POST_RANKS), so it is text, not a
+    -- button anyone can click.
     local rankLabel = RowLabel(chanBlock, L["Who posts the ad:"], 0)
-    local rankBtn = UI:CreateButton(chanBlock, "", 160, ROW_H)
-    local function rankText()
-        local limit = GuildOS.db.recruitment.postMaxRank
-        if limit == nil then return L["Any rank"] end
-        local name = GuildControlGetRankName and GuildControlGetRankName(limit + 1)
-        return string.format(L["Up to %s"], (name and name ~= "") and name or tostring(limit))
-    end
-    rankBtn.label:SetText(rankText())
-    rankBtn:SetScript("OnClick", function()
-        if GuildOS.Recruitment then GuildOS.Recruitment:CyclePostMaxRank() end
-        rankBtn.label:SetText(rankText())
-    end)
+    local rankBtn = UI:CreateText(chanBlock, "", 11, C.text.r, C.text.g, C.text.b)
+    rankBtn:SetText(table.concat((GuildOS.Recruitment and GuildOS.Recruitment.POST_RANKS) or {}, ", "))
 
     -- Broadcast button, under the settings it sends
     local broadcastBtn = UI:CreateButton(chanBlock, L["Broadcast to Members"], 180, 24)
@@ -3849,6 +3881,145 @@ function GuildOS:CreateRecruitmentPanel(parent, _mainFrame)
     end
 
     ----------------------------------------------------------------
+    -- Recruit info: the guild's own words for recruits, below the questions. An officer of the right rank
+    -- edits a block live and every OutlawOS user gets the edit (Modules/RecruitInfo.lua has the rules).
+    -- The roles, the events and the links come from the addon's own data.
+    ----------------------------------------------------------------
+    local RI = GuildOS.RecruitInfo
+    local infoSec = Section("info", L["Recruit info"])
+    local ib = infoSec.body
+    local infoNote = Note(ib, L["The guild's own words for recruits. Blocks you may edit have an Edit button; everyone sees the same text."], 0, 0)
+    local infoBlocks = {}
+
+    -- The popup that edits one block: its text in a box, saved to every OutlawOS user through RI:Save.
+    local editFrame, editTitle, editArea, editBlock
+    local function buildInfoEdit()
+        local f = CreateFrame("Frame", "GuildOSRecruitInfoEdit", UIParent, "BackdropTemplate")
+        f:SetSize(420, 250)
+        f:SetPoint("CENTER")
+        f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = UI:Edge(f) })
+        f:SetBackdropColor(0.058, 0.058, 0.075, 0.98)
+        f:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, C.border.a)
+        UI:StylePopup(f)
+        f:SetFrameStrata("DIALOG")
+        f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
+        f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+        f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+        table.insert(UISpecialFrames, "GuildOSRecruitInfoEdit")
+
+        editTitle = UI:CreateTitle(f, "", 14)
+        editTitle:SetPoint("TOPLEFT", 14, -12)
+        local close = UI:CreateCloseButton(f)
+        close:SetPoint("TOPRIGHT", -6, -6)
+        close:SetScript("OnClick", function() f:Hide() end)
+
+        editArea = UI:CreateTextArea(f, 392, 150, { max = 1000 })
+        editArea:SetPoint("TOPLEFT", 14, -40)
+        local save = UI:CreateButton(f, L["Save"], 90, 24)
+        save:SetPoint("BOTTOMRIGHT", -14, 14)
+        save:SetScript("OnClick", function()
+            if not editBlock then return end
+            if RI:Save(editBlock.key, editArea.edit:GetText()) then
+                f:Hide()
+            else
+                GuildOS:Print(L["You may not edit this block."])
+            end
+        end)
+        local cancel = UI:CreateButton(f, L["Cancel"], 90, 24)
+        cancel:SetPoint("RIGHT", save, "LEFT", -8, 0)
+        cancel:SetScript("OnClick", function() f:Hide() end)
+        f:Hide()
+        return f
+    end
+    local function openInfoEdit(b)
+        if not editFrame then editFrame = buildInfoEdit() end
+        editBlock = b
+        editTitle:SetText(b.title:GetText() or "")
+        editArea.edit:SetText(RI:Text(b.key))
+        editFrame:Show()
+        editFrame:Raise()
+    end
+
+    -- A block's text as it is now: the editable ones from what the officers wrote, the others from the addon.
+    local function paintInfoBlock(b)
+        local text, empty = "", nil
+        if b.editable then
+            text, empty = RI:Text(b.key), L["Nothing written yet."]
+        elseif b.key == "roles" then
+            text, empty = RI:NeedsText() or "", L["No roles listed in the ad right now."]
+        elseif b.key == "events" then
+            text, empty = table.concat(RI:EventsText(5), "\n"), L["No events on the calendar."]
+        elseif b.key == "links" then
+            local discord, site = RI:Links()
+            text = (discord ~= "" and (L["Discord:"] .. " " .. discord .. "\n") or "") .. site
+        end
+        if text == "" and empty then
+            b.body:SetText(empty)
+            b.body:SetTextColor(C.textSoft.r, C.textSoft.g, C.textSoft.b)
+        else
+            b.body:SetText(text)
+            b.body:SetTextColor(C.text.r, C.text.g, C.text.b)
+        end
+        if b.edit then b.edit:SetShown(RI:CanEdit(b.key)) end
+        local by, at = nil, nil
+        if b.editable then by, at = RI:Edited(b.key) end
+        b.by:SetShown(by ~= nil)
+        if by then
+            b.by:SetText(string.format(L["Last edited by %s, %s"], by, GuildOS:LocalDate("%a %d %b %H:%M", at or 0)))
+        end
+    end
+
+    local function infoBlock(key, title, editable)
+        local b = { key = key, editable = editable and true or false }
+        b.title = UI:CreateText(ib, title, 11, C.label.r, C.label.g, C.label.b)
+        b.body = UI:CreateText(ib, "", 11, C.text.r, C.text.g, C.text.b)
+        b.body:SetWordWrap(true)
+        b.body:SetJustifyH("LEFT")
+        b.by = UI:CreateText(ib, "", 10, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+        b.by:SetWordWrap(true)
+        b.by:SetJustifyH("LEFT")
+        if b.editable then
+            b.edit = UI:CreateButton(ib, L["Edit"], 70, 18)
+            b.edit:SetScript("OnClick", function() openInfoEdit(b) end)
+        end
+        infoBlocks[#infoBlocks + 1] = b
+    end
+    infoBlock("schedule",     L["Raid schedule"], true)
+    infoBlock("expectations", L["What we expect"], true)
+    infoBlock("ranks",        L["Ranks"], true)
+    infoBlock("progress",     L["Content progress"], true)
+    infoBlock("roles",        L["Roles we need"], false)
+    infoBlock("events",       L["Upcoming events"], false)
+    infoBlock("links",        L["Links"], false)
+
+    infoSec.layout = function(w)
+        local y = -(noteH(infoNote) + 8)
+        for _, b in ipairs(infoBlocks) do
+            paintInfoBlock(b)
+            b.title:ClearAllPoints()
+            b.title:SetPoint("TOPLEFT", ib, "TOPLEFT", 0, y)
+            if b.edit then
+                b.edit:ClearAllPoints()
+                b.edit:SetPoint("TOPRIGHT", ib, "TOPRIGHT", 0, y + 2)
+            end
+            b.body:ClearAllPoints()
+            b.body:SetPoint("TOPLEFT", ib, "TOPLEFT", 0, y - 18)
+            b.body:SetWidth(w)
+            local h = math.max(14, math.ceil(b.body:GetStringHeight() or 0))
+            y = y - 18 - h - 4
+            b.by:ClearAllPoints()
+            b.by:SetPoint("TOPLEFT", ib, "TOPLEFT", 0, y)
+            b.by:SetWidth(w)
+            if b.by:IsShown() then y = y - math.max(14, math.ceil(b.by:GetStringHeight() or 0)) - 2 end
+            y = y - 14
+        end
+        return -y
+    end
+
+    -- An edit from another officer, or this one's own save, repaints the tab.
+    RI:Listen(function() if relayout then relayout() end end)
+
+    ----------------------------------------------------------------
     -- Join requests: people with no guild who asked this one to take them
     ----------------------------------------------------------------
     -- Not where the module never starts (Anniversary): a section with nothing behind it.
@@ -3899,8 +4070,12 @@ function GuildOS:CreateRecruitmentPanel(parent, _mainFrame)
         y = y - noteH(intervalNote) - GAP
         place(adBlock, layoutAd(w))
         y = y - GAP
+        at(checkNote, recruitContent, 0, y)
+        y = y - noteH(checkNote) - GAP
         place(chanBlock, layoutChan(w))
-        y = y - 2 * GAP
+        y = y - GAP
+        at(statsNote, recruitContent, 0, y)
+        y = y - noteH(statsNote) - 2 * GAP
         for _, sec in ipairs(sections) do
             place(sec.head, HEAD_H)
             local isOpen = recruitingOpen[sec.key] and true or false
@@ -3943,6 +4118,8 @@ function GuildOS:CreateRecruitmentPanel(parent, _mainFrame)
         welcomeBox:SetText(s.welcomeMessage or "")
         UpdateRecruitStatus()
         paintLastPosted()
+        paintStats()
+        paintChecklist()
         UpdateWelcomeStatus()
         UpdateInviteStatus()
         UpdateBeaconStatus()

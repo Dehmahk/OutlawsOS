@@ -38,6 +38,7 @@ SyncService.OFFICER_DOMAINS = {
     cta      = true,   -- an officer's call to arms (answering it is a member action, issue #108)
     ban      = true,   -- blacklist add/remove (officer-authoritative)
     audit    = true,   -- guild audit trail (officer-authoritative, id-deduped)
+    recruit  = true,   -- applicant tracker: stage, claim, notes and checklist of a join request (officers only)
     allyboard = true,  -- alliance bulletin posts this guild authored (ambassadors)
     allyhide  = true,  -- chat lines an ambassador pulled from the alliance feed
     guildcfg  = true,  -- the guild's officer threshold (issue #81), on retail its loot system (#185), its trials (#249)
@@ -57,6 +58,7 @@ SyncService.GUILD_ONLY_DOMAINS = {
     gbank          = true,   -- the guild bank's picture, its ledger and asks for them (#380)
     gbankreq       = true,   -- a member's request for an item; officers close it (#380)
     craftorder     = true,   -- a member's craft order and its crafter's answers (#389)
+    recruitinfo    = true,   -- the recruit info text; the sender's rank is checked by RecruitInfo
 }
 
 -- Actions any guild member may perform inside an officer domain, over GUILD. Keyed by domain:

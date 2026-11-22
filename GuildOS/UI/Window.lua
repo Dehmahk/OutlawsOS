@@ -640,10 +640,25 @@ local function createWindow()
 
         bar:SetHeight(titleH)
         -- Collapsed to the bar, the window is too short for the metal: it paints flat, edge to edge.
-        local top = isBar and 0 or topInset
+        -- Flat (no metal), the window's own 1px border is drawn at its edge: the bar stops at that
+        -- border's inner side, so the brown meets the gold line instead of covering it.
+        local edge = (isBar and not nine) and GuildOS.UI:Edge(self) or 0
+        local top = isBar and edge or topInset
         bar:ClearAllPoints()
-        bar:SetPoint("TOPLEFT", 0, -top)
-        bar:SetPoint("TOPRIGHT", 0, -top)
+        bar:SetPoint("TOPLEFT", edge, -top)
+        bar:SetPoint("TOPRIGHT", -edge, -top)
+        -- The EKO brass frame stands outside the window, with a dark groove inside it. Minimised, the
+        -- plank runs out under that groove to the brass; expanded, it stays on the bar.
+        local plank = self.ekoPlank
+        if plank and self.ekoBorder then
+            plank:ClearAllPoints()
+            if isBar then
+                plank:SetPoint("TOPLEFT", self, "TOPLEFT", -6, 6)
+                plank:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", 6, -6)
+            else
+                plank:SetAllPoints(bar)
+            end
+        end
         minimise.x:SetText(isBar and "+" or DASH)
         close:ClearAllPoints()
         close:SetPoint("RIGHT", bar, "RIGHT", isBar and -(GRIP + 4) or -CLOSE_X, 0)

@@ -351,6 +351,12 @@ local MODULE_START = {
     { "ChehulGossip" },
     -- WoW: Forever and retail: the request to join a guild, from both sides. After the gossip, whose prefix it rides.
     { "JoinRequests" },
+    -- Applicant tracker: the stage, claim, notes and checklist of each join request, shared by the officers.
+    { "RecruitTracker" },
+    -- The recruit info text at the bottom of the Recruiting tab, edited by rank and shared by the sync.
+    { "RecruitInfo" },
+    -- Who did not answer a ready check: the popup when the check ends.
+    { "ReadyCheckWatch" },
     -- WoW: Forever and retail: lights the minimap button on the first guild a character with no guild hears.
     { "GuildFinder" },
     -- Leaves the channel of a /gos probe channel that a /reload cut short, a moment after login.

@@ -11,7 +11,7 @@ local L  = GuildOS.L
 local function JR() return GuildOS.JoinRequests end
 
 local WIDTH, HEIGHT = 640, 400
-local ROW_H, MAX_ROWS = 64, 50
+local ROW_H, MAX_ROWS = 104, 50   -- 104: a two-line note, then a line of the officers' tools (#ops)
 local TOAST_SECONDS = 10
 
 local ROLE_NAME = { TANK = L["Tank"], HEALER = L["Healer"], DPS = L["DPS"] }
@@ -52,6 +52,154 @@ local function Meta(r)
         if r.relayedBy then parts[#parts + 1] = string.format(L["delivered by %s"], r.relayedBy) end
     end
     return table.concat(parts, " \194\183 ")
+end
+
+----------------------------------------------------------------------
+-- The officers' tools on a request (Modules/RecruitTracker.lua does the rules): the stage, the claim,
+-- the notes and the new-recruit checklist. Officers only.
+----------------------------------------------------------------------
+local STAGE_NAME = { contacted = L["Contacted"], trial = L["Trial"], joined = L["Joined"] }
+local CHECK_NAME = {
+    invite  = L["Discord invite sent"],
+    welcome = L["Welcome message sent"],
+    raid    = L["Added to a raid group"],
+    checkin = L["Week-one check-in done"],
+    download = L["Downloaded OutlawOS"],
+}
+local NOTES_SHOWN = 8   -- the popup shows the newest of a request's notes
+
+local function tracker() return GuildOS.RecruitTracker end
+local function myName() return GuildOS.Compat.PlayerName() or "" end
+
+-- "Invited" and "Declined" come from the request; the rest is the officers' own stage.
+local function stageOf(r, rec)
+    if r.status == "invited" then return L["Invited"] end
+    if r.status == "declined" then return L["Declined"] end
+    return (rec and STAGE_NAME[rec.stage]) or L["New"]
+end
+
+-- A small menu at the anchor, the same kind the tab menu uses. Items: text, checked, func.
+local menu
+local function showMenu(anchor, items)
+    menu = menu or CreateFrame("Frame", "GuildOSRecruitMenu", UIParent, "UIDropDownMenuTemplate")
+    UIDropDownMenu_Initialize(menu, function(_, level)
+        for _, it in ipairs(items) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = it.text
+            info.checked = it.checked
+            info.isNotRadio = true
+            info.func = it.func
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end, "MENU")
+    ToggleDropDownMenu(1, nil, menu, anchor, 0, 0)
+end
+
+local notesFrame, notesId, notesText, notesInput
+local function paintNotes()
+    local rec = tracker() and tracker():Get(notesId)
+    local list = (rec and rec.notes) or {}
+    local lines = {}
+    for i = math.max(1, #list - NOTES_SHOWN + 1), #list do
+        local n = list[i]
+        lines[#lines + 1] = string.format("%s, %s: %s", n.by, date("%d %b %H:%M", n.at), n.text)
+    end
+    notesText:SetText(#lines > 0 and table.concat(lines, "\n") or L["No notes yet."])
+end
+
+local function addNote()
+    if not (tracker() and notesId) then return end
+    if tracker():AddNote(notesId, notesInput:GetText() or "") then notesInput:SetText("") end
+end
+
+local function buildNotes()
+    local f = CreateFrame("Frame", "GuildOSRecruitNotes", UIParent, "BackdropTemplate")
+    f:SetSize(380, 320)
+    f:SetPoint("CENTER")
+    f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = GuildOS.UI:Edge(f) })
+    f:SetBackdropColor(0.058, 0.058, 0.075, 0.98)
+    f:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, C.border.a)
+    UI:StylePopup(f)
+    f:SetFrameStrata("DIALOG")
+    f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+    table.insert(UISpecialFrames, "GuildOSRecruitNotes")
+
+    local title = UI:CreateTitle(f, L["Notes"], 14)
+    title:SetPoint("TOPLEFT", 14, -12)
+    local close = UI:CreateCloseButton(f)
+    close:SetPoint("TOPRIGHT", -6, -6)
+    close:SetScript("OnClick", function() f:Hide() end)
+
+    notesText = UI:CreateText(f, "", 11, C.text.r, C.text.g, C.text.b)
+    notesText:SetPoint("TOPLEFT", 14, -40)
+    notesText:SetWidth(352); notesText:SetJustifyH("LEFT"); notesText:SetWordWrap(true)
+
+    notesInput = UI:CreateInput(f, 262, 24, { max = GuildOS.RecruitTracker.MAX_NOTE })
+    notesInput:SetPoint("BOTTOMLEFT", 14, 14)
+    notesInput:SetScript("OnEnterPressed", function() addNote() end)
+    local add = UI:CreateButton(f, L["Add note"], 76, 24)
+    add:SetPoint("LEFT", notesInput, "RIGHT", 8, 0)
+    add:SetScript("OnClick", addNote)
+
+    tracker():Listen(function() if f:IsShown() then paintNotes() end end)
+    f:Hide()
+    notesFrame = f
+end
+
+local function openNotes(id)
+    if not tracker() then return end
+    if not notesFrame then buildNotes() end
+    notesId = id
+    paintNotes()
+    notesFrame:Show()
+    notesFrame:Raise()
+end
+
+-- The four tools on one row, painted for the request as it is now.
+local function paintTools(row, r)
+    local T = tracker()
+    local rec = T:Get(r.id)
+    local stage = rec and rec.stage or nil
+
+    row.stage.label:SetText(string.format(L["Stage: %s"], stageOf(r, rec)))
+    row.stage:SetScript("OnClick", function(self)
+        local items = {
+            { text = L["New"], checked = stage == nil, func = function() T:SetStage(r.id, nil) end },
+        }
+        for _, key in ipairs(T.STAGE_ORDER) do
+            items[#items + 1] = { text = STAGE_NAME[key], checked = stage == key,
+                func = function() T:SetStage(r.id, key) end }
+        end
+        showMenu(self, items)
+    end)
+
+    local holder = rec and rec.claim and rec.claim.by or nil
+    if not holder then
+        row.claim.label:SetText(L["Claim"]); row.claim:SetEnabled(true)
+        row.claim:SetScript("OnClick", function() T:Claim(r.id) end)
+    elseif holder == myName() then
+        row.claim.label:SetText(L["Release"]); row.claim:SetEnabled(true)
+        row.claim:SetScript("OnClick", function() T:Release(r.id) end)
+    else
+        row.claim.label:SetText(string.format(L["Held by %s"], holder)); row.claim:SetEnabled(false)
+        row.claim:SetScript("OnClick", nil)
+    end
+
+    row.notes.label:SetText(string.format(L["Notes (%d)"], rec and #rec.notes or 0))
+    row.notes:SetScript("OnClick", function() openNotes(r.id) end)
+
+    local done, total = T:CheckProgress(r.id)
+    row.check.label:SetText(string.format(L["Checklist %d/%d"], done, total))
+    row.check:SetScript("OnClick", function(self)
+        local items = {}
+        for _, key in ipairs(T.CHECKS) do
+            items[#items + 1] = { text = CHECK_NAME[key], checked = (rec and rec.checklist and rec.checklist[key]) or false,
+                func = function() T:ToggleCheck(r.id, key) end }
+        end
+        showMenu(self, items)
+    end)
 end
 
 local function Build()
@@ -104,10 +252,12 @@ function GuildOS:BuildJoinRequestsList(host, count, scrollName, top, left, right
         row.detail = UI:CreateText(row, "", 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
         row.detail:SetPoint("LEFT", row.name, "RIGHT", 8, 0)
         row.note = UI:CreateText(row, "", 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+        -- A note of up to NOTE_MAX characters wraps onto two lines, across the width the buttons leave.
         row.note:SetPoint("TOPLEFT", 6, -26)
-        row.note:SetWidth(330); row.note:SetJustifyH("LEFT"); row.note:SetWordWrap(false)
+        row.note:SetPoint("RIGHT", row, "RIGHT", -262, 0)
+        row.note:SetJustifyH("LEFT"); row.note:SetWordWrap(true)
         row.meta = UI:CreateText(row, "", 10, C.label.r, C.label.g, C.label.b)
-        row.meta:SetPoint("TOPLEFT", 6, -44)
+        row.meta:SetPoint("TOPLEFT", 6, -58)
         row.meta:SetWidth(330); row.meta:SetJustifyH("LEFT"); row.meta:SetWordWrap(false)
         row.remove = UI:CreateButton(row, L["Remove"], 76, 24)
         row.remove:SetPoint("RIGHT", -6, 0)
@@ -120,6 +270,15 @@ function GuildOS:BuildJoinRequestsList(host, count, scrollName, top, left, right
         row.invite = UI:CreateButton(row, "Approve", 76, 24)
         row.invite:SetPoint("RIGHT", row.whisper, "LEFT", -6, 0)
         UI:SetButtonVariant(row.invite, "primary")
+        row.stage = UI:CreateButton(row, "", 150, 22)
+        row.stage:SetPoint("TOPLEFT", 6, -80)
+        row.claim = UI:CreateButton(row, "", 120, 22)
+        row.claim:SetPoint("LEFT", row.stage, "RIGHT", 6, 0)
+        row.notes = UI:CreateButton(row, "", 96, 22)
+        row.notes:SetPoint("LEFT", row.claim, "RIGHT", 6, 0)
+        row.check = UI:CreateButton(row, "", 130, 22)
+        row.check:SetPoint("LEFT", row.notes, "RIGHT", 6, 0)
+        for _, b in ipairs({ row.stage, row.claim, row.notes, row.check }) do UI:SetButtonVariant(b, "ghost") end
         rows[i] = row
         return row
     end
@@ -158,6 +317,10 @@ function GuildOS:BuildJoinRequestsList(host, count, scrollName, top, left, right
             row.decline:SetScript("OnClick", function() JR():Decide(r.id, "declined") end)
             row.remove:SetScript("OnClick", function() JR():Remove(r.id) end)
             row.whisper:SetScript("OnClick", function() ChatFrame_OpenChat("/w " .. GuildOS:WhisperTarget(r.character) .. " ") end)
+            -- The officers' tools: officers only, on the line under the text (#ops).
+            local editable = tracker() and tracker():CanEdit() or false
+            for _, b in ipairs({ row.stage, row.claim, row.notes, row.check }) do b:SetShown(editable) end
+            if editable then paintTools(row, r) end
             row:Show()
         end
         for i = #list + 1, #rows do rows[i]:Hide() end
@@ -167,6 +330,11 @@ function GuildOS:BuildJoinRequestsList(host, count, scrollName, top, left, right
     JR():Listen(function()
         if host:IsVisible() then Refresh() end
     end)
+    if tracker() then
+        tracker():Listen(function()
+            if host:IsVisible() then Refresh() end
+        end)
+    end
     return Refresh
 end
 

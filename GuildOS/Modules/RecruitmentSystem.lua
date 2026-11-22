@@ -932,23 +932,15 @@ function Recruitment:ApplyIncoming(info, sender, channel)
     self:SyncMemberParticipation()
 end
 
--- The rank limit for members, as the officer's Recruitment panel moves it: every rank, then each
--- member rank in turn (an officer rank would leave no member, and the last rank is every rank), and
--- back. Sent to the guild only while this officer's recruiting is on, so picking a rank never turns a
--- running campaign off; otherwise it goes out with the next broadcast (#150). Returns the new limit.
+-- The ranks that post the guild's ad. Fixed here, by the rank names the game gives them, so nobody can
+-- change it by a click. A member of any other rank is never asked to post. Officers always can.
+Recruitment.POST_RANKS = { "Guild Master", "Co-Guild Master", "Officer", "Raid Marshal", "Herald" }
+local postRankSet = {}
+for _, name in ipairs(Recruitment.POST_RANKS) do postRankSet[name] = true end
+
+-- The "Who posts the ad" choice used to cycle; it is fixed now, so this does nothing.
 function Recruitment:CyclePostMaxRank()
-    local r = GuildOS.db.recruitment
-    local n = (GuildControlGetNumRanks and GuildControlGetNumRanks()) or 0
-    if n < 1 then n = 10 end
-    local first = ((GuildOS.db.settings and GuildOS.db.settings.officerMaxRank) or 1) + 1
-    local last = n - 2
-    local nextLimit
-    if r.postMaxRank == nil then nextLimit = first
-    elseif r.postMaxRank + 1 <= last then nextLimit = r.postMaxRank + 1 end
-    if nextLimit and nextLimit > last then nextLimit = nil end
-    r.postMaxRank = nextLimit
-    if r.enabled then self:BroadcastStatus(true) end
-    return nextLimit
+    return nil
 end
 
 -- Member opt-in choice (persisted). nil = never touched, true = helping,
@@ -981,11 +973,8 @@ end
 -- the officers chose (#150).
 function Recruitment:MemberMayPost()
     if not GuildOS:IsOnGuildDB() then return false end
-    local info = GuildOS.db.guildRecruitment
-    local limit = info and rankLimit(info.maxRank)
-    if not limit then return true end
-    local _, _, rankIndex = GetGuildInfo("player")
-    return rankIndex ~= nil and rankIndex <= limit
+    local _, rankName = GetGuildInfo("player")
+    return rankName ~= nil and postRankSet[rankName] == true
 end
 
 -- Reconcile the member popup ticker with the current guild config and the
@@ -1257,7 +1246,7 @@ function Recruitment:ShowSendPopup()
     -- source, same sanitize, same MSG_MAX cap), so the member consents to the
     -- real content with no hidden tail (a channel that hides raid icons gets it without
     -- their codes, issue #64). The frame auto-sizes to the wrapped text.
-    local full = GuildOS:SanitizeUserText(raw, self.MSG_MAX)
+    local full = GuildOS:SanitizeUserText(self:ExpandFields(raw), self.MSG_MAX)
     f.msgText:SetText("\"" .. full .. "\"")
 
     -- Layout: size the frame to the wrapped message, then the button row (or the
@@ -1286,6 +1275,76 @@ function Recruitment:ShowSendPopup()
 end
 
 ----------------------------------------------------------------------
+-- The ad's fill-ins: {guild}, {members}, {online} and {discord} are filled in as the ad goes out, from
+-- this client's own guild data, so the saved text never goes stale. A field it does not know stays as typed.
+----------------------------------------------------------------------
+function Recruitment:ExpandFields(text)
+    text = text or ""
+    if text == "" or not text:find("{", 1, true) then return text end
+    local total, online = 0, 0
+    if GetNumGuildMembers then total, online = GetNumGuildMembers() end
+    local db = GuildOS.db and GuildOS.db.recruitment or {}
+    local fields = {
+        guild   = (GetGuildInfo and GetGuildInfo("player")) or "",
+        members = tostring(total or 0),
+        online  = tostring(online or 0),
+        discord = db.discord or "",
+    }
+    return (text:gsub("{(%a+)}", function(key) return fields[key] end))
+end
+
+-- The ad checklist: what the officer's ad says, checked against the four things a reader looks for.
+-- The words are hints, not rules, so each line says what it looked for.
+function Recruitment:AdChecklist(text)
+    local expanded = self:ExpandFields(text or "")
+    local t = expanded:lower()
+    local function has(pat) return t:find(pat) ~= nil end
+    local function word(w) return t:find("%f[%a]" .. w) ~= nil end
+    return {
+        { ok = has("whisper") or has("pst") or has("invite") or has("discord") or has("message me") or has("/w "),
+          label = L["How to join: says whisper, PST, invite or Discord"] },
+        { ok = has("level") or has("lvl") or has("all levels") or has("%d+%s*%-%s*%d+") or has("%d+%+"),
+          label = L["Levels: says which levels it is for"] },
+        { ok = word("mon") or word("tue") or word("wed") or word("thu") or word("fri") or word("sat")
+            or word("sun") or word("weekend") or word("raid") or word("daily") or word("nightly") or word("weekly"),
+          label = L["Schedule: says which days or raids run"] },
+        { ok = #expanded <= self.MSG_MAX, label = L["Length: fits in one chat line"] },
+    }
+end
+
+-- Each post that went out: when, as whom, and the channels it reached. Kept to the last 60.
+local POST_LOG_MAX = 60
+function Recruitment:_LogPost(channelNames)
+    local db = GuildOS.db
+    db.recruitPostLog = db.recruitPostLog or {}
+    local log = db.recruitPostLog
+    log[#log + 1] = { at = time(), by = (GuildOS.Compat.PlayerName and GuildOS.Compat.PlayerName()) or "",
+                      channels = channelNames or {} }
+    while #log > POST_LOG_MAX do table.remove(log, 1) end
+end
+
+-- The last week: posts and the channels they reached, join requests, and how many were invited.
+-- A join is not counted per channel: WoW does not say which channel a player read the ad in.
+function Recruitment:Summary(now)
+    now = now or time()
+    local week = 7 * 86400
+    local posts, perChannel, last = 0, {}, nil
+    for _, p in ipairs((GuildOS.db and GuildOS.db.recruitPostLog) or {}) do
+        last = p
+        if now - (p.at or 0) <= week then
+            posts = posts + 1
+            for _, ch in ipairs(p.channels or {}) do perChannel[ch] = (perChannel[ch] or 0) + 1 end
+        end
+    end
+    local requests, invited = 0, 0
+    for _, r in pairs((GuildOS.db and GuildOS.db.joinRequests) or {}) do
+        if now - (r.at or 0) <= week then requests = requests + 1 end
+        if r.status == "invited" and now - (r.decidedAt or 0) <= week then invited = invited + 1 end
+    end
+    return { posts = posts, perChannel = perChannel, requests = requests, invited = invited, last = last }
+end
+
+----------------------------------------------------------------------
 -- Actually send the message (called from the Postar button = hardware event).
 ----------------------------------------------------------------------
 function Recruitment:DoSendRecruitmentMessage()
@@ -1311,13 +1370,14 @@ function Recruitment:DoSendRecruitmentMessage()
     -- at the SendChatMessage limit. Officer and member paths alike. Same cap the
     -- consent popup previewed, so the member posts exactly what they saw (minus raid-icon
     -- codes where the channel would show them as text, issue #64).
-    msg = GuildOS:SanitizeUserText(msg, self.MSG_MAX)
+    msg = GuildOS:SanitizeUserText(self:ExpandFields(msg), self.MSG_MAX)
     if msg == "" then
         GuildOS:Print(L["|cffFF4444No recruitment message set.|r"])
         return
     end
 
     local sent, iconsOnly, posted = false, false, {}
+    local sentTo = {}
     for _, saved in ipairs(settings.channels or {}) do
         local channelName = self:ChannelName(saved)
         local channelNum = GetChannelName(channelName)
@@ -1329,6 +1389,7 @@ function Recruitment:DoSendRecruitmentMessage()
             if text ~= "" then
                 SendChatMessage(text, "CHANNEL", nil, channelNum)
                 sent = true
+                table.insert(sentTo, channelName)
             else
                 iconsOnly = true
             end
@@ -1339,6 +1400,7 @@ function Recruitment:DoSendRecruitmentMessage()
         self._lastSendAt = GetTime()
         self.lastSend = GetTime()
         GuildOS.db.recruitLastPosted = time()   -- EKO patch: shown under the Recruiting strip
+        self:_LogPost(sentTo)
         if GuildOS.RecruitEngagement then GuildOS.RecruitEngagement:RecordPost() end
         GuildOS:Print(L["Recruitment message sent!"])
     elseif iconsOnly then

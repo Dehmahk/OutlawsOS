@@ -138,6 +138,78 @@ end
 ----------------------------------------------------------------------
 -- COOLDOWNS sub-panel
 ----------------------------------------------------------------------
+-- Dead members of the raid, the one dead longest first: who a battle res goes to. The order is when this
+-- panel first saw them dead. Who has a res ready is not read on WoW: Forever (its combat log is not read
+-- there), so the druids in the raid are counted instead.
+local deadSince = {}
+local function BattleResQueue(content, yOff)
+    yOff = SectionHeader(content, L["BATTLE RES QUEUE"], yOff)
+    local dead, druids = {}, 0
+    local inRaid = IsInRaid()
+    if inRaid then
+        for i = 1, GetNumGroupMembers() or 0 do
+            local name, _, _, _, _, classFile = GetRaidRosterInfo(i)
+            if name then
+                local short = name:match("^([^-]+)") or name
+                if classFile == "DRUID" then druids = druids + 1 end
+                if UnitIsDeadOrGhost("raid" .. i) then
+                    deadSince[short] = deadSince[short] or GetTime()
+                    dead[#dead + 1] = { name = short, class = classFile or "", at = deadSince[short] }
+                end
+            end
+        end
+    end
+    -- Those who are up again leave the queue.
+    local isDead = {}
+    for _, d in ipairs(dead) do isDead[d.name] = true end
+    for name in pairs(deadSince) do
+        if not isDead[name] then deadSince[name] = nil end
+    end
+    table.sort(dead, function(a, b)
+        if a.at ~= b.at then return a.at < b.at end
+        return a.name < b.name
+    end)
+
+    local note = inRaid
+        and string.format(L["Druids in the raid: %d. Who has a res ready cannot be read on this client."], druids)
+        or L["Not in a raid."]
+    local t = UI:CreateText(content, note, 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+    t:SetPoint("TOPLEFT", 0, -yOff)
+    yOff = yOff + 20
+    if #dead == 0 then
+        local none = UI:CreateText(content, L["Nobody is dead right now."], 11, C.text.r, C.text.g, C.text.b)
+        none:SetPoint("TOPLEFT", 8, -yOff)
+        return yOff + ROW_H + 2
+    end
+    local now = GetTime()
+    for idx, d in ipairs(dead) do
+        local row = MakeRow(content, yOff, idx)
+        local pos = UI:CreateText(row, tostring(idx), 11, C.text.r, C.text.g, C.text.b)
+        pos:SetPoint("LEFT", 8, 0)
+        local cc = GuildOS.ClassColors[d.class] or C.silver
+        local nameFS = UI:CreateText(row, d.name, 11, cc.r, cc.g, cc.b)
+        nameFS:SetPoint("LEFT", 34, 0)
+        local since = UI:CreateText(row, string.format(L["dead for %ds"], math.floor(now - d.at)),
+            11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+        since:SetPoint("LEFT", 220, 0)
+        yOff = yOff + ROW_H + 2
+    end
+    return yOff
+end
+
+-- The queue moves as people fall and get up, so the Cooldowns sub-tab redraws itself while it is shown.
+local function KeepLive(panel)
+    if panel.liveTicker then return end
+    panel.liveTicker = C_Timer.NewTicker(2, function(ticker)
+        if not panel:IsVisible() then
+            ticker:Cancel()
+            panel.liveTicker = nil
+            return
+        end
+        panel:GetParent().RefreshActive()
+    end)
+end
+
 local function BuildCdSub(panel)
     local summary = UI:CreateText(panel, "", 12, C.text.r, C.text.g, C.text.b)
     summary:SetPoint("TOPLEFT", 0, -4)
@@ -174,7 +246,9 @@ local function BuildCdSub(panel)
             yOff = yOff + ROW_H + 2
         end
 
+        yOff = BattleResQueue(content, yOff)
         content:SetHeight(math.max(1, yOff))
+        KeepLive(panel)
     end
 end
 

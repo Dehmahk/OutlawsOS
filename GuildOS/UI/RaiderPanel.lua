@@ -21,6 +21,15 @@ local ROLE_COL = {
 local ROLE_LETTER = { TANK = "T", HEALER = "H", DPS = "D" }
 -- A raider's gear in the palette's status colours (#371).
 local GEAR_COL = { ready = C.ok, gearing = C.warn, missing = C.danger }
+-- The raids a raider is locked to this week, beside the name in a dim colour (RaidTracker:LockoutsThisWeek).
+local function LockSuffix(set)
+    if not set then return "" end
+    local names = {}
+    for name in pairs(set) do names[#names + 1] = name end
+    if #names == 0 then return "" end
+    table.sort(names)
+    return "   |cff8a8a8a" .. table.concat(names, ", ") .. "|r"
+end
 local function gearLabel(g)
     if g == "ready"   then return L["Ready"]   end
     if g == "gearing" then return L["Gearing"] end
@@ -177,7 +186,7 @@ function GuildOS:CreateRaiderPanel(panel, _mainFrame)
         row:SetBackdrop({ bgFile = WHITE })
 
         row.nameFS = UI:CreateText(row, "", 12, C.text.r, C.text.g, C.text.b)
-        row.nameFS:SetPoint("LEFT", NAME_X, 0); row.nameFS:SetWidth(ROLE_X - NAME_X - 6); row.nameFS:SetJustifyH("LEFT")
+        row.nameFS:SetPoint("LEFT", NAME_X, 0); row.nameFS:SetWidth(ROLE_X - NAME_X - 6); row.nameFS:SetJustifyH("LEFT"); row.nameFS:SetWordWrap(false)
 
         row.roleBtns = {}
         for ri, role in ipairs(RR().ROLES) do
@@ -223,6 +232,7 @@ function GuildOS:CreateRaiderPanel(panel, _mainFrame)
         -- Aggregate counts for the KPI band (accumulated in the row loop).
         local online, rT, rH, rD, gReady = 0, 0, 0, 0, 0
 
+        local locks = GuildOS.RaidTracker and GuildOS.RaidTracker:LockoutsThisWeek() or {}
         for idx, m in ipairs(list) do
             local row = f.rows[idx]
             if not row then row = buildRow(); f.rows[idx] = row end
@@ -248,7 +258,7 @@ function GuildOS:CreateRaiderPanel(panel, _mainFrame)
             -- Name (class-colored; dim when offline)
             local cr, cg, cb = GuildOS:GetClassColor(m.class)
             if not m.online then cr, cg, cb = cr * 0.55, cg * 0.55, cb * 0.55 end
-            row.nameFS:SetText(m.name); row.nameFS:SetTextColor(cr, cg, cb)
+            row.nameFS:SetText(m.name .. LockSuffix(locks[m.key])); row.nameFS:SetTextColor(cr, cg, cb)
 
             -- Roles (multi-toggle; shows the effective set): the shared selection mark (#371).
             for _, b in ipairs(row.roleBtns) do
