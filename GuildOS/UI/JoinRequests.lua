@@ -109,6 +109,9 @@ function GuildOS:BuildJoinRequestsList(host, count, scrollName, top, left, right
         row.meta = UI:CreateText(row, "", 10, C.label.r, C.label.g, C.label.b)
         row.meta:SetPoint("TOPLEFT", 6, -44)
         row.meta:SetWidth(330); row.meta:SetJustifyH("LEFT"); row.meta:SetWordWrap(false)
+        row.remove = UI:CreateButton(row, L["Remove"], 76, 24)
+        row.remove:SetPoint("RIGHT", -6, 0)
+        UI:SetButtonVariant(row.remove, "ghost")
         row.decline = UI:CreateButton(row, L["Decline"], 70, 24)
         row.decline:SetPoint("RIGHT", -6, 0)
         UI:SetButtonVariant(row.decline, "danger")
@@ -144,10 +147,16 @@ function GuildOS:BuildJoinRequestsList(host, count, scrollName, top, left, right
             -- The game lets no addon invite off Anniversary (#256), and these requests are Forever's and retail's.
             -- EKO: Approve (was Invite, hidden on Forever): an officer's, on any open request. It puts
             -- /ginvite <name> in the chat box; the row closes when the game says the invite went.
-            row.invite:SetShown(isOpen and JR():CanDecide()); row.whisper:SetShown(true); row.decline:SetShown(isOpen and JR():CanDecide())
+            local officer = JR():CanDecide()
+            row.invite:SetShown(isOpen and officer); row.whisper:SetShown(true)
+            row.decline:SetShown(isOpen and officer); row.remove:SetShown(not isOpen and officer)
+            -- Whisper sits left of the button on the right: Remove on a closed row, Decline on an open one.
+            row.whisper:ClearAllPoints()
+            row.whisper:SetPoint("RIGHT", (not isOpen and officer) and row.remove or row.decline, "LEFT", -6, 0)
             row.invite:SetEnabled(isOpen)
             row.invite:SetScript("OnClick", function() JR():Approve(r.id) end)
             row.decline:SetScript("OnClick", function() JR():Decide(r.id, "declined") end)
+            row.remove:SetScript("OnClick", function() JR():Remove(r.id) end)
             row.whisper:SetScript("OnClick", function() ChatFrame_OpenChat("/w " .. GuildOS:WhisperTarget(r.character) .. " ") end)
             row:Show()
         end

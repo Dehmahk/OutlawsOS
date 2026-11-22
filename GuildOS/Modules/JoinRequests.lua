@@ -537,6 +537,18 @@ function JR:Decide(id, status)
     return true
 end
 
+-- Takes a closed request off this officer's list (declined, invited or expired). An open one stays: it
+-- is still waiting for an answer. Only this copy goes; the guild's other officers keep theirs.
+function JR:Remove(id)
+    if not self:CanDecide() then return false end
+    local rows = store()
+    local r = rows[id]
+    if not r or r.status == "open" then return false end
+    rows[id] = nil
+    changed()
+    return true
+end
+
 -- Whether Invite would act: the request is open, this player may invite, and the person is there to be
 -- invited. A request from the game is repeated by whoever is online, so one not heard for six minutes is
 -- offline; the site cannot know, so a request from there is always live.
