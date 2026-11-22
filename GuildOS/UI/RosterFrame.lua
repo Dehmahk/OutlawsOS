@@ -3780,6 +3780,75 @@ function GuildOS:CreateRecruitmentPanel(parent, _mainFrame)
     beaconSec.layout = function() return ROW_H + 4 + noteH(beaconNote) end
 
     ----------------------------------------------------------------
+    -- Commonly asked questions: the answers recruits ask for most, each in a box to select and copy from.
+    -- A box takes a click (or its Select button) and highlights its whole answer, ready for Ctrl+C.
+    -- Shut until opened, like the other sections.
+    ----------------------------------------------------------------
+    local FAQ = {
+        { q = "What is GuildOS?",
+          a = "GuildOS is a free addon from CurseForge that our guild uses for events, raids, recruiting & our own group finder. Add the GuildOS Unbroken plugin for the guild Marketplace & crafting orders. Optional, but it keeps you in the loop." },
+        { q = "Is GuildOS required?",
+          a = "Not required at all! You can join and play without it. It just makes it easier to sign up for events and stay connected. Grab it whenever you're ready." },
+        { q = "I'm casual, is that okay?",
+          a = "Totally cool! We're a casual guild at heart. No rush, play at your own pace. We just ask that you're 21+ and friendly." },
+        { q = "Do you raid or do BGs?",
+          a = "Yes! Raids open Dec 9 and we pick Raid Leaders Dec 1. BGs are welcome too, and our Event Organizers may run PvP nights. We're casual at heart, so no pressure." },
+        { q = "I'm already in a guild, how do I leave?",
+          a = "Easy! Just type /gquit in chat and it'll remove you from your current guild. Let me know once you're out and I'll send the invite right away!" },
+        { q = "I'll be away for a while",
+          a = "Thanks for the heads up! You're all set. FYI, starting Jan 1st we'll remove members inactive 30+ days without notice, so letting us know like you did keeps your spot safe!" },
+        { q = "What is Renown?",
+          a = "It's our guild's level in GuildOS! Dungeon firsts, level 60s, crafting milestones & raid kills earn guild achievements that raise it. Every 5 levels we unlock a new insignia & title. Press J in GuildOS or check guildos.me to see them all!" },
+        { q = "What time zone is the guild?",
+          a = "Fair heads up, it's way past our peak hours (about 1-11 PM EST) so you've caught our graveyard shift and chat's quieter right now. Don't let that scare you off though, we've got night owls too! Want an invite?" },
+        { q = "Do you have raid times?",
+          a = "Not yet! Raids open Dec 9, and we pick Raid Leaders Dec 1, then set raid nights with a poll. Tanks & healers especially welcome, there's a spot for you! Want an invite?" },
+    }
+    local faqSec = Section("faq", L["Commonly Asked Questions"])
+    local fb = faqSec.body
+    local faqNote = Note(fb, L["Ready-made answers for recruits. Select one, then press Ctrl+C to copy it."], 0, 0)
+    local faqItems, faqBoxes = {}, {}
+    for i, item in ipairs(FAQ) do
+        local qFS = UI:CreateText(fb, item.q, 11, C.text.r, C.text.g, C.text.b)
+        local selBtn = UI:CreateButton(fb, L["Select"], 80, 18)
+        local area = UI:CreateTextArea(fb, 200, 40, { max = 1000 })
+        local edit = area.edit
+        edit:SetText(item.a)
+        -- Read-only in effect: a key that would change the answer puts it back, selected.
+        edit:HookScript("OnTextChanged", function(self, userInput)
+            if userInput then self:SetText(item.a); self:HighlightText() end
+        end)
+        edit:HookScript("OnEditFocusGained", function(self) self:HighlightText() end)
+        local function selectAnswer()
+            edit:SetFocus()
+            edit:HighlightText()
+            GuildOS:Print(L["Answer selected: press Ctrl+C to copy"])
+        end
+        selBtn:SetScript("OnClick", selectAnswer)
+        faqBoxes[#faqBoxes + 1] = edit
+        faqItems[i] = { q = qFS, btn = selBtn, area = area, text = item.a }
+    end
+    faqSec.layout = function(w)
+        local y = -(noteH(faqNote) + 8)
+        -- About how many characters a line of the box holds at this width (Sans 12, inset 6px a side).
+        local perLine = math.max(30, math.floor((w - 24) / 6.4))
+        for _, it in ipairs(faqItems) do
+            it.q:ClearAllPoints()
+            it.q:SetPoint("TOPLEFT", fb, "TOPLEFT", 0, y)
+            it.btn:ClearAllPoints()
+            it.btn:SetPoint("TOPRIGHT", fb, "TOPRIGHT", 0, y + 2)
+            local lines = math.max(1, math.ceil(#it.text / perLine))
+            local h = 10 + lines * 15
+            it.area:ClearAllPoints()
+            it.area:SetPoint("TOPLEFT", fb, "TOPLEFT", 0, y - 22)
+            it.area:SetPoint("TOPRIGHT", fb, "TOPRIGHT", 0, y - 22)
+            it.area:SetHeight(h)
+            y = y - 22 - h - 12
+        end
+        return -y
+    end
+
+    ----------------------------------------------------------------
     -- Join requests: people with no guild who asked this one to take them
     ----------------------------------------------------------------
     -- Not where the module never starts (Anniversary): a section with nothing behind it.
@@ -3849,6 +3918,7 @@ function GuildOS:CreateRecruitmentPanel(parent, _mainFrame)
     -- The tab's OnShow fills every box before the tab is laid out, and an edit box filled before it is
     -- laid out shows nothing until its cursor moves (#158); a shut section's too, until it opens.
     local editBoxes = { intervalBox, msgBox, chanBox, kwBox, lvlBox, discordBox, welcomeBox }
+    for _, box in ipairs(faqBoxes) do editBoxes[#editBoxes + 1] = box end
     resetCursors = function()
         for _, box in ipairs(editBoxes) do
             if not box:HasFocus() then box:SetCursorPosition(0) end
