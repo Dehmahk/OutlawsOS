@@ -2112,6 +2112,29 @@ local function MemberDropdown_Initialize(self, level, menuList)
             end
         end
 
+        -- Assign a role to this member: saved in OutlawOS only. The Herald rank itself is still
+        -- set by hand in the guild panel (rank changes are Blizzard-protected).
+        if GuildOS.db then
+            GuildOS.db.roleAssign = GuildOS.db.roleAssign or {}
+            local rkey = data.key or GuildOS:GetPlayerKey(data.name, data.realm or GetRealmName())
+            local current = GuildOS.db.roleAssign[rkey]
+            for _, role in ipairs({ "Recruiter", "Event Organizer" }) do
+                info = UIDropDownMenu_CreateInfo()
+                info.text = "Assign " .. role
+                info.checked = (current == role)
+                info.func = function()
+                    if GuildOS.db.roleAssign[rkey] == role then
+                        GuildOS.db.roleAssign[rkey] = nil
+                        GuildOS:Print(data.name .. ": role cleared.")
+                    else
+                        GuildOS.db.roleAssign[rkey] = role
+                        GuildOS:Print(data.name .. ": saved as " .. role .. ". Set the Herald rank in the guild panel to give access.")
+                    end
+                end
+                UIDropDownMenu_AddButton(info, level)
+            end
+        end
+
         -- Add officer note: Guild OS's own, private to officers — said in its name, beside the public one.
         if GuildOS.OfficerNotes then
             info = UIDropDownMenu_CreateInfo()
@@ -3060,7 +3083,7 @@ function GuildOS:CreateRecruitmentPanel(parent, _mainFrame)
     end
 
     -- The Recruiting sub-tab (#373, "panel with preview"): a status strip, the ad beside the chat line it
-    -- makes, the channels under both, then Welcome, Auto-invite, Beacon and, where its module runs, Join
+    -- makes, the channels under both, then Welcome, Beacon and, where its module runs, Join
     -- requests, each a section that opens in place. Opened, it is taller than the window, so it builds
     -- into a scroll frame.
     --
@@ -3672,153 +3695,6 @@ function GuildOS:CreateRecruitmentPanel(parent, _mainFrame)
     welcomeSec.layout = function() return 2 * ROW + ROW_H end
 
     ----------------------------------------------------------------
-    -- Auto-Invite (issue #59): everything /gos autoinvite sets, through the same
-    -- Recruitment setters the command uses.
-    ----------------------------------------------------------------
-    local aiSec = Section("autoinvite", L["Auto-Invite (whisper keyword)"])
-    -- EKO patch: Auto-Invite doesn't work on Forever, so its section is taken out of the layout and hidden.
-    -- The build below still runs, so nothing else that reads it breaks.
-    sections[#sections] = nil
-    aiSec.head:Hide()
-    aiSec.body:Hide()
-    local ab = aiSec.body
-    local function aiCfg() return GuildOS.db.recruitment and GuildOS.db.recruitment.autoInvite end
-
-    -- A game that lets no addon invite says so on the header and first in the section, and its controls
-    -- are greyed out below (#371, #373).
-    local canInvite = GuildOS.Client.isAnniversary
-    local aiNote = not canInvite
-        and Note(ab, L["This game does not let an addon invite: the auto-invite works on TBC Anniversary only."], 0, 0)
-    local function UpdateInviteStatus()
-        if not canInvite then return paint(aiSec.status, L["not on this client"], C.textSoft) end
-        local cfg = aiCfg()
-        paintOnOff(aiSec.status, cfg and cfg.enabled)
-    end
-
-    local aiChk = UI:CreateCheckbox(ab, L["Invite players who whisper the keyword"], 18)
-    aiChk.checkbox.onChanged = function(_, checked)
-        local cfg = aiCfg()
-        if cfg then cfg.enabled = checked and true or false end
-        UpdateInviteStatus()
-    end
-
-    local kwLabel = RowLabel(ab, L["Keyword:"], 0)
-    local kwBox = UI:CreateInput(ab, 120, ROW_H, { max = R.KEYWORD_MAX })
-    UI:AttachSaveButton(kwBox, function(box)
-        local cfg = aiCfg()
-        if not cfg then return end
-        if not R:SetAutoInviteKeyword(cfg, box:GetText()) then box:SetText(cfg.keyword) return end
-        box:SetText(cfg.keyword)
-        GuildOS:Print(L["Auto-invite keyword set to |cffFFFFFF"] .. cfg.keyword .. "|r.")
-    end)
-
-    local lvlLabel = RowLabel(ab, L["Min level:"], 0)
-    local lvlBox = UI:CreateInput(ab, 50, ROW_H, { numeric = true, max = 2 })
-    UI:AttachSaveButton(lvlBox, function(box)
-        local cfg = aiCfg()
-        if not cfg then return end
-        R:SetAutoInviteMinLevel(cfg, box:GetText())
-        box:SetText(tostring(cfg.minLevel))
-    end)
-    local lvlNote = Note(ab, L["0 = any level"], COL, 0)
-
-    local classLabel = RowLabel(ab, L["Classes:"], 0)
-    local classBtns = {}
-    -- A class the invite takes is the selected chip (UI:SetSelected, #371), not a fill in its colour.
-    local function refreshClassBtns()
-        local cfg = aiCfg()
-        for _, b in ipairs(classBtns) do
-            UI:SetSelected(b, cfg and cfg.classes[b._class] and true or false)
-        end
-    end
-    for i, class in ipairs(R.CLASSES) do
-        local name = (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[class]) or class
-        local b = UI:CreateButton(ab, name, CHIP_W, ROW_H)
-        b._class = class
-        b:SetScript("OnClick", function(self)
-            local cfg = aiCfg()
-            if not cfg then return end
-            R:SetAutoInviteClass(cfg, self._class, not cfg.classes[self._class])
-            refreshClassBtns()
-        end)
-        classBtns[i] = b
-    end
-    local classNote = Note(ab, L["None selected = any class."], COL, 0)
-
-    local fbLabel = RowLabel(ab, L["Not confirmed:"], 0)
-    local fbBtn = UI:CreateButton(ab, "", 120, ROW_H)
-    local function refreshFallback()
-        local cfg = aiCfg()
-        fbBtn.label:SetText((cfg and cfg.whoFallback == "invite") and L["Invite them"] or L["Skip them"])
-    end
-    fbBtn:SetScript("OnClick", function()
-        local cfg = aiCfg()
-        if not cfg then return end
-        R:SetAutoInviteFallback(cfg, cfg.whoFallback == "invite" and "skip" or "invite")
-        refreshFallback()
-    end)
-    local fbNote = Note(ab, L["When /who can't confirm the level or class."], COL, 0)
-
-    -- How the invite decides, under the section it explains.
-    local banNote = canInvite
-        and Note(ab, L["Banned players are never invited. Level and class filters are checked with /who."], 0, 0)
-    if not canInvite then
-        -- Greyed out and kept, under the sentence that says why (#371).
-        aiChk.checkbox:SetEnabled(false)
-        aiChk.label:SetTextColor(C.disabled.r, C.disabled.g, C.disabled.b)
-        for _, box in ipairs({ kwBox, lvlBox }) do
-            box:EnableMouse(false)
-            box:SetTextColor(C.disabled.r, C.disabled.g, C.disabled.b)
-            box.saveButton:SetEnabled(false)
-        end
-        for _, b in ipairs(classBtns) do b:SetEnabled(false) end
-        fbBtn:SetEnabled(false)
-    end
-
-    local function refreshAutoInvite()
-        local cfg = aiCfg()
-        aiChk.checkbox:SetChecked(cfg and cfg.enabled or false)
-        kwBox:SetText(cfg and cfg.keyword or "")
-        lvlBox:SetText(cfg and tostring(cfg.minLevel or 0) or "")
-        refreshClassBtns()
-        refreshFallback()
-    end
-
-    -- The class chips wrap with the width, so the rows under them follow.
-    aiSec.layout = function(w)
-        local y = 0
-        if aiNote then
-            at(aiNote, ab, 0, y)
-            y = y - noteH(aiNote) - 6
-        end
-        at(aiChk, ab, 0, y - 2)
-        y = y - ROW
-        labelAt(kwLabel, ab, y)
-        at(kwBox, ab, COL, y)
-        y = y - ROW
-        labelAt(lvlLabel, ab, y)
-        at(lvlBox, ab, COL, y)
-        y = y - ROW_H - 4
-        at(lvlNote, ab, COL, y)
-        y = y - noteH(lvlNote) - 6
-        labelAt(classLabel, ab, y)
-        y = y - placeChips(classBtns, #classBtns, ab, y, chipsPerRow(w, 3)) - 4
-        at(classNote, ab, COL, y)
-        y = y - noteH(classNote) - 6
-        labelAt(fbLabel, ab, y)
-        at(fbBtn, ab, COL, y)
-        y = y - ROW_H - 4
-        at(fbNote, ab, COL, y)
-        y = y - noteH(fbNote)
-        if banNote then
-            y = y - 6
-            at(banNote, ab, 0, y)
-            y = y - noteH(banNote)
-        end
-        return -y
-    end
-
-    ----------------------------------------------------------------
     -- Recruitment Beacon (Chehul mesh): realm/city-wide ad, officer-only
     ----------------------------------------------------------------
     local beaconSec = Section("beacon", L["Recruitment Beacon (mesh)"])
@@ -4123,7 +3999,7 @@ function GuildOS:CreateRecruitmentPanel(parent, _mainFrame)
 
     -- The tab's OnShow fills every box before the tab is laid out, and an edit box filled before it is
     -- laid out shows nothing until its cursor moves (#158); a shut section's too, until it opens.
-    local editBoxes = { intervalBox, msgBox, chanBox, kwBox, lvlBox, discordBox, welcomeBox }
+    local editBoxes = { intervalBox, msgBox, chanBox, discordBox, welcomeBox }
     for _, box in ipairs(faqBoxes) do editBoxes[#editBoxes + 1] = box end
     resetCursors = function()
         for _, box in ipairs(editBoxes) do
@@ -4143,7 +4019,6 @@ function GuildOS:CreateRecruitmentPanel(parent, _mainFrame)
         local s = GuildOS.db.recruitment
         intervalBox:SetText(tostring(s.interval or 120))
         refreshChanBtns()
-        refreshAutoInvite()
         msgBox:SetText(s.message or "")
         discordBox:SetText(s.discord or "")
         welcomeBox:SetText(s.welcomeMessage or "")

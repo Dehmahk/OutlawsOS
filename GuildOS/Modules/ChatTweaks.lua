@@ -44,6 +44,12 @@ function ChatTweaks:Initialize()
     for k, v in pairs(self.DEFAULTS) do
         if GuildOS.db.chatTweaks[k] == nil then GuildOS.db.chatTweaks[k] = v end
     end
+    -- One-time switch-on (1.37.15): annotations were off by default until 1.37.13, so settings
+    -- saved before then stayed off. Turn them on once; after that the player's own choice stands.
+    if not GuildOS.db.chatTweaks.defaultOnMigrated then
+        GuildOS.db.chatTweaks.enabled = true
+        GuildOS.db.chatTweaks.defaultOnMigrated = true
+    end
     self._cache = {}
 
     local f = CreateFrame("Frame")

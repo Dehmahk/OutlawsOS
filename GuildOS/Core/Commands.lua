@@ -93,7 +93,6 @@ local function printHelp()
         helpLine("/gos tempban <name> <days>", L["Ban a player for a number of days"])
         helpLine("/gos unban <name>",          L["Lift a ban"])
         helpLine("/gos banlist",               L["Open the ban list"])
-        helpLine("/gos autoinvite",            L["Auto-invite settings"])
         helpLine("/gos note <name> <text>",    L["Add an officer note"])
         if GuildOS.Wishlist then helpLine("/gos wish", L["Open the loot wishlist"]) end
         helpLine("/gos scout",                 L["Scan for unguilded recruits"])
@@ -720,13 +719,6 @@ local function handleCommand(msg)
         end
     elseif msg == "banlist" then
         GuildOS.UI:OpenWindow("management", "ban")
-    elseif msg == "autoinvite" or msg:match("^autoinvite%s") or msg == "ai" or msg:match("^ai%s") then
-        if GuildOS.Recruitment then
-            local rest = strtrim((msg:gsub("^ai%s*", ""):gsub("^autoinvite%s*", "")))
-            local a = {}
-            for w in rest:gmatch("%S+") do a[#a + 1] = w end
-            GuildOS.Recruitment:HandleAutoInviteCommand(a)
-        end
     elseif msg == "mentions" or msg:match("^mentions%s") then
         if GuildOS.Mentions then
             local rest = strtrim((msg:gsub("^mentions%s*", "")))

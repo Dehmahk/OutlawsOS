@@ -3033,31 +3033,51 @@ function EKO:BuildDeskSub(panel)
         ht:ClearAllPoints(); ht:SetPoint("LEFT", b3, "RIGHT", 10, 0)
         y = y + 32
 
-        -- Who has OutlawOS: leadership only (the Leadership tab's list and the roster's Leadership ranks).
-        -- Everyone's install status is on the roster.
+        -- Who has OutlawOS: every leader (the Leadership tab's list and the roster's Leadership ranks), with
+        -- the version they check in with. A leader who has never checked in shows NOT INSTALLED; any version
+        -- other than this release is out of date.
         local LEAD_RANKS = { ["guild master"] = true, ["gm alt"] = true, ["co-guild master"] = true, ["officer"] = true,
             ["recruiter"] = true, ["herald"] = true, ["raid marshal"] = true }
+        local seen = {}
+        for _, u in ipairs(EKO:PatchUsers()) do seen[short(u.name)] = u end
         local users = {}
-        for _, u in ipairs(EKO:PatchUsers()) do
-            if EKO:IsLeader(u.name) or (u.rank and LEAD_RANKS[u.rank:lower()]) then users[#users + 1] = u end
+        for name, m in pairs(EKO:Roster()) do
+            if EKO:IsLeader(name) or (m.rank and LEAD_RANKS[m.rank:lower()]) then
+                local rec = seen[name] or {}
+                users[#users + 1] = { name = name, m = m, online = m.online, rank = m.rank, v = rec.v, at = rec.at }
+            end
         end
-        local onl = 0
-        for _, u in ipairs(users) do if u.online then onl = onl + 1 end end
-        local wh = sectionAt(child, string.format("OutlawOS INSTALLED  ·  %d seen, %d online now", #users, onl), y)
+        table.sort(users, function(a, b)
+            if (a.online and 1 or 0) ~= (b.online and 1 or 0) then return a.online end
+            return a.name < b.name
+        end)
+        local CURRENT = EKO.PATCH_VERSION
+        local onl, current = 0, 0
+        for _, u in ipairs(users) do
+            if u.online then onl = onl + 1 end
+            if u.v == CURRENT then current = current + 1 end
+        end
+        local wh = sectionAt(child, string.format("OutlawOS INSTALLED  ·  %d of %d leaders current, %d online now", current, #users, onl), y)
         local chk = btn(wh, "Check who's online", 140, function() EKO:CheckPatch() end)
         chk:SetPoint("TOPRIGHT", 0, 2)
         y = y + 26
-        if #users == 0 then txt(child, "Nobody seen yet. Click Check who's online.", 0, y, width, 12, C.textSoft); y = y + 22 end
+        if #users == 0 then txt(child, "No leaders found in the roster.", 0, y, width, 12, C.textSoft); y = y + 22 end
         for i, u in ipairs(users) do
             local r = newRow(child, y, i, 22)
             cell(r, u.m and classColored(u.m) or u.name, 8, 200)
             cell(r, u.rank or (GREY .. "not in roster|r"), 215, 140, C.textSoft.r, C.textSoft.g, C.textSoft.b)
             cell(r, u.online and (GREEN .. "online|r") or (GREY .. "offline|r"), 360, 70)
-            cell(r, "v" .. tostring(u.v) .. (u.v ~= EKO.PATCH_VERSION and " |cffff6060(old zip)|r" or ""), 435, 150)
-            cell(r, "last seen " .. date("%b %d %I:%M %p", u.at or 0), 590, 200, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+            if not u.v then
+                cell(r, "|cffff6060NOT INSTALLED|r", 435, 150)
+            elseif u.v == CURRENT then
+                cell(r, GREEN .. "v" .. u.v .. "|r", 435, 150)
+            else
+                cell(r, "|cffff6060v" .. tostring(u.v) .. "  UPDATE OutlawOS|r", 435, 150)
+            end
+            cell(r, u.at and ("last seen " .. date("%b %d %I:%M %p", u.at)) or "", 590, 200, C.textSoft.r, C.textSoft.g, C.textSoft.b)
             y = y + 24
         end
-        txt(child, "Everyone with this zip or newer checks in at login. Officers on an older zip won't show until they install this one.", 0, y + 2, width, 10, C.textSoft)
+        txt(child, "Each leader's version is the one they check in with at login. NOT INSTALLED means no check-in yet; UPDATE OutlawOS means an older version.", 0, y + 2, width, 10, C.textSoft)
         y = y + 26
 
         -- Anniversaries
@@ -3264,7 +3284,7 @@ end)
 -- Who has OutlawOS: every client with the patch says hello at login and answers a check (domain
 -- "ekowho", guild only). Kept in db.eko.patchUsers[name] = { v, at }.
 ----------------------------------------------------------------------
-EKO.PATCH_VERSION = "2026.11.21"
+EKO.PATCH_VERSION = GuildOS.VERSION or "?"   -- the CurseForge version each client checks in with
 
 local function rememberPatch(name, v)
     local db = EKO:DB()

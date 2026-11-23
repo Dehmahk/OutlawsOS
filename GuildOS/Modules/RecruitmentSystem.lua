@@ -49,16 +49,6 @@ Recruitment.DEFAULT_SETTINGS = {
     discord = "",
 }
 
--- Auto-invite defaults (merged into db.recruitment.autoInvite on Initialize).
-Recruitment.AUTOINVITE_DEFAULTS = {
-    enabled     = false,
-    keyword     = "ginv",
-    minLevel    = 0,
-    classes     = {},        -- set: { WARRIOR = true, ... }; empty = any class
-    cooldownSec = 300,
-    whoFallback = "skip",    -- "skip" (fail-safe) or "invite" when /who can't confirm
-}
-
 Recruitment.ticker       = nil   -- officer auto-send ticker
 Recruitment.memberTicker = nil   -- member opt-in auto-send ticker
 Recruitment.lastSend     = 0
@@ -70,89 +60,6 @@ Recruitment.SEND_MIN_GAP     = 30   -- min seconds between two sends from this c
 Recruitment.AUTO_SESSION_CAP = 40   -- max AUTO popups per session before self-pausing
 Recruitment.MSG_MAX          = 255  -- SendChatMessage byte cap; the consent popup previews the SAME
                                     -- length that is sent, so what the member sees is what posts
-
-----------------------------------------------------------------------
--- Auto-invite: pure helpers (deterministic; unit-tested via /gos selftest)
-----------------------------------------------------------------------
-function Recruitment:_MatchKeyword(msg, keyword)
-    local m = strtrim(msg or ""):lower()
-    local k = (keyword or ""):lower()
-    if k == "" then return false end
-    return m == k or m:sub(1, #k + 1) == (k .. " ")
-end
-
-function Recruitment:_OnInviteCooldown(name, now, store)
-    store = store or self._inviteCd or {}
-    local exp = store[name]
-    return exp ~= nil and exp > (now or 0)
-end
-
-function Recruitment:_MarkInvited(name, now, cooldownSec, store)
-    store = store or self._inviteCd
-    if not store then self._inviteCd = {}; store = self._inviteCd end
-    store[name] = (now or 0) + (cooldownSec or 300)
-end
-
-function Recruitment:_PassesFilters(info, cfg)
-    if not info then return false end
-    if (cfg.minLevel or 0) > 0 and (info.level or 0) < cfg.minLevel then return false end
-    if cfg.classes and next(cfg.classes) ~= nil then
-        if not cfg.classes[info.class] then return false end
-    end
-    return true
-end
-
-----------------------------------------------------------------------
--- Settings, one door for the slash commands and the Recruitment screen (issue #59), so both
--- hold the same rules. Each takes the table it writes and returns what it stored, or nil/false.
-----------------------------------------------------------------------
-Recruitment.KEYWORD_MAX = 20
-
--- A keyword is one word, lowercase: the whisper is matched on its first word.
-function Recruitment:SetAutoInviteKeyword(cfg, word)
-    local kw = strtrim(tostring(word or "")):lower():match("^(%S+)")
-    if not kw or #kw > self.KEYWORD_MAX then return nil end
-    cfg.keyword = kw
-    return kw
-end
-
--- 0 means any level; nothing above the game's cap.
-function Recruitment:SetAutoInviteMinLevel(cfg, n)
-    n = tonumber(n)
-    if not n then return nil end
-    cfg.minLevel = math.max(0, math.min(GuildOS.Client.maxLevel, math.floor(n)))
-    return cfg.minLevel
-end
-
-function Recruitment:IsClass(token)
-    for _, c in ipairs(self.CLASSES) do
-        if c == token then return true end
-    end
-    return false
-end
-
--- The command used to store whatever was typed: a "MAEG" left in the filter counted as a
--- filter, matched nobody, and showed nowhere, so auto-invite went quiet. Dropped at start.
-function Recruitment:_DropUnknownClasses(classes)
-    for c in pairs(classes or {}) do
-        if not self:IsClass(c) then classes[c] = nil end
-    end
-end
-
--- Only a class the game has.
-function Recruitment:SetAutoInviteClass(cfg, class, on)
-    class = tostring(class or ""):upper()
-    if not self:IsClass(class) then return false end
-    cfg.classes[class] = on and true or nil
-    return true
-end
-
--- What to do when /who cannot confirm the player's level or class.
-function Recruitment:SetAutoInviteFallback(cfg, mode)
-    if mode ~= "skip" and mode ~= "invite" then return false end
-    cfg.whoFallback = mode
-    return true
-end
 
 -- A recruitment channel is listed once, whatever the case.
 -- The preset channels as each client names them: the game's own ChatChannels table
@@ -303,31 +210,9 @@ function Recruitment:_IsGuildmate(fullName)
     return false
 end
 
-function Recruitment:_RegisterAutoInviteTests()
+function Recruitment:_RegisterRecruitTests()
     if not GuildOS.SelfTest then return end
     local S = GuildOS.SelfTest
-    S:Register("autoinvite.keyword_exact", function()
-        if not Recruitment:_MatchKeyword("  GINV ", "ginv") then return false, "exact should match" end
-        return true
-    end)
-    S:Register("autoinvite.keyword_prefix", function()
-        if not Recruitment:_MatchKeyword("ginv please", "ginv") then return false, "prefix should match" end
-        if Recruitment:_MatchKeyword("ginvite me", "ginv") then return false, "must not match 'ginvite'" end
-        return true
-    end)
-    S:Register("autoinvite.cooldown", function()
-        local store = { Bob = 500 }
-        if not Recruitment:_OnInviteCooldown("Bob", 400, store) then return false, "should be on cd" end
-        if Recruitment:_OnInviteCooldown("Bob", 600, store) then return false, "cd should be over" end
-        return true
-    end)
-    S:Register("autoinvite.filters", function()
-        local cfg = { minLevel = 60, classes = { WARRIOR = true } }
-        if not Recruitment:_PassesFilters({ level = 70, class = "WARRIOR" }, cfg) then return false, "should pass" end
-        if Recruitment:_PassesFilters({ level = 58, class = "WARRIOR" }, cfg) then return false, "level fail" end
-        if Recruitment:_PassesFilters({ level = 70, class = "MAGE" }, cfg) then return false, "class fail" end
-        return true
-    end)
     S:Register("recruit.participation_opt_in", function()
         -- Opt-in (#150): only an explicit true helps; the untouched default (nil) and false stay out.
         if Recruitment:_ParticipatingFrom(nil) then return false, "nil default must not participate" end
@@ -374,56 +259,6 @@ function Recruitment:_RegisterAutoInviteTests()
         if Recruitment:_AutoShouldContinue(41, 40) then return false, "over cap stops" end
         return true
     end)
-end
-
-----------------------------------------------------------------------
--- Auto-invite: whisper hook + invite flow
-----------------------------------------------------------------------
-function Recruitment:RegisterAutoInviteEvent()
-    local f = CreateFrame("Frame")
-    GuildOS.Compat.RegisterEvent(f, "CHAT_MSG_WHISPER")
-    f:SetScript("OnEvent", function(_, _, msg, author)
-        if GuildOS.Compat.IsSecret(msg, author) then return end  -- chat in lockdown: nothing readable
-        local cfg = GuildOS.db.recruitment and GuildOS.db.recruitment.autoInvite
-        if not cfg or not cfg.enabled then return end
-        if not GuildOS.Compat.AddonMayInvite() then return end   -- Anniversary only (#256)
-        if not Recruitment:_MatchKeyword(msg, cfg.keyword) then return end
-        local sender = author and (author:match("^([^-]+)") or author)
-        if sender and sender ~= "" then
-            Recruitment:_HandleKeywordWhisper(sender, author)
-        end
-    end)
-end
-
--- An invite the whisper earned. Only TBC Anniversary gets here (#256): the popup that held it for a
--- click on WoW: Forever (#61) went with the invite the game took away from addons there.
-function Recruitment:_DoInvite(name)
-    self:_InviteNow(name)
-end
-
-function Recruitment:_InviteNow(name, full)
-    local cfg = GuildOS.db.recruitment.autoInvite
-    if not GuildOS.Compat.GuildInvite(full or name) then return end
-    if GuildOS.RecruitEngagement then GuildOS.RecruitEngagement:RecordInvite(name) end
-    self:_MarkInvited(name, GetServerTime(), cfg.cooldownSec)
-    GuildOS:Print(string.format(L["Auto-invited |cffFFFFFF%s|r to the guild."], name))
-end
-
-function Recruitment:_HandleKeywordWhisper(sender, author)
-    local cfg = GuildOS.db.recruitment.autoInvite
-    -- Ban gate (BanList already alerts on a banned whisper). The whole sender: on retail the realm
-    -- tells a banned namesake from this realm's (issue #184).
-    if GuildOS.BanList and GuildOS.BanList:IsBanned(author or sender) then return end
-    -- Cooldown
-    if self:_OnInviteCooldown(sender, GetServerTime()) then return end
-    -- Filters need a /who, which Forever runs only from a click: there the officer's click on
-    -- the popup is the check, and the filters stay for Anniversary.
-    local filtered = (cfg.minLevel or 0) > 0 or (cfg.classes and next(cfg.classes) ~= nil)
-    if filtered and not GuildOS.Compat.NeedsClick() then
-        self:_QualifyAndInvite(sender)
-    else
-        self:_DoInvite(sender, author)
-    end
 end
 
 ----------------------------------------------------------------------
@@ -503,60 +338,6 @@ function Recruitment:DismissPendingWelcome()
     self._pendingWelcomes = {}
 end
 
--- Async /who lookup, one query at a time. Fail-safe: on timeout / no result,
--- apply whoFallback ("skip" = do NOT invite).
-function Recruitment:_QualifyAndInvite(sender)
-    if self._whoBusy then
-        -- one lookup at a time; drop extra concurrent triggers (cooldown will let them retry)
-        return
-    end
-    self._whoBusy = sender
-    if not self._whoFrame then
-        self._whoFrame = CreateFrame("Frame")
-        self._whoFrame:SetScript("OnEvent", function() Recruitment:_OnWhoResult() end)
-    end
-    GuildOS.Compat.RegisterEvent(self._whoFrame, "WHO_LIST_UPDATE")
-    GuildOS.Compat.SetWhoToUI(true)   -- results to the API, not the Social frame
-    GuildOS.Compat.SendWho(GuildOS.Compat.WhoExact(sender))
-    -- Timeout: /who is throttled; give it 6s then fail-safe.
-    GuildOS.Compat.After(6, function()
-        if Recruitment._whoBusy == sender then Recruitment:_FinishWho(sender, nil) end
-    end)
-end
-
-function Recruitment:_OnWhoResult()
-    local sender = self._whoBusy
-    if not sender then return end
-    local info
-    if C_FriendList and C_FriendList.GetNumWhoResults then
-        local n = C_FriendList.GetNumWhoResults() or 0
-        for i = 1, n do
-            local w = C_FriendList.GetWhoInfo(i)
-            if w and w.fullName and (w.fullName:match("^([^-]+)") or w.fullName) == sender then
-                info = { level = w.level, class = w.filename }
-                break
-            end
-        end
-    end
-    self:_FinishWho(sender, info)
-end
-
-function Recruitment:_FinishWho(sender, info)
-    if self._whoFrame then self._whoFrame:UnregisterEvent("WHO_LIST_UPDATE") end
-    GuildOS.Compat.SetWhoToUI(false)
-    self._whoBusy = nil
-    local cfg = GuildOS.db.recruitment.autoInvite
-    -- Re-check cooldown/ban in case time passed.
-    if GuildOS.BanList and GuildOS.BanList:IsBanned(sender) then return end
-    if self:_OnInviteCooldown(sender, GetServerTime()) then return end
-    if info then
-        if self:_PassesFilters(info, cfg) then self:_DoInvite(sender) end
-    else
-        -- couldn't confirm → fail-safe
-        if cfg.whoFallback == "invite" then self:_DoInvite(sender) end
-    end
-end
-
 ----------------------------------------------------------------------
 -- Initialize
 ----------------------------------------------------------------------
@@ -580,16 +361,7 @@ function Recruitment:Initialize()
         end
     end
 
-    -- Auto-invite config (fill missing keys the same way)
-    r.autoInvite = r.autoInvite or {}
-    for k, v in pairs(self.AUTOINVITE_DEFAULTS) do
-        if r.autoInvite[k] == nil then
-            r.autoInvite[k] = (type(v) == "table") and GuildOS:DeepCopy(v) or v
-        end
-    end
-    self:_DropUnknownClasses(r.autoInvite.classes)
-    self._inviteCd = {}
-    self:_RegisterAutoInviteTests()
+    self:_RegisterRecruitTests()
 
     -- Set default channels if empty
     if #r.channels == 0 then
@@ -617,9 +389,6 @@ function Recruitment:Initialize()
 
     -- Listen for new guild members joining
     self:RegisterWelcomeEvent()
-
-    -- Listen for keyword whispers requesting an auto-invite
-    self:RegisterAutoInviteEvent()
 
     -- Resume if was enabled
     if r.enabled and self:CanUseRecruitment() then
@@ -1547,9 +1316,6 @@ function Recruitment:HandleCommand(args)
         else
             GuildOS:Print(L["Usage: /guildos recruit invite <PlayerName>"])
         end
-    elseif cmd == "autoinvite" or cmd == "ai" then
-        table.remove(args, 1)
-        Recruitment:HandleAutoInviteCommand(args)
     else
         GuildOS:Print(L["|cffFFD700Recruitment commands:|r"])
         GuildOS:Print("  /guildos recruit on/off")
@@ -1560,72 +1326,6 @@ function Recruitment:HandleCommand(args)
         GuildOS:Print("  /guildos recruit welcome on/off/msg <text>")
         GuildOS:Print("  /guildos recruit discord <link>")
         GuildOS:Print("  /guildos recruit invite <PlayerName>")
-    end
-end
-
-----------------------------------------------------------------------
--- Auto-invite command handler
-----------------------------------------------------------------------
-function Recruitment:HandleAutoInviteCommand(args)
-    local cfg = GuildOS.db.recruitment and GuildOS.db.recruitment.autoInvite
-    if not cfg then
-        GuildOS:Print(L["Auto-invite is available to officers after login."])
-        return
-    end
-    local sub = args[1]
-    if sub == "on" then
-        cfg.enabled = true
-        GuildOS:Print(L["Auto-invite |cff4CFF4Cenabled|r (keyword: |cffFFFFFF"] .. cfg.keyword .. "|r).")
-    elseif sub == "off" then
-        cfg.enabled = false
-        GuildOS:Print(L["Auto-invite |cffFF4444disabled|r."])
-    elseif sub == "keyword" then
-        local kw = args[2] and self:SetAutoInviteKeyword(cfg, args[2])
-        if kw then
-            GuildOS:Print(L["Auto-invite keyword set to |cffFFFFFF"] .. kw .. "|r.")
-        elseif args[2] then
-            GuildOS:Print(string.format(L["A keyword is one word of up to %d characters."], self.KEYWORD_MAX))
-        else
-            GuildOS:Print(L["Current keyword: |cffFFFFFF"] .. cfg.keyword .. "|r.")
-        end
-    elseif sub == "minlevel" then
-        local n = self:SetAutoInviteMinLevel(cfg, args[2])
-        if n then
-            GuildOS:Print(string.format(L["Auto-invite min level set to |cffFFFFFF%d|r."], n))
-        else
-            GuildOS:Print(string.format(L["Usage: /gos autoinvite minlevel <0-%d>"], GuildOS.Client.maxLevel))
-        end
-    elseif sub == "class" then
-        local op, cls = args[2], args[3]
-        if op == "clear" then
-            cfg.classes = {}
-            GuildOS:Print(L["Auto-invite class filter cleared."])
-        elseif (op == "add" or op == "remove") and cls then
-            if self:SetAutoInviteClass(cfg, cls, op == "add") then
-                GuildOS:Print(L["Auto-invite class filter updated."])
-            else
-                GuildOS:Print(L["Unknown class: "] .. cls .. " (" .. table.concat(self.CLASSES, ", ") .. ")")
-            end
-        else
-            GuildOS:Print(L["Usage: /gos autoinvite class <add|remove|clear> <CLASS>"])
-        end
-    elseif sub == "fallback" then
-        if self:SetAutoInviteFallback(cfg, args[2]) then
-            GuildOS:Print(L["When /who cannot confirm a player: |cffFFFFFF"] .. cfg.whoFallback .. "|r")
-        else
-            GuildOS:Print(L["Usage: /gos autoinvite fallback <skip|invite>"])
-        end
-    else
-        local st = cfg.enabled and L["|cff4CFF4CON|r"] or L["|cffFF4444OFF|r"]
-        local classes = {}
-        for _, c in ipairs(self.CLASSES) do
-            if cfg.classes[c] then classes[#classes + 1] = c end
-        end
-        GuildOS:Print(L["Auto-invite: "] .. st .. L[" · keyword: |cffFFFFFF"] .. cfg.keyword ..
-            L["|r · min level: |cffFFFFFF"] .. tostring(cfg.minLevel) .. "|r · " .. L["classes: "] ..
-            (#classes > 0 and table.concat(classes, ", ") or L["any"]) .. " · " .. L["unconfirmed: "] .. cfg.whoFallback)
-        GuildOS:Print(L["Usage: /gos autoinvite <on|off|keyword|minlevel|class|fallback|status>"])
-        GuildOS:Print(string.format(L["Also in the %s tab, under %s."], L["Recruitment"], L["Recruiting"]))
     end
 end
 
