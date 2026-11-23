@@ -46,35 +46,443 @@ local function clear(child)
 end
 
 ----------------------------------------------------------------------
--- ACTIVITY sub-panel: recent guild activity (last 7 days)
+-- ACTIVITY sub-panel: what has happened in the guild, as a timeline (Digest:Activity). A window and a
+-- filter; a summary card; what is open now; the people in it; and a click that goes where the line is.
 ----------------------------------------------------------------------
+local ACT_ROW_H = 20
+local ACT_WINDOWS = {
+    { key = "new", label = L["New"] },
+    { key = "7", label = L["7 days"] },
+    { key = "30", label = L["30 days"] },
+}
+local ACT_FILTERS = {
+    { key = "all", label = L["All"] },
+    { key = "people", label = L["People"], cats = { members = true, leveling = true } },
+    { key = "raids", label = L["Raids"], cats = { raids = true } },
+    { key = "loot", label = L["Loot"], cats = { loot = true } },
+    { key = "clears", label = L["Clears"], cats = { clears = true } },
+}
+local ACT_TRUNCATE = 110     -- a line longer than this is cut, and its full text is in the tooltip
+local ACT_NAMES_TIP = 20     -- names listed in a tooltip before "and N more"
+local NAMES_SHOWN_UI = 3     -- a line names this many people in full; more are counted (as Digest)
+
+local function toneColor(tone)
+    if tone == "good" then return C.ok end
+    if tone == "bad" then return C.danger end
+    if tone == "gold" then return C.gold end
+    return C.silver
+end
+
+local function setColor(fs, c)
+    fs:SetTextColor(c.r, c.g, c.b)
+end
+
+-- One pooled row: a time, a dot, the line, and a button where the line can go.
+local function actRow(child)
+    local r = CreateFrame("Frame", nil, child)
+    r:SetHeight(ACT_ROW_H)
+    r:EnableMouse(true)
+    r.time = UI:CreateText(r, "", 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+    r.time:SetPoint("LEFT", r, "LEFT", 0, 0)
+    r.time:SetWidth(84)
+    r.time:SetJustifyH("LEFT")
+    r.dot = UI:CreateText(r, "*", 12, C.silver.r, C.silver.g, C.silver.b)
+    r.dot:SetPoint("LEFT", r, "LEFT", 88, 0)
+    r.text = UI:CreateText(r, "", 12, C.text.r, C.text.g, C.text.b)
+    r.text:SetPoint("LEFT", r, "LEFT", 102, 0)
+    r.text:SetJustifyH("LEFT")
+    r.text:SetWordWrap(false)
+    r.btn = UI:CreateButton(r, "", 84, 18)
+    UI:SetButtonVariant(r.btn, "ghost")
+    r.btn:SetPoint("RIGHT", r, "RIGHT", 0, 0)
+    r:SetScript("OnEnter", function(self)
+        if not self.tip then return end
+        GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+        GameTooltip:ClearLines()
+        if self.tip.title then GameTooltip:AddLine(self.tip.title, 1, 1, 1, true) end
+        for _, line in ipairs(self.tip.lines) do GameTooltip:AddLine(line, 0.8, 0.8, 0.8, true) end
+        GameTooltip:Show()
+    end)
+    r:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    return r
+end
+
+-- A small window to copy the summary from (Ctrl+C), for pasting into Discord.
+local copyFrame
+local function showCopy(text)
+    if not copyFrame then
+        local f = CreateFrame("Frame", "GuildOSActivityCopy", UIParent, "BackdropTemplate")
+        f:SetSize(460, 300)
+        f:SetPoint("CENTER")
+        f:SetFrameStrata("DIALOG")
+        f:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = UI:Edge(f) })
+        f:SetBackdropColor(0.058, 0.058, 0.075, 0.98)
+        f:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, C.border.a)
+        f:EnableMouse(true)
+        f:SetMovable(true)
+        f:RegisterForDrag("LeftButton")
+        f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+        f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+        f.title = UI:CreateTitle(f, L["Copy the summary"], 14)
+        f.title:SetPoint("TOPLEFT", 16, -14)
+        f.hint = UI:CreateText(f, L["Press Ctrl+C to copy it, then paste it into Discord."], 11, C.silver.r, C.silver.g, C.silver.b)
+        f.hint:SetPoint("TOPLEFT", 16, -36)
+        local close = UI:CreateCloseButton(f)
+        close:SetPoint("TOPRIGHT", -8, -8)
+        close:SetScript("OnClick", function() f:Hide() end)
+        local box = CreateFrame("EditBox", nil, f)
+        box:SetMultiLine(true)
+        box:SetAutoFocus(false)
+        box:SetFontObject("GameFontHighlightSmall")
+        box:SetPoint("TOPLEFT", 16, -60)
+        box:SetPoint("BOTTOMRIGHT", -16, 16)
+        box:SetScript("OnEscapePressed", function() f:Hide() end)
+        f.box = box
+        copyFrame = f
+    end
+    copyFrame.box:SetText(text or "")
+    copyFrame:Show()
+    copyFrame.box:SetFocus()
+    copyFrame.box:HighlightText()
+end
+
 local function BuildActivitySub(panel)
+    local hub = panel:GetParent()
+    local Digest = GuildOS.Digest
+    local state = { window = "7", filter = "all" }
+    local lastCopy = ""
+    local refresh   -- defined below; the controls call it
+
     local hint = UI:CreateText(panel, L["What's happened in the guild lately."], 12, C.textSoft.r, C.textSoft.g, C.textSoft.b)
     hint:SetPoint("TOPLEFT", 0, -GAP)
-    local _, child = makeScroll(panel, "GuildOSHubActivityScroll", hint)
 
-    return function()
-        clear(child)
-        local lines = {}
-        if GuildOS.Digest then
-            local since = GetServerTime() - 7 * 86400
-            lines = GuildOS.Digest:Build(since)
-        end
-        local y = 0
-        -- One line per thing that happened, as a plain list: no gold bullet before it (#371).
-        for _, line in ipairs(lines) do
-            local fs = UI:CreateText(child, line, 12, C.text.r, C.text.g, C.text.b)
-            fs:SetPoint("TOPLEFT", 0, -y)
-            fs:SetPoint("TOPRIGHT", 0, -y)
-            fs:SetJustifyH("LEFT")
-            y = y + math.max(20, (fs:GetStringHeight() or 14) + GAP)
-        end
-        if #lines == 0 then
-            local empty = UI:CreateText(child, L["Nothing new in the last 7 days."], 12, C.textSoft.r, C.textSoft.g, C.textSoft.b)
-            empty:SetPoint("TOPLEFT", 0, 0)
-        end
-        child:SetHeight(math.max(1, y))
+    -- The controls on one bar that wraps: the window, the filter, and two actions.
+    local bar = CreateFrame("Frame", nil, panel)
+    bar:SetPoint("TOPLEFT", hint, "BOTTOMLEFT", 0, -GAP)
+    bar:SetHeight(FIELD_H)
+    local controls, windowBtns, filterBtns = {}, {}, {}
+    for _, w in ipairs(ACT_WINDOWS) do
+        local b = UI:CreateButton(bar, w.label, 84, 24)
+        b:SetScript("OnClick", function() state.window = w.key; refresh() end)
+        windowBtns[w.key] = b
+        controls[#controls + 1] = b
     end
+    for _, f in ipairs(ACT_FILTERS) do
+        local b = UI:CreateButton(bar, f.label, 84, 24)
+        b:SetScript("OnClick", function() state.filter = f.key; refresh() end)
+        filterBtns[f.key] = b
+        controls[#controls + 1] = b
+    end
+    local markBtn = UI:CreateButton(bar, L["Mark all read"], 116, 24)
+    markBtn:SetScript("OnClick", function()
+        if Digest then Digest:MarkActivitySeen() end
+        refresh()
+    end)
+    local copyBtn = UI:CreateButton(bar, L["Copy summary"], 116, 24)
+    copyBtn:SetScript("OnClick", function() showCopy(lastCopy) end)
+    controls[#controls + 1] = markBtn
+    controls[#controls + 1] = copyBtn
+    local function layoutBar()
+        UI:FlowBar(bar, controls, { gap = 4, rowGap = 4, rowH = 24 })
+    end
+
+    local holder, child = makeScroll(panel, "GuildOSHubActivityScroll", bar)
+    UI:MakeResponsive(panel, function(_, w)
+        bar:SetWidth(math.max(200, w))
+        layoutBar()
+    end)
+
+    -- The summary card: four numbers for the window.
+    local cardTitles = { L["Joined"], L["Raids"], L["Looted"], L["Cleared"] }
+    local cards = {}
+    for i, t in ipairs(cardTitles) do
+        cards[i] = {
+            num = UI:CreateText(child, "0", 18, C.gold.r, C.gold.g, C.gold.b),
+            label = UI:CreateText(child, t, 10, C.textSoft.r, C.textSoft.g, C.textSoft.b),
+        }
+    end
+
+    -- Pinned lines, placed each refresh: what is open now, what is coming, the next achievement,
+    -- a welcome, and the notices that live in Bulletin.
+    local openText = UI:CreateText(child, "", 12, C.text.r, C.text.g, C.text.b)
+    local openRide = UI:CreateButton(child, L["Ride Out"], 84, 20)
+    UI:SetButtonVariant(openRide, "ghost")
+    openRide:SetScript("OnClick", function() UI:OpenWindow("groups", "active") end)
+    local openCta = UI:CreateButton(child, L["Call to Arms"], 110, 20)
+    UI:SetButtonVariant(openCta, "ghost")
+    openCta:SetScript("OnClick", function() UI:OpenWindow("guild", "cta") end)
+    local upcomingText = UI:CreateText(child, "", 12, C.ok.r, C.ok.g, C.ok.b)
+    local nextText = UI:CreateText(child, "", 12, C.text.r, C.text.g, C.text.b)
+    local nextBar = CreateFrame("StatusBar", nil, child)
+    nextBar:SetStatusBarTexture(WHITE)
+    nextBar:SetStatusBarColor(C.gold.r, C.gold.g, C.gold.b, 1)
+    nextBar.bg = nextBar:CreateTexture(nil, "BACKGROUND")
+    nextBar.bg:SetAllPoints()
+    nextBar.bg:SetTexture(WHITE)
+    nextBar.bg:SetVertexColor(0.15, 0.15, 0.18, 1)
+    local welcomeText = UI:CreateText(child, "", 12, C.gold.r, C.gold.g, C.gold.b)
+    local welcomeBtn = UI:CreateButton(child, L["Roster"], 84, 20)
+    UI:SetButtonVariant(welcomeBtn, "ghost")
+    welcomeBtn:SetScript("OnClick", function() UI:OpenWindow("roster") end)
+    local noticeText = UI:CreateText(child, "", 12, C.text.r, C.text.g, C.text.b)
+    local noticeBtn = UI:CreateButton(child, L["Bulletin"], 84, 20)
+    UI:SetButtonVariant(noticeBtn, "ghost")
+    noticeBtn:SetScript("OnClick", function() UI:OpenWindow("guild", "bulletin") end)
+    local emptyText = UI:CreateText(child, "", 12, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+
+    local pool, used = {}, 0
+    local y = 0
+    local todayStart = 0
+
+    local function place(fs, x)
+        fs:ClearAllPoints()
+        fs:SetPoint("TOPLEFT", child, "TOPLEFT", x or 0, -y)
+    end
+    local function placeRight(btn, shown)
+        btn:ClearAllPoints()
+        if shown then btn:SetPoint("TOPRIGHT", child, "TOPRIGHT", 0, -y) end
+        btn:SetShown(shown)
+    end
+
+    local function nextRow()
+        used = used + 1
+        local r = pool[used]
+        if not r then
+            r = actRow(child)
+            pool[used] = r
+        end
+        r:ClearAllPoints()
+        r:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
+        r:SetPoint("TOPRIGHT", child, "TOPRIGHT", 0, -y)
+        r:Show()
+        r.tip = nil
+        return r
+    end
+
+    local function headRow(title)
+        local r = nextRow()
+        r.time:Hide()
+        r.dot:Hide()
+        r.btn:Hide()
+        r.text:ClearAllPoints()
+        r.text:SetPoint("LEFT", r, "LEFT", 0, 0)
+        r.text:SetPoint("RIGHT", r, "RIGHT", 0, 0)
+        r.text:SetText(title)
+        setColor(r.text, C.gold)
+        y = y + ACT_ROW_H + 4
+    end
+
+    local function entryRow(e)
+        local r = nextRow()
+        r.time:Show()
+        r.dot:Show()
+        r.time:SetText(e.ts > 0 and date(e.ts >= todayStart and "%H:%M" or "%a %H:%M", e.ts) or "")
+        r.dot:SetText("*")
+        setColor(r.dot, toneColor(e.tone))
+        local full = e.text
+        local shortText = (#full > ACT_TRUNCATE) and (full:sub(1, ACT_TRUNCATE - 3) .. "...") or full
+        r.text:SetText(shortText)
+        setColor(r.text, e.tone == "gold" and C.gold or C.text)
+
+        local tipLines = {}
+        if e.names and #e.names > 0 then
+            for i, nm in ipairs(e.names) do
+                if i > ACT_NAMES_TIP then
+                    tipLines[#tipLines + 1] = string.format(L["and %d more"], #e.names - ACT_NAMES_TIP)
+                    break
+                end
+                tipLines[#tipLines + 1] = nm
+            end
+        end
+        if #tipLines > 0 or #full > ACT_TRUNCATE then
+            r.tip = { title = (#full > ACT_TRUNCATE) and full or nil, lines = tipLines }
+        end
+
+        local tab = e.tab
+        local btnShown = tab ~= nil
+        if btnShown then
+            local big = e.names and #e.names > NAMES_SHOWN_UI
+            r.btn.label:SetText(big and L["See all"] or L["Open"])
+            r.btn:SetWidth(84)
+            r.btn:SetScript("OnClick", function() UI:OpenWindow(tab[1], tab[2]) end)
+        end
+        r.btn:SetShown(btnShown)
+        r.text:ClearAllPoints()
+        r.text:SetPoint("LEFT", r, "LEFT", 102, 0)
+        if btnShown then
+            r.text:SetPoint("RIGHT", r.btn, "LEFT", -GAP, 0)
+        else
+            r.text:SetPoint("RIGHT", r, "RIGHT", 0, 0)
+        end
+        y = y + ACT_ROW_H
+    end
+
+    refresh = function()
+        local now = GetServerTime()
+        local t = date("*t", now)
+        todayStart = now - (t.hour * 3600 + t.min * 60 + t.sec)
+        layoutBar()
+        for _, w in ipairs(ACT_WINDOWS) do
+            UI:SetButtonVariant(windowBtns[w.key], state.window == w.key and "primary" or "secondary")
+        end
+        for _, f in ipairs(ACT_FILTERS) do
+            UI:SetButtonVariant(filterBtns[f.key], state.filter == f.key and "primary" or "secondary")
+        end
+
+        if not Digest then
+            emptyText:ClearAllPoints()
+            emptyText:SetPoint("TOPLEFT", child, "TOPLEFT", 0, 0)
+            emptyText:SetText(L["Nothing new in this window."])
+            emptyText:Show()
+            child:SetHeight(24)
+            return
+        end
+
+        local since = Digest:ActivitySince(state.window)
+        local feed = Digest:Activity(since)
+        local sum = feed.summary
+
+        -- The card
+        local vals = { sum.joins, sum.raids, sum.loot, sum.clears }
+        y = 0
+        for i, c in ipairs(cards) do
+            c.num:ClearAllPoints()
+            c.num:SetPoint("TOPLEFT", child, "TOPLEFT", (i - 1) * 120, -y)
+            c.num:SetText(tostring(vals[i] or 0))
+            c.label:ClearAllPoints()
+            c.label:SetPoint("TOPLEFT", child, "TOPLEFT", (i - 1) * 120, -(y + 22))
+        end
+        y = y + 44
+
+        -- Open now: calls in the last six hours, and groups forming or looking
+        local calls, forming, looking = 0, 0, 0
+        for _, c in ipairs(GuildOS.CallToArms and GuildOS.CallToArms.recent or {}) do
+            if (c.at or 0) > now - 6 * 3600 then calls = calls + 1 end
+        end
+        if GuildOS.Groups and GuildOS.LFGBoard then
+            local onlineSet = GuildOS.LFGBoard:_BuildOnlineRoster()
+            for _, c in pairs(GuildOS.Groups:Counts(now, onlineSet)) do
+                forming = forming + (c.groups or 0)
+                looking = looking + (c.seekers or 0)
+            end
+        end
+        local openShown = calls > 0 or forming > 0 or looking > 0
+        openText:SetShown(openShown)
+        if openShown then
+            openText:ClearAllPoints()
+            openText:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y - 3)
+            openText:SetText(string.format(L["Open now: %d call(s) in 6h, %d group(s) forming, %d looking"], calls, forming, looking))
+        end
+        placeRight(openRide, openShown)
+        openCta:SetShown(openShown and calls > 0)
+        if openShown and calls > 0 then
+            openCta:ClearAllPoints()
+            openCta:SetPoint("TOPRIGHT", openRide, "TOPLEFT", -GAP, 0)
+        end
+        if openShown then y = y + 26 end
+
+        upcomingText:SetShown(sum.upcoming ~= nil)
+        if sum.upcoming then
+            place(upcomingText)
+            upcomingText:SetText(sum.upcoming)
+            y = y + 22
+        end
+
+        nextText:SetShown(sum.next ~= nil)
+        nextBar:SetShown(sum.next ~= nil)
+        if sum.next then
+            place(nextText)
+            nextText:SetText(string.format(L["Next: %s (%d/%d)"], sum.next.title, sum.next.current, sum.next.target))
+            nextBar:ClearAllPoints()
+            nextBar:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -(y + 18))
+            nextBar:SetPoint("TOPRIGHT", child, "TOPRIGHT", 0, -(y + 18))
+            nextBar:SetHeight(8)
+            nextBar:SetMinMaxValues(0, sum.next.target)
+            nextBar:SetValue(math.min(sum.next.current, sum.next.target))
+            y = y + 36
+        end
+
+        local welcome = sum.welcome or {}
+        welcomeText:SetShown(#welcome > 0)
+        placeRight(welcomeBtn, #welcome > 0)
+        if #welcome > 0 then
+            local names = {}
+            for i, nm in ipairs(welcome) do
+                if i > NAMES_SHOWN_UI then break end
+                names[#names + 1] = nm
+            end
+            local more = #welcome - #names
+            local who = table.concat(names, ", ") .. (more > 0 and string.format(L[" +%d"], more) or "")
+            place(welcomeText)
+            welcomeText:SetText(string.format(L["Welcome: %s"], who))
+            welcomeBtn:SetPoint("TOPRIGHT", child, "TOPRIGHT", 0, -y)
+            y = y + 24
+        end
+
+        noticeText:SetShown(sum.notices > 0)
+        noticeBtn:SetShown(sum.notices > 0)
+        if sum.notices > 0 then
+            place(noticeText)
+            noticeText:SetText(string.format(L["%d new notice(s) in Bulletin"], sum.notices))
+            noticeBtn:ClearAllPoints()
+            noticeBtn:SetPoint("TOPRIGHT", child, "TOPRIGHT", 0, -y)
+            y = y + 24
+        end
+        if y > 0 then y = y + GAP end
+
+        -- The timeline
+        used = 0
+        local filter
+        for _, f in ipairs(ACT_FILTERS) do if f.key == state.filter then filter = f end end
+        local function keep(e)
+            return not filter or not filter.cats or filter.cats[e.cat] == true
+        end
+        local winLabel = ""
+        for _, w in ipairs(ACT_WINDOWS) do
+            if w.key == state.window then winLabel = w.label end
+        end
+        local lines = { string.format(L["OutlawOS, %s"], winLabel) }
+
+        local youShown = false
+        for _, e in ipairs(feed.entries) do
+            if e.cat == "you" and (state.filter == "all" or state.filter == "people") then
+                if not youShown then headRow(L["You"]); youShown = true end
+                entryRow(e)
+            end
+        end
+
+        local bucketNow
+        for _, e in ipairs(feed.entries) do
+            if e.cat ~= "you" and keep(e) then
+                local bucket = e.ts == 0 and "none" or (e.ts >= todayStart and "today" or "earlier")
+                if bucket ~= bucketNow then
+                    bucketNow = bucket
+                    headRow(bucket == "today" and L["Today"] or (bucket == "earlier" and L["Earlier"] or L["No time recorded"]))
+                end
+                entryRow(e)
+                local stamp = e.ts > 0 and (date("%a %H:%M", e.ts) .. "  ") or ""
+                lines[#lines + 1] = stamp .. e.text
+            end
+        end
+        for i = 1, #pool do
+            if i > used then pool[i]:Hide() end
+        end
+
+        emptyText:SetShown(used == 0)
+        if used == 0 then
+            emptyText:ClearAllPoints()
+            emptyText:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
+            emptyText:SetText(L["Nothing new in this window."])
+        end
+
+        lastCopy = table.concat(lines, "\n")
+        child:SetHeight(math.max(1, y + (used == 0 and 24 or 0)))
+
+        -- The unread count on the sub-tab's label
+        if hub and hub.setBadge then hub.setBadge("activity", Digest:UnreadCount()) end
+    end
+
+    return refresh
 end
 
 ----------------------------------------------------------------------
@@ -886,6 +1294,17 @@ function GuildOS:CreateGuildHub(parent, _mainFrame)
     end
     layoutTabs()
 
+    -- An unread count on a sub-tab's label ("Activity  3"), set by the sub-panel that owns it.
+    parent.setBadge = function(key, n)
+        local btn = subTabBtns[key]
+        if not btn then return end
+        local base = ""
+        for _, t in ipairs(HUB_SUBTABS) do if t.key == key then base = t.label end end
+        btn.label:SetText((n and n > 0) and (base .. "  " .. n) or base)
+        btn:SetWidth(math.max(TAB_MIN_W, math.ceil(btn.label:GetStringWidth()) + TAB_PAD))
+        layoutTabs()
+    end
+
     -- Hung from the bar, so a bar wrapped onto two rows pushes the content down. Flush with the bar on
     -- both sides and right under it: each sub-tab starts its content at x = 0, GAP down (#371), so
     -- every one of them starts at the same place.
@@ -900,6 +1319,12 @@ function GuildOS:CreateGuildHub(parent, _mainFrame)
     for _, t in ipairs(HUB_SUBTABS) do
         parent.subPanels[t.key] = { panel = makeSubPanel() }
         if not t.feature then build(t.key) end
+    end
+
+    -- The Activity badge is set before the tab is first opened.
+    if GuildOS.Digest then
+        local ok, n = pcall(GuildOS.Digest.UnreadCount, GuildOS.Digest)
+        if ok then parent.setBadge("activity", n) end
     end
 
     parent:SetScript("OnShow", function()

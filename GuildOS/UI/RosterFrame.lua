@@ -2134,6 +2134,13 @@ end
 ----------------------------------------------------------------------
 -- Row tooltip (rich info on hover)
 ----------------------------------------------------------------------
+-- "0/1/16  (Shadow)" reads as "Shadow 0/1/16"; a retail spec name, with no points to show, passes through.
+local function specTitle(label)
+    local dist, tree = tostring(label):match("^([%d/]+)%s+%((.-)%)$")
+    if dist and tree and tree ~= "?" then return tree .. " " .. dist end
+    return label
+end
+
 function ShowRowTooltip(row)
     local data = row.memberData
     if not data then return end
@@ -2145,6 +2152,18 @@ function ShowRowTooltip(row)
     GameTooltip:AddLine(data.name, cr, cg, cb)
     GameTooltip:AddLine(string.format(L["Level %d %s %s"], data.level, data.race, data.classDisplay), 0.8, 0.8, 0.8)
     GameTooltip:AddLine(data.rank, C.text.r, C.text.g, C.text.b)
+
+    -- Officers: the trial's state first, the thing they came to the card for.
+    if GuildOS:IsOfficer() and GuildOS.TrialTracker then
+        local tkey = GuildOS:GetPlayerKey(data.name, data.realm or GetRealmName())
+        local trial = GuildOS.TrialTracker:GetTrial(tkey)
+        if trial then
+            local state = GuildOS.TrialTracker:GetState(tkey)
+            local daysRem = GuildOS.TrialTracker:GetDaysRemaining(tkey)
+            local stateText = (state == "trial" and daysRem) and string.format(L["%d days left"], daysRem) or tostring(state or "?")
+            GameTooltip:AddLine(string.format(L["Trial: %s"], stateText), C.gold.r, C.gold.g, C.gold.b)
+        end
+    end
 
     -- EKO patch: their alts (or, on an alt, whose alt it is and the main's other alts)
     do
@@ -2181,7 +2200,7 @@ function ShowRowTooltip(row)
     -- First seen by Guild OS (approximate "member since")
     local firstSeen = GuildOS.GetFirstSeen and GuildOS:GetFirstSeen(data.key)
     if firstSeen then
-        GameTooltip:AddLine(string.format(L["Tracked since %s"], date("%Y-%m-%d", firstSeen)), C.silver.r, C.silver.g, C.silver.b)
+        GameTooltip:AddLine(string.format(L["Tracked since %s"], date("%b %d", firstSeen)), C.silver.r, C.silver.g, C.silver.b)
     end
 
     -- Talent spec
@@ -2190,7 +2209,7 @@ function ShowRowTooltip(row)
         local specLabel = GuildOS.SpecChecker:GetSpecLabel(memberKey)
         if specLabel then
             GameTooltip:AddLine(" ")
-            GameTooltip:AddLine(string.format(L["Spec: %s"], specLabel), cr, cg, cb)
+            GameTooltip:AddLine(specTitle(specLabel), cr, cg, cb)
         end
     end
 
@@ -2215,7 +2234,7 @@ function ShowRowTooltip(row)
         GameTooltip:AddLine(L["Professions:"], C.text.r, C.text.g, C.text.b)
         for _, prof in ipairs(data.professions) do
             local profColor = prof.isPrimary and C.text or C.silver
-            local line = prof.rank and string.format("  %s  %d / %d", L[prof.name], prof.rank, prof.maxRank or 0)
+            local line = prof.rank and string.format("  %s %d/%d", L[prof.name], prof.rank, prof.maxRank or 0)
                 or ("  " .. L[prof.name])   -- known from the guild roster only: no rank (issue #31)
             GameTooltip:AddLine(line, profColor.r, profColor.g, profColor.b)
         end
@@ -2263,13 +2282,10 @@ function ShowRowTooltip(row)
     if not data.hasAddonData then
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine(L["Player does not have Guild OS installed"], C.red.r, C.red.g, C.red.b)
-    elseif data.addonVersion and data.addonVersion ~= GuildOS.VERSION then
+    elseif data.addonVersion and data.addonVersion ~= GuildOS.VERSION and CompareVersions(data.addonVersion, GuildOS.VERSION) < 0 then
+        -- An older client is worth a line for everyone; a newer or equal one goes in the footer, for officers.
         GameTooltip:AddLine(" ")
-        if CompareVersions(data.addonVersion, GuildOS.VERSION) < 0 then
-            GameTooltip:AddLine(string.format(L["Guild OS v%s (outdated)"], data.addonVersion), C.red.r, C.red.g, C.red.b)
-        else
-            GameTooltip:AddLine(string.format("Guild OS v%s", data.addonVersion), C.label.r, C.label.g, C.label.b)
-        end
+        GameTooltip:AddLine(string.format(L["Guild OS v%s (outdated)"], data.addonVersion), C.red.r, C.red.g, C.red.b)
     end
 
     -- Wishlist info (native)
@@ -2294,8 +2310,15 @@ function ShowRowTooltip(row)
     end
 
     GameTooltip:AddLine(" ")
-    GameTooltip:AddLine(L["Left-click: detailed view"], 0.5, 0.5, 0.5)
-    GameTooltip:AddLine(L["Right-click: whisper, invite, etc."], 0.5, 0.5, 0.5)
+    -- Officers see the client version here, grey; a newer one says so.
+    if GuildOS:IsOfficer() and data.hasAddonData and data.addonVersion then
+        if data.addonVersion ~= GuildOS.VERSION and CompareVersions(data.addonVersion, GuildOS.VERSION) > 0 then
+            GameTooltip:AddLine(string.format(L["Guild OS v%s (newer than yours)"], data.addonVersion), 0.5, 0.5, 0.5)
+        else
+            GameTooltip:AddLine(string.format("Guild OS v%s", data.addonVersion), 0.5, 0.5, 0.5)
+        end
+    end
+    GameTooltip:AddLine(L["Left-click: details, right-click: actions"], 0.5, 0.5, 0.5)
 
     GameTooltip:Show()
 end

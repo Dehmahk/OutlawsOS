@@ -904,7 +904,7 @@ end
 -- Utility — print
 ----------------------------------------------------------------------
 function GuildOS:Print(msg)
-    DEFAULT_CHAT_FRAME:AddMessage("|cffFFD700[Guild OS]|r " .. tostring(msg))
+    DEFAULT_CHAT_FRAME:AddMessage("|cffFFD700[OutlawOS]|r " .. tostring(msg))
 end
 
 ----------------------------------------------------------------------

@@ -88,6 +88,9 @@ end
 -- link: itemLink string OR itemId number
 -- w, h: optional size override (defaults to anchor size)
 ----------------------------------------------------------------------
+local equipExpanded = false   -- the full equipment list, or the grid of icons (suggestion 12)
+local IMPORTANT_EMPTY = { [11] = true, [12] = true, [13] = true, [14] = true, [16] = true }   -- rings, trinkets, main hand
+
 local function CreateItemTooltipZone(parent, anchor, link, w, h)
     if not link then return end
     local zone = CreateFrame("Frame", nil, parent)
@@ -266,8 +269,9 @@ function PopulateDetail(frame, data)
     local children = { child:GetChildren() }
     for _, c in ipairs(children) do c:Hide() end
 
-    -- Reset scroll position so switching members always starts at the top.
-    child:GetParent():SetVerticalScroll(0)
+    -- The scroll position is kept from the member before, so checking several people does not lose
+    -- the place; it is clamped to this card's length at the end.
+    local scrollKeep = child:GetParent():GetVerticalScroll() or 0
 
     -- Class icon
     local classCoords = CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[data.class]
@@ -300,9 +304,6 @@ function PopulateDetail(frame, data)
     if GuildOS.Mesh then
         infoLine = infoLine .. GuildOS.Mesh:PresenceSuffix(data.name)
     end
-    if founder then
-        infoLine = infoLine .. "  |  " .. string.format(L["Founding member · joined %s"], date("!%Y-%m-%d", founder.joinedAt))
-    end
     frame.infoText:SetText(infoLine)
 
     -- Alt-of indicator: nil unless this member is linked to a main.
@@ -311,6 +312,86 @@ function PopulateDetail(frame, data)
 
     local yOff = -5
     local contentWidth = DETAIL_WIDTH - 35
+
+    -- The founding line sits in the body, not the header, so a long date and source note never run
+    -- past the window's edge.
+    if founder then
+        local how = ({ firstSeen = L["first seen here"], claim = L["their own claim"] })[founder.src]
+        local foundLine = _pFS(child)
+        GuildOS:ApplyFont(foundLine, 10)
+        foundLine:SetPoint("TOPLEFT", 15, yOff - 2)
+        foundLine:SetWidth(contentWidth - 30)
+        foundLine:SetJustifyH("LEFT")
+        foundLine:SetWordWrap(true)
+        foundLine:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
+        foundLine:SetText(string.format(L["Founding member · joined %s"], date("!%Y-%m-%d", founder.joinedAt))
+            .. (how and ("  (" .. how .. ")") or ""))
+        foundLine:Show()
+        yOff = yOff - (foundLine:GetStringHeight() + 8)
+    end
+
+    ----------------------------------------------------------------
+    -- Section: Trial Status (officer only)
+    ----------------------------------------------------------------
+    ----------------------------------------------------------------
+    -- Section: Trial Status (officer only)
+    ----------------------------------------------------------------
+    if GuildOS.TrialTracker and GuildOS:IsOfficer() then
+        local playerKey = GuildOS:GetPlayerKey(data.name, data.realm or GetRealmName())
+        local trial = GuildOS.TrialTracker:GetTrial(playerKey)
+        if trial then
+            yOff = yOff - 10
+            local daysRem = GuildOS.TrialTracker:GetDaysRemaining(playerKey)
+            local daysSince = GuildOS.TrialTracker:GetDaysSinceStart(playerKey)
+            -- The state worked out from the start and the guild's length, not the word stored (#249).
+            local state = GuildOS.TrialTracker:GetState(playerKey)
+            local stateText = ({ trial = L["TRIAL"], review = L["READY TO REVIEW"], left = L["LEFT THE GUILD"],
+                approved = L["APPROVED"], denied = L["DENIED"] })[state] or tostring(trial.status or "?"):upper()
+            local trialStr = L["TRIAL STATUS  --  "] .. stateText
+            if daysRem and state == "trial" then trialStr = trialStr .. "  (" .. daysRem .. L[" days left)"] end
+            yOff = CreateSectionHeader(child, trialStr, yOff, contentWidth)
+
+            local infoStr = _pFS(child)
+            GuildOS:ApplyFont(infoStr, 10)
+            infoStr:SetPoint("TOPLEFT", 15, yOff - 5)
+            infoStr:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
+            -- A trial started with nobody vouching for the newcomer names the addon as sponsor: say so.
+            local sponsor = (trial.sponsor == nil or trial.sponsor == "" or trial.sponsor == GuildOS.TrialTracker.AUTO_SPONSOR)
+                and L["No sponsor yet"] or trial.sponsor
+            infoStr:SetText(L["Sponsor: "] .. sponsor .. L["  |  Day "] .. (daysSince or 0))
+            infoStr:Show()
+            yOff = yOff - 20
+
+            -- Progress tracking
+            local progress = GuildOS.TrialTracker:GetProgress(playerKey)
+            if progress then
+                -- iLvl progress
+                local ilvlColor = progress.ilvlDelta > 0 and C.green or (progress.ilvlDelta < 0 and C.red or C.silver)
+                local ilvlSign = progress.ilvlDelta > 0 and "+" or ""
+                local ilvlStr = format(L["Item level %d at start, %d now (%s%d)"], progress.startIlvl, progress.currentIlvl, ilvlSign, progress.ilvlDelta)
+                local ilvlText = _pFS(child)
+                GuildOS:ApplyFont(ilvlText, 10)
+                ilvlText:SetPoint("TOPLEFT", 15, yOff - 3)
+                ilvlText:SetTextColor(ilvlColor.r, ilvlColor.g, ilvlColor.b)
+                ilvlText:SetText(ilvlStr)
+                ilvlText:Show()
+
+                -- Attunement progress, where the game has attunements (TBC, ADR-0014; issue #184)
+                if GuildOS.AttunementTracker then
+                    local attColor = progress.attDelta > 0 and C.green or C.silver
+                    local attStr = format(L["Attunements: %d/%d >> %d/%d  (+%d)"], progress.startAttDone, progress.attTotal, progress.currentAttDone, progress.attTotal, progress.attDelta)
+                    local attText = _pFS(child)
+                    GuildOS:ApplyFont(attText, 10)
+                    attText:SetPoint("TOPLEFT", contentWidth / 2, yOff - 3)
+                    attText:SetTextColor(attColor.r, attColor.g, attColor.b)
+                    attText:SetText(attStr)
+                    attText:Show()
+                end
+                yOff = yOff - 16
+            end
+
+        end
+    end
 
     ----------------------------------------------------------------
     -- Section: Spec
@@ -547,10 +628,22 @@ function PopulateDetail(frame, data)
     yOff = yOff - 5
 
     if data.gear then
-        for _, slotInfo in ipairs(GuildOS.SlotIDs) do
-            local item = data.gear[slotInfo.id]
-            yOff = CreateGearRow(child, slotInfo.id, item, yOff, contentWidth)
+        if equipExpanded then
+            for _, slotInfo in ipairs(GuildOS.SlotIDs) do
+                local item = data.gear[slotInfo.id]
+                yOff = CreateGearRow(child, slotInfo.id, item, yOff, contentWidth)
+            end
+        else
+            yOff = CreateGearGrid(child, data.gear, yOff, contentWidth)
         end
+        local toggle = UI:CreateButton(child, equipExpanded and L["Hide the full list"] or L["Show the full list"], 150, 20)
+        UI:SetButtonVariant(toggle, "ghost")
+        toggle:SetPoint("TOPLEFT", 15, yOff - 4)
+        toggle:SetScript("OnClick", function()
+            equipExpanded = not equipExpanded
+            PopulateDetail(frame, data)
+        end)
+        yOff = yOff - 26
     else
         local noData = _pFS(child)
         GuildOS:ApplyFont(noData, 11)
@@ -663,8 +756,10 @@ function PopulateDetail(frame, data)
         local total25      = GuildOS.RaidTracker:GetTotal25ManSessions(playerGroup)
         local raids25      = att.raids25 or 0
         local groupSuffix  = playerGroup ~= "" and ("  [" .. playerGroup .. "]") or ""
-        local attStr = string.format(GuildOS.RaidTracker:ProgLabel(L["RAID ATTENDANCE%s  --  %d%%  (%d/%d raids, 25-man)"]),
-            groupSuffix, pct, raids25, total25)
+        local attStr = total25 == 0
+            and (L["RAID ATTENDANCE%s  --  no 25-man raids tracked yet"]):format(groupSuffix)
+            or string.format(GuildOS.RaidTracker:ProgLabel(L["RAID ATTENDANCE%s  --  %d%%  (%d/%d raids, 25-man)"]),
+                groupSuffix, pct, raids25, total25)
         yOff = CreateSectionHeader(child, attStr, yOff, contentWidth)
 
         if att.lastRaid > 0 then
@@ -718,84 +813,70 @@ function PopulateDetail(frame, data)
     end
 
     ----------------------------------------------------------------
-    -- Section: Trial Status (officer only)
+    -- Section: Officer Notes (officer only)
     ----------------------------------------------------------------
-    if GuildOS.TrialTracker and GuildOS:IsOfficer() then
-        playerKey = GuildOS:GetPlayerKey(data.name, data.realm or GetRealmName())
-        local trial = GuildOS.TrialTracker:GetTrial(playerKey)
-        if trial then
+    if GuildOS:IsOfficer() then
+        local okey = GuildOS:GetPlayerKey(data.name, data.realm or GetRealmName())
+        local trial = GuildOS.TrialTracker and GuildOS.TrialTracker:GetTrial(okey)
+        local notes = GuildOS.OfficerNotes and GuildOS.OfficerNotes:GetNotes(okey) or {}
+        local trialNotes = (trial and trial.notes) or {}
+        if trial or GuildOS.OfficerNotes then
             yOff = yOff - 10
-            local daysRem = GuildOS.TrialTracker:GetDaysRemaining(playerKey)
-            local daysSince = GuildOS.TrialTracker:GetDaysSinceStart(playerKey)
-            -- The state worked out from the start and the guild's length, not the word stored (#249).
-            local state = GuildOS.TrialTracker:GetState(playerKey)
-            local stateText = ({ trial = L["TRIAL"], review = L["READY TO REVIEW"], left = L["LEFT THE GUILD"],
-                approved = L["APPROVED"], denied = L["DENIED"] })[state] or tostring(trial.status or "?"):upper()
-            local trialStr = L["TRIAL STATUS  --  "] .. stateText
-            if daysRem and state == "trial" then trialStr = trialStr .. "  (" .. daysRem .. L[" days left)"] end
-            yOff = CreateSectionHeader(child, trialStr, yOff, contentWidth)
+            yOff = CreateSectionHeader(child, L["OFFICER NOTES  --  "] .. (#notes + #trialNotes) .. L[" notes"], yOff, contentWidth)
+            yOff = yOff - 5
 
-            local infoStr = _pFS(child)
-            GuildOS:ApplyFont(infoStr, 10)
-            infoStr:SetPoint("TOPLEFT", 15, yOff - 5)
-            infoStr:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
-            infoStr:SetText(L["Sponsor: "] .. (trial.sponsor or "?") .. L["  |  Day "] .. (daysSince or 0))
-            infoStr:Show()
-            yOff = yOff - 20
-
-            -- Progress tracking
-            local progress = GuildOS.TrialTracker:GetProgress(playerKey)
-            if progress then
-                -- iLvl progress
-                local ilvlColor = progress.ilvlDelta > 0 and C.green or (progress.ilvlDelta < 0 and C.red or C.silver)
-                local ilvlSign = progress.ilvlDelta > 0 and "+" or ""
-                local ilvlStr = format(L["iLvl: %d >> %d  (%s%d)"], progress.startIlvl, progress.currentIlvl, ilvlSign, progress.ilvlDelta)
-                local ilvlText = _pFS(child)
-                GuildOS:ApplyFont(ilvlText, 10)
-                ilvlText:SetPoint("TOPLEFT", 15, yOff - 3)
-                ilvlText:SetTextColor(ilvlColor.r, ilvlColor.g, ilvlColor.b)
-                ilvlText:SetText(ilvlStr)
-                ilvlText:Show()
-
-                -- Attunement progress, where the game has attunements (TBC, ADR-0014; issue #184)
-                if GuildOS.AttunementTracker then
-                    local attColor = progress.attDelta > 0 and C.green or C.silver
-                    local attStr = format(L["Attunements: %d/%d >> %d/%d  (+%d)"], progress.startAttDone, progress.attTotal, progress.currentAttDone, progress.attTotal, progress.attDelta)
-                    local attText = _pFS(child)
-                    GuildOS:ApplyFont(attText, 10)
-                    attText:SetPoint("TOPLEFT", contentWidth / 2, yOff - 3)
-                    attText:SetTextColor(attColor.r, attColor.g, attColor.b)
-                    attText:SetText(attStr)
-                    attText:Show()
-                end
-                yOff = yOff - 16
-            end
-
-            -- Trial notes (all of them, not just 3)
-            if trial.notes and #trial.notes > 0 then
-                local notesLabel = _pFS(child)
-                GuildOS:ApplyFont(notesLabel, 9)
-                notesLabel:SetPoint("TOPLEFT", 15, yOff - 6)
-                notesLabel:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
-                notesLabel:SetText(L["Officer Comments ("] .. #trial.notes .. ")")
-                notesLabel:Show()
-                yOff = yOff - 18
-
-                for _, note in ipairs(trial.notes) do
-                    local noteFS = _pFS(child)
-                    GuildOS:ApplyFont(noteFS, 9)
-                    noteFS:SetPoint("TOPLEFT", 20, yOff - 2)
-                    noteFS:SetWidth(contentWidth - 40)
-                    noteFS:SetJustifyH("LEFT")
-                    noteFS:SetWordWrap(true)
-                    local dateStr = note.timestamp and GuildOS:DateText(note.timestamp, " %H:%M") or ""
-                    noteFS:SetText(format("|cffAAAAAA[%s %s]|r %s", note.author or "?", dateStr, note.text or ""))
-                    noteFS:Show()
-                    yOff = yOff - (noteFS:GetStringHeight() + 4)
+            if GuildOS.OfficerNotes then
+                local tags = GuildOS.OfficerNotes:GetAllTags(okey)
+                if next(tags) then
+                    local tagParts = {}
+                    for k, v in pairs(tags) do
+                        table.insert(tagParts, k .. ": " .. tostring(v))
+                    end
+                    local tagStr = _pFS(child)
+                    GuildOS:ApplyFont(tagStr, 9)
+                    tagStr:SetPoint("TOPLEFT", 15, yOff - 5)
+                    tagStr:SetTextColor(C.accent.r, C.accent.g, C.accent.b)
+                    tagStr:SetText(table.concat(tagParts, "  |  "))
+                    tagStr:Show()
+                    yOff = yOff - 16
                 end
             end
 
-            -- Add note input
+            -- The trial's comments, all of them, then the officers' notes, the last three
+            for _, note in ipairs(trialNotes) do
+                local noteFS = _pFS(child)
+                GuildOS:ApplyFont(noteFS, 9)
+                noteFS:SetPoint("TOPLEFT", 20, yOff - 2)
+                noteFS:SetWidth(contentWidth - 40)
+                noteFS:SetJustifyH("LEFT")
+                noteFS:SetWordWrap(true)
+                local dateStr = note.timestamp and GuildOS:DateText(note.timestamp, " %H:%M") or ""
+                noteFS:SetText(format("|cffAAAAAA[%s %s]|r %s", note.author or "?", dateStr, note.text or ""))
+                noteFS:Show()
+                yOff = yOff - (noteFS:GetStringHeight() + 4)
+            end
+            for i = 1, math.min(3, #notes) do
+                local note = notes[i]
+                local noteStr = _pFS(child)
+                GuildOS:ApplyFont(noteStr, 9)
+                noteStr:SetPoint("TOPLEFT", 15, yOff - 3)
+                noteStr:SetWidth(contentWidth - 30)
+                noteStr:SetJustifyH("LEFT")
+                noteStr:SetWordWrap(true)
+                local dateStr = note.timestamp and GuildOS:DateText(note.timestamp) or ""
+                noteStr:SetText("|cffAAAAAA[" .. (note.author or "?") .. " " .. dateStr .. "]|r " .. (note.text or ""))
+                noteStr:Show()
+                yOff = yOff - (noteStr:GetStringHeight() + 4)
+            end
+
+            -- One box: a trial comment while there is a trial, else an officer note
+            local function saveComment(text)
+                if trial then
+                    GuildOS.TrialTracker:AddTrialNote(okey, text)
+                elseif GuildOS.OfficerNotes then
+                    GuildOS.OfficerNotes:AddNote(okey, text)
+                end
+            end
             local addNoteBox = CreateFrame("EditBox", nil, child, "BackdropTemplate")
             addNoteBox:SetSize(contentWidth - 100, 22)
             addNoteBox:SetPoint("TOPLEFT", 15, yOff - 8)
@@ -825,7 +906,7 @@ function PopulateDetail(frame, data)
             addBtn:SetScript("OnClick", function()
                 local text = addNoteBox:GetText()
                 if text and strtrim(text) ~= "" then
-                    GuildOS.TrialTracker:AddTrialNote(playerKey, strtrim(text))
+                    saveComment(strtrim(text))
                     addNoteBox:SetText("")
                     addNoteBox:ClearFocus()
                     PopulateDetail(frame, data)
@@ -834,7 +915,7 @@ function PopulateDetail(frame, data)
             addNoteBox:SetScript("OnEnterPressed", function(self)
                 local text = self:GetText()
                 if text and strtrim(text) ~= "" then
-                    GuildOS.TrialTracker:AddTrialNote(playerKey, strtrim(text))
+                    saveComment(strtrim(text))
                     self:SetText("")
                     self:ClearFocus()
                     PopulateDetail(frame, data)
@@ -842,48 +923,6 @@ function PopulateDetail(frame, data)
             end)
 
             yOff = yOff - 36
-        end
-    end
-
-    ----------------------------------------------------------------
-    -- Section: Officer Notes (officer only)
-    ----------------------------------------------------------------
-    if GuildOS.OfficerNotes and GuildOS:IsOfficer() then
-        yOff = yOff - 10
-        playerKey = GuildOS:GetPlayerKey(data.name, data.realm or GetRealmName())
-        local notes = GuildOS.OfficerNotes:GetNotes(playerKey)
-        local notesHeader = L["OFFICER NOTES  --  "] .. #notes .. L[" notes"]
-        yOff = CreateSectionHeader(child, notesHeader, yOff, contentWidth)
-
-        -- Show tags
-        local tags = GuildOS.OfficerNotes:GetAllTags(playerKey)
-        if next(tags) then
-            local tagParts = {}
-            for k, v in pairs(tags) do
-                table.insert(tagParts, k .. ": " .. tostring(v))
-            end
-            local tagStr = _pFS(child)
-            GuildOS:ApplyFont(tagStr, 9)
-            tagStr:SetPoint("TOPLEFT", 15, yOff - 5)
-            tagStr:SetTextColor(C.accent.r, C.accent.g, C.accent.b)
-            tagStr:SetText(table.concat(tagParts, "  |  "))
-            tagStr:Show()
-            yOff = yOff - 16
-        end
-
-        -- Show last 3 notes
-        for i = 1, math.min(3, #notes) do
-            local note = notes[i]
-            local noteStr = _pFS(child)
-            GuildOS:ApplyFont(noteStr, 9)
-            noteStr:SetPoint("TOPLEFT", 15, yOff - 3)
-            noteStr:SetWidth(contentWidth - 30)
-            noteStr:SetJustifyH("LEFT")
-            noteStr:SetWordWrap(true)
-            local dateStr = note.timestamp and GuildOS:DateText(note.timestamp) or ""
-            noteStr:SetText("|cffAAAAAA[" .. (note.author or "?") .. " " .. dateStr .. "]|r " .. (note.text or ""))
-            noteStr:Show()
-            yOff = yOff - (noteStr:GetStringHeight() + 4)
         end
     end
 
@@ -1031,7 +1070,7 @@ function PopulateDetail(frame, data)
         GuildOS:ApplyFont(addLinkPlaceholder, 10)
         addLinkPlaceholder:SetPoint("LEFT", 6, 0)
         addLinkPlaceholder:SetTextColor(0.35, 0.35, 0.35)
-        addLinkPlaceholder:SetText(L["AltName (this is the main)"])
+        addLinkPlaceholder:SetText(L["Name of an alt to link to this member"])
         addLinkBox:SetScript("OnTextChanged", function(self)
             if self:GetText() ~= "" then addLinkPlaceholder:Hide() else addLinkPlaceholder:Show() end
         end)
@@ -1072,6 +1111,7 @@ function PopulateDetail(frame, data)
     -- scrollbar clamps correctly when content is shorter than the frame.
     child:SetHeight(math.abs(yOff) + 20)
     child:GetParent():UpdateScrollChildRect()
+    child:GetParent():SetVerticalScroll(math.min(scrollKeep, child:GetParent():GetVerticalScrollRange() or 0))
 end
 
 ----------------------------------------------------------------------
@@ -1107,6 +1147,64 @@ end
 -- Create a gear slot row (with enchant & gem display)
 ----------------------------------------------------------------------
 
+-- The item's icon from its ID. The client knows an ID's icon without the item being cached, so the
+-- placeholder only shows for an item the client cannot place at all.
+local function itemIconFor(item)
+    local instant = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+    if item.id and instant then
+        local icon = select(5, instant(item.id))
+        if icon then return icon end
+    end
+    return select(10, GuildOS.Compat.GetItemInfo(item.link or item.id or 0))
+end
+
+-- The equipment as a grid of icons: each item on hover, a red mark where its enchant is missing, and an
+-- empty important slot in gold. Two rows of ten; returns the offset under it.
+function CreateGearGrid(parent, gear, yOff, width)
+    local CELL, STEP, PER_ROW = 34, 40, 10
+    local col, row = 0, 0
+    for _, slotInfo in ipairs(GuildOS.SlotIDs) do
+        local slotId = slotInfo.id
+        local item = gear[slotId]
+        local x = 15 + col * STEP
+        local y = yOff - 4 - row * STEP
+        local bg = _pBG(parent)
+        bg:SetTexture("Interface\\Buttons\\WHITE8x8")
+        bg:SetPoint("TOPLEFT", x, y)
+        bg:SetSize(CELL, CELL)
+        if item and item.name and item.name ~= "" then
+            bg:SetVertexColor(0.12, 0.12, 0.15, 1)
+            local itemIcon = itemIconFor(item)
+            local icon = (itemIcon and itemIcon ~= "") and itemIcon or "Interface\\Icons\\INV_Misc_QuestionMark"
+            local iconFrame = UI:CreateIcon(parent, CELL - 6, icon)
+            iconFrame:SetPoint("TOPLEFT", x + 3, y - 3)
+            iconFrame:Show()
+            UI:SetIconQuality(iconFrame, item.quality)
+            CreateItemTooltipZone(parent, iconFrame, item.link or item.id)
+            if GuildOS.GearAudit and GuildOS.GearAudit:NeedsEnchant(slotId, item) then
+                local mark = _pFS(parent)
+                GuildOS:ApplyFont(mark, 9)
+                mark:SetPoint("BOTTOMRIGHT", bg, "BOTTOMRIGHT", -2, 1)
+                mark:SetTextColor(C.red.r, C.red.g, C.red.b)
+                mark:SetText("!")
+                mark:Show()
+            end
+        elseif IMPORTANT_EMPTY[slotId] then
+            bg:SetVertexColor(C.gold.r, C.gold.g, C.gold.b, 0.35)
+        else
+            bg:SetVertexColor(0.1, 0.1, 0.12, 1)
+        end
+        bg:Show()
+        col = col + 1
+        if col >= PER_ROW then
+            col = 0
+            row = row + 1
+        end
+    end
+    local rowsUsed = row + (col > 0 and 1 or 0)
+    return yOff - 4 - rowsUsed * STEP - 4
+end
+
 function CreateGearRow(parent, slotId, item, yOff, width)
     local ROW_H = 26
     local subRowH = 14
@@ -1125,7 +1223,8 @@ function CreateGearRow(parent, slotId, item, yOff, width)
 
     if item and item.name and item.name ~= "" then
         -- Resolve localized item name and icon from client cache
-        local localName, _, _, _, _, _, _, _, _, itemIcon = GuildOS.Compat.GetItemInfo(item.id or 0)
+        local localName = GuildOS.Compat.GetItemInfo(item.id or 0)
+        local itemIcon = itemIconFor(item)
         local displayName = (localName and localName ~= "") and localName or item.name
         local icon = (itemIcon and itemIcon ~= "") and itemIcon or ""
 
@@ -1144,6 +1243,7 @@ function CreateGearRow(parent, slotId, item, yOff, width)
         nameText:SetPoint("TOPLEFT", 106, yOff - 5)
         nameText:SetJustifyH("LEFT")
         nameText:SetWordWrap(false)
+        nameText:SetWidth(width - 250)   -- room for the enchant on the same line
         nameText:SetTextColor(qColor.r, qColor.g, qColor.b)
         nameText:SetText(displayName)
         nameText:Show()
@@ -1192,34 +1292,35 @@ function CreateGearRow(parent, slotId, item, yOff, width)
         if enchantName then
             local enchText = _pFS(parent)
             GuildOS:ApplyFont(enchText, 9)
-            enchText:SetPoint("TOPLEFT", 106, enchantY)
+            enchText:SetPoint("TOPRIGHT", -40, yOff - 6)
             enchText:SetTextColor(0.0, 0.8, 0.0)
             enchText:SetText(enchantName)
             enchText:Show()
-            hasExtra = true
         elseif item.enchantId and item.enchantId > 0 then
             local enchText = _pFS(parent)
             GuildOS:ApplyFont(enchText, 9)
-            enchText:SetPoint("TOPLEFT", 106, enchantY)
+            enchText:SetPoint("TOPRIGHT", -40, yOff - 6)
             enchText:SetTextColor(0.0, 0.8, 0.0)
             enchText:SetText(L["Enchanted"])
             enchText:Show()
-            hasExtra = true
         elseif GuildOS.GearAudit and GuildOS.GearAudit:NeedsEnchant(slotId, item) then   -- ADR-0026, #177
             local warnText = _pFS(parent)
             GuildOS:ApplyFont(warnText, 9)
-            warnText:SetPoint("TOPLEFT", 106, enchantY)
+            warnText:SetPoint("TOPRIGHT", -40, yOff - 6)
             warnText:SetTextColor(C.red.r, C.red.g, C.red.b, 0.7)
             warnText:SetText(L["Not enchanted"])
             warnText:Show()
-            hasExtra = true
         end
     else
         -- Empty slot
         local emptyText = _pFS(parent)
         GuildOS:ApplyFont(emptyText, 10)
         emptyText:SetPoint("TOPLEFT", 82, yOff - 5)
-        emptyText:SetTextColor(0.3, 0.3, 0.3)
+        if IMPORTANT_EMPTY[slotId] then
+            emptyText:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
+        else
+            emptyText:SetTextColor(0.3, 0.3, 0.3)
+        end
         emptyText:SetText(L["- Empty -"])
         emptyText:Show()
     end

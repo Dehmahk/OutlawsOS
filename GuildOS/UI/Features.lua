@@ -83,6 +83,15 @@ UI:RegisterFeature({
     build = function(c, win) GuildOS:CreateGroupsPanel(c, win) end,
 })
 
+-- The marketplace: what members offer and what they look for, and one click to say "I want it" or
+-- "I have it". Crafted items are ordered in the Crafts tab. Ported from Christian's GuildOS_Unbroken
+-- (used with his agreement).
+UI:RegisterFeature({
+    id = "market", label = L["Marketplace"], order = 47,
+    subs = { "offer", "seek" },
+    build = function(c, win) GuildOS:CreateMarketPanel(c, win) end,
+})
+
 -- WoW: Forever only (issue #211): the guild's journal, where the module exists. The Guild tab's
 -- Journal sub-tab since issue #367: its switch stays in Settings, and /gos open journal opens it.
 UI:RegisterFeature({

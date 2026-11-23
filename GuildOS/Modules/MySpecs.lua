@@ -307,6 +307,20 @@ local function specTexture(row)
   end
   t:Hide()
   row.mySpecTex = t
+  -- Textures take no mouse, so a frame over the mark carries its tooltip. It shows only for the
+  -- grey question mark (no spec recorded), set in paintRow.
+  local hit = CreateFrame("Frame", nil, row)
+  hit:SetAllPoints(t)
+  hit:EnableMouse(true)
+  hit:Hide()
+  hit:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:AddLine(L["No spec recorded yet"], 1, 0.82, 0)
+    GameTooltip:AddLine(L["This member has not set a main spec in My Char, so their role is not known."], 0.8, 0.8, 0.8, true)
+    GameTooltip:Show()
+  end)
+  hit:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  row.mySpecHit = hit
   return t
 end
 
@@ -316,19 +330,23 @@ for role, path in pairs(ROLE_ICON) do ICON_PATH[role] = path end
 local function paintRow(row, data)
   if not row or not data or not row.nameText then return end
   local t = specTexture(row)
-  if not row.nameText:IsShown() then t:Hide() return end
+  local hit = row.mySpecHit
+  if not row.nameText:IsShown() then t:Hide() if hit then hit:Hide() end return end
   local r = RecordOf(data.name)
   local s = r and SPECS[r.ms]
   if s then
     t:SetTexture(ICON_PATH[s.role])
     t:SetDesaturated(not data.isOnline)
     t:Show()
+    if hit then hit:Hide() end
   elseif isOfficer() then
     t:SetTexture(QUESTION_ICON)
     t:SetDesaturated(true)
     t:Show()
+    if hit then hit:Show() end
   else
     t:Hide()
+    if hit then hit:Hide() end
   end
 end
 

@@ -2152,13 +2152,14 @@ function EKO:TooltipLines(data)
     if lore then lines[#lines + 1] = { GREY .. lore .. "|r", wrap = true } end
     local score = self:Notoriety(name, data.level)
     lines[#lines + 1] = { string.format("Notoriety: %s%d|r  (%s)", GOLDC, score, self:WantedLevel(score)) }
+    lines[#lines + 1] = { GREY .. "Clears, dungeons, firsts, bounties and level add up to it." .. "|r", wrap = true }
     local joined = self:JoinedAt(name)
     if joined then
         local days = math.floor((now() - joined) / DAY)
         lines[#lines + 1] = { string.format("On the Ledger since %s (%d day%s)", date("%b %d", joined), days, days == 1 and "" or "s") }
     end
     local seals = self:Seals(name, data.level)
-    if #seals > 0 then lines[#lines + 1] = { "Seals: " .. GOLDC .. table.concat(seals, ", ") .. "|r", wrap = true } end
+    if #seals > 0 then lines[#lines + 1] = { "Seals (badges): " .. GOLDC .. table.concat(seals, ", ") .. "|r", wrap = true } end
     return lines
 end
 
