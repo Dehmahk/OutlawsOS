@@ -126,6 +126,7 @@ function GuildOS:CreateRaiderPanel(panel, _mainFrame)
     -- KPI band (same card style as the Roster tab): raid coverage at a glance.
     -- Values filled + cards positioned responsively in Refresh.
     local KPI_H = 66
+    local SEARCH_H = 28   -- the search row, between the KPI band and the table header
     local band = CreateFrame("Frame", nil, f)
     band:SetPoint("TOPLEFT", 0, 0); band:SetPoint("TOPRIGHT", 0, 0); band:SetHeight(KPI_H)
 
@@ -149,27 +150,49 @@ function GuildOS:CreateRaiderPanel(panel, _mainFrame)
         f.kpi[i] = { card = card, val = val }
     end
     f.KPI_H = KPI_H
+    -- The sort column and direction, the search text, and the column headers that show the sort.
+    f.sortKey, f.sortDesc, f.query, f.heads = "name", false, "", {}
+    -- Search: the raiders whose name has the text.
+    local search = UI:CreateInput(f, 220, 20, { placeholder = L["Search raiders..."] })
+    search:SetPoint("TOPLEFT", 0, -(KPI_H + 4))
+    search:HookScript("OnTextChanged", function(self, userInput)
+        if not userInput then return end
+        f.query = strtrim(self:GetText() or ""):lower()
+        f.Refresh()
+    end)
 
     -- The table's header row, under the band: the shared one, no fill and a 1px rule under it (#371).
     local header = UI:CreateTableHeader(f, HEAD_H)
-    header:SetPoint("TOPLEFT", 0, -KPI_H)
-    header:SetPoint("TOPRIGHT", -GAP, -KPI_H)
-    local function head(text, x)
+    header:SetPoint("TOPLEFT", 0, -(KPI_H + SEARCH_H))
+    header:SetPoint("TOPRIGHT", -GAP, -(KPI_H + SEARCH_H))
+    local function head(text, x, key)
         local h = UI:CreateHeaderText(header, text, 10)
         h:SetPoint("LEFT", x, 0)
+        h.base = text
+        if key then
+            -- A click sorts the list by this column; a second click turns it round.
+            f.heads[key] = h
+            local hit = CreateFrame("Button", nil, header)
+            hit:SetPoint("LEFT", x - 4, 0)
+            hit:SetSize(math.max(60, (h:GetStringWidth() or 60) + 16), HEAD_H)
+            hit:SetScript("OnClick", function()
+                if f.sortKey == key then f.sortDesc = not f.sortDesc else f.sortKey, f.sortDesc = key, false end
+                f.Refresh()
+            end)
+        end
         return h
     end
-    head(L["Raider"],  NAME_X)
-    head(L["Roles"],   ROLE_X)
-    head(L["Gear"],    GEAR_X)
-    head(L["iLvl"],    ILVL_X)
-    head(L["Spec"],    SPEC_X)
+    head(L["Raider"],  NAME_X, "name")
+    head(L["Roles"],   ROLE_X, "role")
+    head(L["Gear"],    GEAR_X, "gear")
+    head(L["iLvl"],    ILVL_X, "ilvl")
+    head(L["Spec"],    SPEC_X, "spec")
     head(L["Note"],    NOTE_X)
 
     -- Scrollable list: its child keeps the frame's width less the gutter, so the rows end where the
     -- header does and nothing runs under the bar (#371).
     local holder = CreateFrame("Frame", nil, f)
-    holder:SetPoint("TOPLEFT", 0, -(KPI_H + HEAD_H))
+    holder:SetPoint("TOPLEFT", 0, -(KPI_H + SEARCH_H + HEAD_H))
     holder:SetPoint("BOTTOMRIGHT", 0, GAP)
     f.holder = holder
     local scroll, child = UI:CreateScrollFrame(holder, "GuildOSRaiderScroll")
@@ -228,6 +251,45 @@ function GuildOS:CreateRaiderPanel(panel, _mainFrame)
             end
         end
         table.sort(list, function(a, b) return a.name:lower() < b.name:lower() end)
+
+        -- The search keeps the raiders whose name has its text; the sort is by the column clicked.
+        if f.query ~= "" then
+            local kept = {}
+            for _, m in ipairs(list) do
+                if m.name:lower():find(f.query, 1, true) then kept[#kept + 1] = m end
+            end
+            list = kept
+        end
+        local key, desc = f.sortKey, f.sortDesc
+        local function sortValue(m)
+            if key == "role" then
+                local e = RR():EffectiveRoles(m.key)
+                return (e.TANK and 4 or 0) + (e.HEALER and 2 or 0) + (e.DPS and 1 or 0)
+            elseif key == "gear" then
+                return ({ ready = 1, gearing = 2, missing = 3 })[(RR():Get(m.key) or {}).gear or ""] or 4
+            elseif key == "ilvl" then
+                local mem = GuildOS.db.members and GuildOS.db.members[m.key]
+                return mem and mem.avgIlvl or 0
+            elseif key == "spec" then
+                local mem = GuildOS.db.members and GuildOS.db.members[m.key]
+                local spec = mem and GuildOS.SpecChecker and GuildOS.SpecChecker:SpecName(mem.spec)
+                return (spec and spec ~= "" and spec or "~"):lower()   -- no spec sorts last
+            end
+            return m.name:lower()
+        end
+        local values = {}
+        for _, m in ipairs(list) do values[m] = sortValue(m) end
+        table.sort(list, function(a, b)
+            local va, vb = values[a], values[b]
+            if va ~= vb then
+                if desc then return va > vb end
+                return va < vb
+            end
+            return a.name:lower() < b.name:lower()
+        end)
+        for k, h in pairs(f.heads) do
+            h:SetText(h.base .. (k == key and (desc and " v" or " ^") or ""))
+        end
 
         -- Aggregate counts for the KPI band (accumulated in the row loop).
         local online, rT, rH, rD, gReady = 0, 0, 0, 0, 0
@@ -338,6 +400,8 @@ function GuildOS:CreateRaiderPanel(panel, _mainFrame)
                 f.emptyFS = UI:CreateText(child2, string.format(L["No level-%d members found."], GuildOS.Client.maxLevel), 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
                 f.emptyFS:SetPoint("TOPLEFT", 6, -6)
             end
+            f.emptyFS:SetText((f.query ~= "" and L["No raiders match that search."])
+                or string.format(L["No level-%d members found."], GuildOS.Client.maxLevel))
             f.emptyFS:Show()
         elseif f.emptyFS then
             f.emptyFS:Hide()

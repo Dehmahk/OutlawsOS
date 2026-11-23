@@ -44,6 +44,16 @@ local MEMBER_COLS = {
 -- Shared widget builders
 ----------------------------------------------------------------------
 -- A box: the shared field (#371), with its hint shown while it is empty.
+-- Deleting a core asks first. The panel's own work runs on accept, from the data it passes.
+GuildOS.Dialogs["GUILDOS_CORE_DELETE"] = {
+    text = "%s", button1 = L["Delete"], button2 = L["Cancel"],
+    OnAccept = function(self)
+        local d = self and self.data
+        if d and d.run then d.run() end
+    end,
+    timeout = 0, whileDead = true, hideOnEscape = true,
+}
+
 local function MakeInput(parent, w, numeric, placeholder)
     return UI:CreateInput(parent, w, 22, { numeric = numeric and true or nil, max = numeric and 5 or nil,
         placeholder = placeholder })
@@ -67,7 +77,7 @@ end
 -- A core's origin, as the list and the header say it.
 local function originOf(CM, name)
     if CM:IsFromDiscord(name) then return L["from Discord"] end
-    return L["only in this game"]
+    return L["Game only, not on the site"]
 end
 
 ----------------------------------------------------------------------
@@ -96,7 +106,7 @@ function GuildOS:CreateCoresPanel(panel)
     listDiv:SetVertexColor(C.line.r, C.line.g, C.line.b, 1)
 
     local listScroll, listContent = UI:CreateScrollFrame(leftCol, "GuildOSCoreListScroll")
-    listScroll:SetPoint("TOPLEFT", 0, -(GAP + HEAD_H))
+    listScroll:SetPoint("TOPLEFT", 0, -(GAP + HEAD_H + 30))
     listScroll:SetPoint("BOTTOMRIGHT", 0, 92)   -- its bar inside the column, clear of the divider (#371)
     UI:BindScrollChildWidth(listScroll, listContent)
 
@@ -111,7 +121,7 @@ function GuildOS:CreateCoresPanel(panel)
     local seenNote = MakeLabel(leftCol, "", 11, C.label.r, C.label.g, C.label.b)
     seenNote:SetPoint("BOTTOMLEFT", 0, 36)
     local newInput = MakeInput(leftCol, listW - 72 - GAP, false, L["Core name"])
-    newInput:SetPoint("BOTTOMLEFT", 0, 6)
+    newInput:SetPoint("TOPLEFT", 0, -(GAP + HEAD_H + 4))
     local createBtn = UI:CreateButton(leftCol, L["Create"], 60, 22)
     createBtn:SetPoint("LEFT", newInput, "RIGHT", 4, 0)
     local againBtn = UI:CreateButton(leftCol, L["Create cores in game again"], listW - GAP, 22)
@@ -268,13 +278,17 @@ function GuildOS:CreateCoresPanel(panel)
                 end
             end)
             local deleteBtn = track(UI:CreateButton(header, L["Delete"], 70, 20))
-            deleteBtn:SetPoint("LEFT", renameBtn, "RIGHT", 4, 0)
+            deleteBtn:SetPoint("LEFT", renameBtn, "RIGHT", 14, 0)
             UI:SetButtonVariant(deleteBtn, "danger")
             deleteBtn:SetScript("OnClick", function()
-                local ok, err = CM:Delete(coreName)
-                if not ok then SetStatus(err or L["Core not found."], C.red); return end
-                selectedCore = nil
-                SetStatus(string.format(L["Core \"%s\" deleted."], coreName), C.red)
+                GuildOS:ShowDialog("GUILDOS_CORE_DELETE", string.format(L["Delete the core \"%s\"? Its roster and settings go with it."], coreName), nil, {
+                    run = function()
+                        local ok, err = CM:Delete(coreName)
+                        if not ok then SetStatus(err or L["Core not found."], C.red); return end
+                        selectedCore = nil
+                        SetStatus(string.format(L["Core \"%s\" deleted."], coreName), C.red)
+                    end,
+                })
             end)
         end
     end
@@ -410,7 +424,7 @@ function GuildOS:CreateCoresPanel(panel)
         end
 
         if #sortedMbrs == 0 then
-            local emL = MakeLabel(rightContent, L["No members yet."], 11, C.label.r, C.label.g, C.label.b)
+            local emL = MakeLabel(rightContent, L["No members yet. Add someone from the guild below."], 11, C.label.r, C.label.g, C.label.b)
             emL:SetPoint("TOPLEFT", 4, y - 4)
             y = y - 20
         end

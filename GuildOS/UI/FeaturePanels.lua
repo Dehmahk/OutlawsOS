@@ -13,6 +13,7 @@ end
 
 -- Session filter state: true = 25-man only, false = all raids
 local _raidFilter25 = true
+local _raidSearch = ""   -- the sessions list's search text, lowercased
 
 ----------------------------------------------------------------------
 -- Core Sign-up Frame: the Raids tab's button and /gos signup open it, for any player (#377)
@@ -363,7 +364,7 @@ function GuildOS:CreateRaidsPanel(parent, _mainFrame)
     -- Sessions section
     ----------------------------------------------------------------
     local FILTER_Y, LIST_TOP = -40, -40 - 20 - GAP
-    local sessionsLabel = UI:CreateHeaderText(scrollParent, L["Sessions"], 11)
+    local sessionsLabel = UI:CreateHeaderText(scrollParent, L["Show:"], 11)
     sessionsLabel:SetPoint("LEFT", scrollParent, "TOPLEFT", 0, FILTER_Y - 10)
 
     -- The filter: the shown one marked by UI:SetSelected, as every choice of a set (#371).
@@ -388,7 +389,7 @@ function GuildOS:CreateRaidsPanel(parent, _mainFrame)
     AHdr(L["RAIDS"], ATT_COLS.raids); AHdr(L["AVG SCORE"], ATT_COLS.avg); AHdr(L["LAST RAID"], ATT_COLS.last)
 
     local attTitle = UI:CreateSectionTitle(scrollParent, Prog(L["Member Attendance — 25-man only"]))
-    attTitle:SetPoint("BOTTOMLEFT", attHdr, "TOPLEFT", 0, GAP)
+    attTitle:SetPoint("BOTTOMLEFT", attHdr, "TOPLEFT", 0, 4)
 
     local attScroll, attContent = UI:CreateScrollFrame(scrollParent, "GuildOSAttendanceScroll")
     attScroll:SetPoint("TOPLEFT", attHdr, "BOTTOMLEFT", 0, 0)
@@ -416,6 +417,23 @@ function GuildOS:CreateRaidsPanel(parent, _mainFrame)
         sessionScroll:SetShown(hasSessions)
     end
     sessionContent.placeBlocks(true)
+
+    -- The search box narrows the sessions to the raids (and core groups) whose name has its text.
+    local searchBox = UI:CreateInput(scrollParent, 150, 20, { placeholder = L["Search raids..."] })
+    searchBox:SetPoint("LEFT", filter25Btn, "RIGHT", 10, 0)
+    searchBox:HookScript("OnTextChanged", function(self, userInput)
+        if not userInput then return end
+        _raidSearch = strtrim(self:GetText() or ""):lower()
+        GuildOS:RefreshRaidsPanel(sessionContent, attContent, statusText)
+    end)
+
+    -- With no session the list folds away: this line says why, where the list would start.
+    local hintFS = UI:CreateText(scrollParent, "", 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+    hintFS:SetPoint("TOPLEFT", 0, LIST_TOP)
+    hintFS:SetPoint("RIGHT", scrollParent, "RIGHT", 0, 0)
+    hintFS:SetJustifyH("LEFT")
+    hintFS:Hide()
+    sessionContent.hint = hintFS
 
     ----------------------------------------------------------------
     -- Filter button wiring
@@ -461,12 +479,24 @@ function GuildOS:RefreshRaidsPanel(sessionContent, attContent, statusText)
     local groupStr  = curGroup ~= "" and (curGroup .. "  ·  ") or ""
     local trackStr  = GuildOS.RaidTracker.trackingActive
                       and "|cff00ff00" .. L["Tracking"] .. "|r" or "|cff888888" .. L["Idle"] .. "|r"
-    statusText:SetText(groupStr .. totalAll .. L[" lockouts ("] .. total25 .. Prog(L[" 25-man)  |  "]) .. trackStr)
+    statusText:SetText(groupStr .. totalAll .. L[" sessions ("] .. total25 .. Prog(L[" 25-man)  |  "]) .. trackStr)
 
     ----------------------------------------------------------------
     -- Sessions grouped by instance + the region's reset week (guildos-web#199)
     ----------------------------------------------------------------
     local sessions = GuildOS.RaidTracker:GetRecentSessions(200, _raidFilter25, true)
+
+    -- The search text narrows the list by the raid's name or its group's tag.
+    local query = _raidSearch
+    if query ~= "" then
+        local kept = {}
+        for _, s in ipairs(sessions) do
+            local sd = s.data or {}
+            local hay = ((sd.name or "") .. " " .. (sd.groupTag or "")):lower()
+            if hay:find(query, 1, true) then kept[#kept + 1] = s end
+        end
+        sessions = kept
+    end
 
     -- Build groups keyed by "instanceID_weekNum"
     local groups     = {}
@@ -758,6 +788,14 @@ function GuildOS:RefreshRaidsPanel(sessionContent, attContent, statusText)
         end -- if isGroupExp
     end -- for groups
     sessionContent:SetHeight(math.max(1, yOff))
+    if sessionContent.hint then
+        local none = #groupOrder == 0
+        sessionContent.hint:SetShown(none)
+        if none then
+            sessionContent.hint:SetText(_raidSearch ~= "" and L["No raid matches that search."]
+                or L["Sessions appear here when your group enters a tracked raid. To sign up for a core raid, use Core Sign-up above."])
+        end
+    end
     if sessionContent.placeBlocks then sessionContent.placeBlocks(#groupOrder > 0) end
 
     ----------------------------------------------------------------

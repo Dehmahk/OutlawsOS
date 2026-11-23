@@ -172,7 +172,7 @@ local function BattleResQueue(content, yOff)
 
     local note = inRaid
         and string.format(L["Druids in the raid: %d. Who has a res ready cannot be read on this client."], druids)
-        or L["Not in a raid."]
+        or L["Not in a raid. The battle res queue fills in once you join one."]
     local t = UI:CreateText(content, note, 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
     t:SetPoint("TOPLEFT", 0, -yOff)
     yOff = yOff + 20
@@ -266,6 +266,12 @@ function GuildOS:CreateRaidToolsPanel(parent, _mainFrame)
     bar:SetHeight(28)
     UI:StyleSubTabBar(bar)
 
+    -- When the panel last refreshed, beside its button: the queue and the composition show their age.
+    local updatedFS = UI:CreateText(bar, "", 10, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+    local function stamp()
+        updatedFS:SetText(string.format(L["Updated %s"], date("%H:%M")))
+    end
+
     local subTabBtns = {}
     local function selectSub(key)
         parent.activeSub = key
@@ -273,11 +279,13 @@ function GuildOS:CreateRaidToolsPanel(parent, _mainFrame)
         for k, btn in pairs(subTabBtns) do btn:SetActive(k == key) end
         local info = parent.subPanels[key]
         if info and info.refresh then GuildOS:SafeCall(info.refresh) end
+        stamp()
     end
     parent.SelectSub = selectSub
     parent.RefreshActive = function()
         local info = parent.subPanels[parent.activeSub]
         if info and info.refresh then GuildOS:SafeCall(info.refresh) end
+        stamp()
     end
 
     local x = 0
@@ -293,6 +301,7 @@ function GuildOS:CreateRaidToolsPanel(parent, _mainFrame)
     local refreshBtn = UI:CreateButton(bar, L["Refresh"], 90, 22)
     refreshBtn:SetPoint("RIGHT", 0, 0)
     refreshBtn:SetScript("OnClick", function() parent.RefreshActive() end)
+    updatedFS:SetPoint("RIGHT", refreshBtn, "LEFT", -10, 0)
 
     -- A sub-tab's content: flush with the bar's left edge, its first line GAP under it.
     local function makeSubPanel()

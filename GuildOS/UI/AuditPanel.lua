@@ -180,8 +180,8 @@ local function BuildReadySub(panel)
 
         local rows = GuildOS.Readiness:GetReport(targetShort)
         local c = GuildOS.Readiness:Summarize(rows)
-        summary:SetText(string.format(L["%d ready  |  %d need attention  |  %d not ready"],
-            c.ready, c.warn, c.notready))
+        summary:SetText(string.format(L["%s ready  |  %s need attention  |  %s not ready"],
+            tint(tostring(c.ready), C.ok), tint(tostring(c.warn), C.warn), tint(tostring(c.notready), C.danger)))
 
         if forever then
             local names = GuildOS.CoreManager and GuildOS.CoreManager:GetSortedNames() or {}
@@ -595,6 +595,13 @@ local function BuildSyncSub(panel)
 
     -- /gos probe channel (specs/071-o-recrutamento). Made once; the list clears its children and the
     -- refresh puts it back under the recruitment lines.
+    -- Diagnostics: closed by default. The counters, the probes, the performance numbers and the
+    -- alliance diagnostics show only while it is open.
+    local diagBtn = UI:CreateButton(content, L["Show diagnostics"], 170, 20)
+    diagBtn:SetScript("OnClick", function()
+        panel.diagOpen = not panel.diagOpen
+        if refresh then refresh() end
+    end)
     local probeBtn = UI:CreateButton(content, L["Probe channel"], 140, 20)
     probeBtn:SetScript("OnClick", function()
         if not GuildOS.Probe then return end
@@ -627,11 +634,19 @@ local function BuildSyncSub(panel)
         local yOff = 0
 
         ------------------------------------------------------------------
+        -- Guild OS messages this session        -- Diagnostics: the toggle heads the list; closed, the sections below stay out of sight.
+        diagBtn.label:SetText(panel.diagOpen and L["Hide diagnostics"] or L["Show diagnostics"])
+        diagBtn:ClearAllPoints()
+        diagBtn:SetPoint("TOPLEFT", 0, -yOff)
+        diagBtn:Show()
+        yOff = yOff + 30
+
+        ------------------------------------------------------------------
         -- Guild OS messages this session (issue #312): what the guildmates' broadcasts became, so a
         -- sync that stores nothing shows where it was lost.
         ------------------------------------------------------------------
         local cs = GuildOS.CommSystem
-        if cs.SyncCounters then
+        if panel.diagOpen and cs.SyncCounters then
             local n = cs:SyncCounters()
             local line = string.format(L["Guild OS messages this session: received %d  -  stored %d  -  dropped %d"],
                 n.received, n.stored, n.dropped)
@@ -647,24 +662,26 @@ local function BuildSyncSub(panel)
         ------------------------------------------------------------------
         -- Where the time goes (issue #324): what /gos perf prints. A section, under the shared title.
         ------------------------------------------------------------------
-        yOff = SectionTitle(content, L["Performance"], yOff)
-        for _, line in ipairs(GuildOS.Perf:Lines()) do
-            local fs = UI:CreateText(content, line, 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
-            fs:SetPoint("TOPLEFT", 0, -yOff)
-            yOff = yOff + LINE_H
+        if panel.diagOpen then
+            yOff = SectionTitle(content, L["Performance"], yOff)
+            for _, line in ipairs(GuildOS.Perf:Lines()) do
+                local fs = UI:CreateText(content, line, 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+                fs:SetPoint("TOPLEFT", 0, -yOff)
+                yOff = yOff + LINE_H
+            end
+            perfPrintBtn:ClearAllPoints()
+            perfPrintBtn:SetPoint("TOPLEFT", 0, -(yOff + 2))
+            perfPrintBtn:Show()
+            perfResetBtn:ClearAllPoints()
+            perfResetBtn:SetPoint("LEFT", perfPrintBtn, "RIGHT", 6, 0)
+            perfResetBtn:Show()
+            yOff = yOff + 32
         end
-        perfPrintBtn:ClearAllPoints()
-        perfPrintBtn:SetPoint("TOPLEFT", 0, -(yOff + 2))
-        perfPrintBtn:Show()
-        perfResetBtn:ClearAllPoints()
-        perfResetBtn:SetPoint("LEFT", perfPrintBtn, "RIGHT", 6, 0)
-        perfResetBtn:Show()
-        yOff = yOff + 32
 
         ------------------------------------------------------------------
         -- The recruitment: the gossip's rounds, the requests, the whisper test and the channel probe.
         ------------------------------------------------------------------
-        local lines = RecruitLines()
+        local lines = panel.diagOpen and RecruitLines() or nil
         probeBtn:Hide()
         if lines then
             yOff = SectionTitle(content, L["Recruitment"], yOff)
@@ -685,7 +702,7 @@ local function BuildSyncSub(panel)
         -- freshness live here, next to the mesh health line.
         ------------------------------------------------------------------
         local ally, async = GuildOS.Alliance, GuildOS.AllianceSync
-        if ally and async and ally:Get() then
+        if panel.diagOpen and ally and async and ally:Get() then
             local diag = async:Diagnostics()
             local pact = ally:Get()
             local bridge = ally:CurrentBridge() or L["nobody online"]
