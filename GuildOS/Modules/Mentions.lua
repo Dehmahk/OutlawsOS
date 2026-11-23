@@ -18,7 +18,10 @@ Mentions.DEFAULTS = {
     guild     = true,
     officer   = true,
     officerCall = true,   -- someone writes "officer" in guild chat: whoever has an officer rank hears it (#266)
+    cooldown  = 5,        -- seconds before the same word from the same sender alerts again
 }
+
+local WORDS_TAG = "GOSWORDS1"   -- the first field of a watch-word string (copy and paste on the settings page)
 
 -- Heard in every client, next to the client's own words: a guild speaks English as often as not.
 local OFFICER_WORDS_EN = { "officer", "officers" }
@@ -122,9 +125,98 @@ function Mentions:_OfficerCall(msg, words)
 end
 
 function Mentions:_Record(term, sender, msg)
-    local log = GuildOS.db.mentions.log
-    table.insert(log, 1, { term = term, sender = sender, msg = msg, ts = GetServerTime() })
+    local cfg = GuildOS.db.mentions
+    local log = cfg.log
+    local ts = GetServerTime()
+    table.insert(log, 1, { term = term, sender = sender, msg = msg, ts = ts })
     while #log > LOG_MAX do table.remove(log) end
+    -- How often each word has fired, and when last: the settings page shows both on its chips.
+    cfg.hits = cfg.hits or {}
+    cfg.hits[term] = (cfg.hits[term] or 0) + 1
+    cfg.lastHit = cfg.lastHit or {}
+    cfg.lastHit[term] = ts
+end
+
+-- A temporary mute: alerts stop until the time passes (or Unmute). Nothing is logged while muted.
+function Mentions:Mute(seconds)
+    local cfg = GuildOS.db.mentions
+    if cfg then cfg.muteUntil = GetServerTime() + seconds end
+end
+
+function Mentions:Unmute()
+    local cfg = GuildOS.db.mentions
+    if cfg then cfg.muteUntil = nil end
+end
+
+-- The time a mute ends, while one is running; nil otherwise.
+function Mentions:MutedUntil()
+    local cfg = GuildOS.db.mentions
+    local t = cfg and cfg.muteUntil
+    if t and GetServerTime() < t then return t end
+    return nil
+end
+
+-- Pure: the short names of the characters linked to `me` (its short name) in `links`, as the guild's
+-- alt links are kept (alt -> main). A main gives its alts; an alt gives its main and the main's other
+-- alts. `me` itself is left out, and the list is sorted.
+function Mentions:_LinkedNames(me, links)
+    local function short(k)
+        k = tostring(k or "")
+        return k:match("^([^-]+)") or k
+    end
+    me = short(me)
+    links = links or {}
+    local main = me
+    for key, m in pairs(links) do
+        if short(key) == me then main = short(m); break end
+    end
+    local out, seen = {}, { [me] = true }
+    local function add(n)
+        if n ~= "" and not seen[n] then seen[n] = true; out[#out + 1] = n end
+    end
+    add(main)
+    for key, m in pairs(links) do
+        if short(m) == main then add(short(key)) end
+    end
+    table.sort(out)
+    return out
+end
+
+-- Pure: the watch-words of `list` as one string: the tag, then each word after a semicolon.
+function Mentions:_ExportWords(list)
+    local parts = { WORDS_TAG }
+    for _, w in ipairs(list or {}) do
+        parts[#parts + 1] = (tostring(w):gsub(";", ""))
+    end
+    return table.concat(parts, ";")
+end
+
+-- Pure: adds the words of a string from _ExportWords to `list`, one at a time through _AddWatchWord.
+-- Returns the counts { added, dupe, short }, or nil when the text is not a watch-word string.
+function Mentions:_ImportWords(list, text)
+    local counts = { added = 0, dupe = 0, short = 0 }
+    local tagged = false
+    for part in tostring(text or ""):gmatch("[^;]+") do
+        if not tagged then
+            if strtrim(part) ~= WORDS_TAG then return nil end
+            tagged = true
+        else
+            local st = self:_AddWatchWord(list, part)
+            if st == "ok" then counts.added = counts.added + 1
+            elseif st == "dupe" then counts.dupe = counts.dupe + 1
+            else counts.short = counts.short + 1 end
+        end
+    end
+    if not tagged then return nil end
+    return counts
+end
+
+-- A sample alert, to hear the sound and see the line without waiting for a mention.
+function Mentions:TestAlert()
+    local cfg = GuildOS.db.mentions
+    if not cfg then return end
+    GuildOS:Print(string.format(L["|cffFFD700Mention|r (%s): %s: %s"], "test", "Test", L["This is a test alert."]))
+    if cfg.sound and PlaySound then PlaySound(SOUNDKIT and SOUNDKIT.TELL_MESSAGE or 3081) end
 end
 
 function Mentions:_SetupHook()
@@ -135,6 +227,7 @@ function Mentions:_SetupHook()
         if GuildOS.Compat.IsSecret(msg, author) then return end  -- chat in lockdown: nothing readable
         local cfg = GuildOS.db.mentions
         if not cfg or not cfg.enabled then return end
+        if Mentions:MutedUntil() then return end   -- a temporary mute: nothing alerts until it ends
         if event == "CHAT_MSG_GUILD" and not cfg.guild then return end
         if event == "CHAT_MSG_OFFICER" and not cfg.officer then return end
         local me = GuildOS.Compat.PlayerName()
@@ -151,7 +244,7 @@ function Mentions:_SetupHook()
         local key = (sender or "?") .. "|" .. term
         if Mentions._cd[key] then return end
         Mentions._cd[key] = true
-        GuildOS.Compat.After(5, function() Mentions._cd[key] = nil end)
+        GuildOS.Compat.After(cfg.cooldown or 5, function() Mentions._cd[key] = nil end)
         Mentions:_Record(term, sender, msg)
         GuildOS:Print(string.format(L["|cffFFD700Mention|r (%s): %s: %s"], term, sender or "?", msg))
         if cfg.sound and PlaySound then PlaySound(SOUNDKIT and SOUNDKIT.TELL_MESSAGE or 3081) end
@@ -205,6 +298,24 @@ function Mentions:_RegisterTests()
         -- "Jose" with an accented e: \195\169 must survive on BOTH sides.
         local jose = "Jos\195\169"
         if Mentions:_Match("hey " .. jose .. " inv?", jose, {}, true) ~= jose then return false, "accented own name" end
+        return true
+    end)
+    S:Register("mentions.linked_names", function()
+        local links = { Alt1 = "Main", Alt2 = "Main-Realm" }
+        local got = Mentions:_LinkedNames("Alt1", links)
+        if #got ~= 2 or got[1] ~= "Alt2" or got[2] ~= "Main" then return false, "alt sees main and sibling" end
+        got = Mentions:_LinkedNames("Main", links)
+        if #got ~= 2 or got[1] ~= "Alt1" or got[2] ~= "Alt2" then return false, "main sees its alts" end
+        return true
+    end)
+    S:Register("mentions.words_round_trip", function()
+        local list = { "need heals", "vic" }
+        local text = Mentions:_ExportWords(list)
+        if text ~= "GOSWORDS1;need heals;vic" then return false, "export" end
+        local into = {}
+        local counts = Mentions:_ImportWords(into, text .. ";vic;ab")
+        if not counts or counts.added ~= 2 or counts.dupe ~= 1 or counts.short ~= 1 then return false, "import counts" end
+        if Mentions:_ImportWords({}, "not a list") ~= nil then return false, "untagged text refused" end
         return true
     end)
     S:Register("mentions.add_watchword", function()

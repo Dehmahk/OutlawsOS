@@ -114,7 +114,7 @@ function Form:Row(obj, opts)
     end
     self.rows[#self.rows + 1] = { obj = obj, gap = opts.gap or ROW_GAP, indent = opts.indent or 0,
         h = opts.h, wide = opts.wide, shown = shown, place = opts.place, rule = opts.rule,
-        anchor = opts.anchor, col = self.col or 1 }
+        rail = opts.rail, anchor = opts.anchor, col = self.col or 1 }
     return obj
 end
 
@@ -142,6 +142,7 @@ function Form:Layout(width)
     local split = self.columns and width >= TWO_COLUMN_W
     local colW = split and math.min(MAX_W, math.floor((width - COL_GAP) / 2)) or math.min(width, MAX_W)
     local ys, firsts = { 0, 0 }, { true, true }
+    local rails = {}
     self.anchors = {}   -- where each named row starts, so a page can jump to it
     for _, r in ipairs(self.rows) do
         local c = (split and r.col == 2) and 2 or 1
@@ -154,13 +155,31 @@ function Form:Layout(width)
             firsts[c] = false
             if r.anchor then self.anchors[r.anchor] = ys[c] end
             local x = (split and c == 2) and (colW + COL_GAP) or 0
+            local top = ys[c]
             r.obj:ClearAllPoints()
-            r.obj:SetPoint("TOPLEFT", self.content, "TOPLEFT", x + r.indent, -ys[c])
+            r.obj:SetPoint("TOPLEFT", self.content, "TOPLEFT", x + r.indent, -top)
             if r.wide then r.obj:SetWidth(math.max(1, colW - r.indent)) end
             local full = (split and colW or width) - r.indent
-            ys[c] = ys[c] + (r.place and r.place(r.obj, colW - r.indent, full) or r.h or textHeight(r.obj))
+            local h = (r.place and r.place(r.obj, colW - r.indent, full)) or r.h or textHeight(r.obj)
+            ys[c] = top + h
+            if r.rail then rails[#rails + 1] = { x = x + r.indent - 8, top = top, h = h, col = c } end
         end
     end
+    -- A thin rail beside each sub-option, running down to the next one in its column.
+    self.railLines = self.railLines or {}
+    for i, seg in ipairs(rails) do
+        local t = self.railLines[i] or self.content:CreateTexture(nil, "BACKGROUND")
+        self.railLines[i] = t
+        local nxt = rails[i + 1]
+        local bottom = (nxt and nxt.col == seg.col) and nxt.top or (seg.top + seg.h)
+        t:SetTexture(WHITE8)
+        t:SetVertexColor(C.line.r, C.line.g, C.line.b, 1)
+        t:ClearAllPoints()
+        t:SetPoint("TOPLEFT", self.content, "TOPLEFT", seg.x, -seg.top)
+        t:SetSize(2, math.max(1, bottom - seg.top))
+        t:Show()
+    end
+    for i = #rails + 1, #self.railLines do self.railLines[i]:Hide() end
     local y = math.max(ys[1], ys[2])
     self.content:SetHeight(math.max(1, y))
     return y
@@ -197,6 +216,15 @@ function Form:Section(title, shown, opts)
     return row
 end
 
+-- A sub-heading inside a section: gold, one line.
+function Form:Subhead(text, opts)
+    opts = opts or {}
+    local fs = UI:CreateText(self.content, text, 12, C.gold.r, C.gold.g, C.gold.b)
+    fs:SetJustifyH("LEFT")
+    fs:SetWordWrap(false)
+    return self:Row(fs, { gap = opts.gap or 14, indent = opts.indent, wide = true, shown = opts.shown })
+end
+
 -- A paragraph in Sans 11, wrapped to the page: textSoft, or text on a page that asks for bright notes.
 function Form:Note(text, opts)
     opts = opts or {}
@@ -229,8 +257,8 @@ function Form:Check(label, desc, get, set, opts)
             if opts.enabled() then cb:Enable() else cb:Disable() end
         end
     end)
-    self:Row(f, { gap = opts.gap, indent = indent, h = 18, wide = true, shown = opts.shown })
-    if desc then self:Note(desc, { indent = indent + NOTE_INDENT, shown = opts.shown }) end
+    self:Row(f, { gap = opts.gap, indent = indent, h = 18, wide = true, shown = opts.shown, rail = opts.rail })
+    if desc then self:Note(desc, { indent = indent + NOTE_INDENT, shown = opts.shown, gap = opts.descGap }) end
     return f
 end
 
@@ -581,103 +609,251 @@ PAGES.interface = function(F)
     end
 end
 
+-- Chat and alerts: personal display and alert settings, never synced (Modules/ChatTweaks.lua, Modules/Mentions.lua).
+local chatForm              -- the Chat and alerts page last built, refreshed after a paste
+local COOLDOWNS = { 5, 30, 120 }   -- seconds a repeat alert waits, in the order the button cycles them
+-- A sample member for the preview: an alt of Floyd, an officer rank, a level 60.
+local SAMPLE_MEMBER = { rankName = "Officer", classFile = "WARRIOR", level = 60, altTag = "alt of Floyd", shortTag = "[Floyd]" }
+
+local function cooldownText(n)
+    if n < 60 then return string.format(L["%d seconds"], n) end
+    return string.format(L["%d minutes"], math.floor(n / 60))
+end
+
+-- A paste of watch-words: each word goes in through the same check as typing it.
+local function importWords(text)
+    local mcfg = GuildOS.db.mentions
+    if not mcfg then return end
+    mcfg.watchWords = mcfg.watchWords or {}
+    local counts = GuildOS.Mentions:_ImportWords(mcfg.watchWords, text)
+    if not counts then
+        GuildOS:Print(L["That is not a watch-word string."])
+        return
+    end
+    GuildOS:Print(string.format(L["Added %d watch-words, %d already there, %d too short."], counts.added, counts.dupe, counts.short))
+    if chatForm then chatForm:Refresh() end
+end
+
 PAGES.chat = function(F, isOfficer)
-    -- Guild and officer chat annotations: a personal display preference (Modules/ChatTweaks.lua).
+    chatForm = F
+    -- A wide window splits the page: the annotations, their preview and groups on the left, alerts on the right.
+    F.columns = true
     local function ct() return GuildOS.db.chatTweaks or {} end
     local function setCt(key)
         return function(checked) if GuildOS.db.chatTweaks then GuildOS.db.chatTweaks[key] = checked end end
     end
     local function annotating() return ct().enabled and true or false end
-    F:Section(L["Guild chat"])
-    F:Check(L["Annotate guild chat (class icon, level, alt tag)"], nil, annotating, setCt("enabled"))
-    F:Check(L["Rank symbol"], L["A symbol for each guild rank that has one, from Guild Master to Veteran Outlaw, and for the EKO roles that have one. Not for Herald, Alter Ego, Outlaw or Recruit."],
-        function() return ct().rank ~= false end, setCt("rank"),
-        { indent = SUB_INDENT, enabled = annotating })
-    F:Check(L["Class icon"], nil, function() return ct().classIcon ~= false end, setCt("classIcon"),
-        { indent = SUB_INDENT, enabled = annotating })
-    F:Check(L["Level"], nil, function() return ct().level ~= false end, setCt("level"),
-        { indent = SUB_INDENT, enabled = annotating })
-    F:Check(L["Alt tag"], nil, function() return ct().altTag ~= false end, setCt("altTag"),
-        { indent = SUB_INDENT, enabled = annotating })
-    -- Guild Roster Manager's tag (#269).
-    F:Check(L["Short tag: [M] on a main, [Main] on an alt"], nil, function() return ct().altShort end, setCt("altShort"),
-        { indent = 2 * SUB_INDENT, enabled = function() return annotating() and ct().altTag ~= false end })
-
-    -- Mentions (issue #59): what /gos mentions sets. Personal, never synced.
     local mcfg = GuildOS.db.mentions
+    local function alerting() return mcfg and mcfg.enabled and true or false end
+
+    F:Section(L["Guild chat"])
+    F:Check(L["Add icons and tags to guild chat lines"], nil, annotating, setCt("enabled"))
+    F:Check(L["Rank symbol"], L["A symbol for each rank that has one: Guild Master, GM Alt, Co-Guild Master, Officer, Raid Marshal and Veteran Outlaw, plus the Recruiter and Event Organizer roles. Herald, Alter Ego, Outlaw and Recruit have none."],
+        function() return ct().rank ~= false end, setCt("rank"),
+        { indent = SUB_INDENT, enabled = annotating, rail = true, descGap = 6 })
+    F:Check(L["Class icon"], nil, function() return ct().classIcon ~= false end, setCt("classIcon"),
+        { indent = SUB_INDENT, enabled = annotating, rail = true })
+    F:Check(L["Level"], nil, function() return ct().level ~= false end, setCt("level"),
+        { indent = SUB_INDENT, enabled = annotating, rail = true })
+    F:Check(L["Alt tag"], nil, function() return ct().altTag ~= false end, setCt("altTag"),
+        { indent = SUB_INDENT, enabled = annotating, rail = true })
+    -- Guild Roster Manager's tag (#269).
+    F:Check(L["Short alt tag"], L["Off: an alt shows (alt of Floyd). On: an alt shows [Floyd], and a main with alts shows [M]."],
+        function() return ct().altShort end, setCt("altShort"),
+        { indent = 2 * SUB_INDENT, enabled = function() return annotating() and ct().altTag ~= false end,
+          rail = true, descGap = 4 })
+
+    -- A sample of the lines these settings make, so the choices can be seen before a real message comes in.
+    local box = CreateFrame("Frame", nil, F.content, "BackdropTemplate")
+    box:SetBackdrop({ bgFile = WHITE8, edgeFile = WHITE8, edgeSize = GuildOS.UI:Edge(box) })
+    box:SetBackdropColor(C.well.r, C.well.g, C.well.b, 1)
+    box:SetBackdropBorderColor(C.lineHi.r, C.lineHi.g, C.lineHi.b, 1)
+    local cap = UI:CreateText(box, L["Preview"], 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+    cap:SetPoint("TOPLEFT", 10, -8)
+    local guildLine = UI:CreateText(box, "", 12, C.text.r, C.text.g, C.text.b)
+    guildLine:SetJustifyH("LEFT")
+    guildLine:SetWordWrap(true)
+    local alertLine = UI:CreateText(box, "", 12, C.text.r, C.text.g, C.text.b)
+    alertLine:SetJustifyH("LEFT")
+    alertLine:SetWordWrap(true)
+    F:Sync(function()
+        local prefix = annotating() and GuildOS.ChatTweaks:_BuildPrefix(SAMPLE_MEMBER, ct()) or ""
+        local who = "|cffFFFFFFAsh|r:"
+        guildLine:SetText((prefix ~= "" and (prefix .. " ") or "") .. who .. " " .. L["anyone up for MC?"])
+        if alerting() then
+            alertLine:SetText(string.format(L["|cffFFD700Mention|r (%s): %s: %s"], "vic", "Ash", L["vic, are you on tonight?"]))
+        else
+            alertLine:SetText(L["Mention alerts are off."])
+        end
+    end)
+    F:Row(box, { wide = true, gap = 10, place = function(_, w)
+        local tw = math.max(60, w - 20)
+        guildLine:SetWidth(tw)
+        alertLine:SetWidth(tw)
+        guildLine:ClearAllPoints()
+        guildLine:SetPoint("TOPLEFT", box, "TOPLEFT", 10, -26)
+        local gh = textHeight(guildLine)
+        alertLine:ClearAllPoints()
+        alertLine:SetPoint("TOPLEFT", box, "TOPLEFT", 10, -(26 + gh + 8))
+        local h = 26 + gh + 8 + textHeight(alertLine) + 10
+        box:SetHeight(h)
+        return h
+    end })
+
+    if GuildOS.db.lfgPrefs then
+        F:Section(L["Groups"])
+        F:Check(L["Tell me when a guildmate posts on the LFG board"], nil,
+            function() return GuildOS.db.lfgPrefs.notify end,
+            function(checked) GuildOS.db.lfgPrefs.notify = checked end)
+        F:Check(L["Show a small notice when a guildmate forms a group for my level"], nil,
+            function() return GuildOS.db.lfgPrefs.toast ~= false end,
+            function(checked) GuildOS.db.lfgPrefs.toast = checked and true or false end)
+    end
+
+    -- The second column: alerts (Modules/Mentions.lua).
+    F:Column()
     if mcfg then
         F:Section(L["Mentions"])
-        local function alerting() return mcfg.enabled and true or false end
-        local function mention(label, key, officerOnly)
+        F:Check(L["Alert me when my name or a watch-word comes up in chat"], nil,
+            function() return mcfg.enabled end, function(checked) mcfg.enabled = checked end)
+
+        F:Subhead(L["Who sets an alert off"], { gap = 10 })
+        local function mention(label, key, officerOnly, desc)
             if officerOnly and not isOfficer then return end
-            F:Check(label, nil, function() return mcfg[key] end, function(checked) mcfg[key] = checked end,
-                key ~= "enabled" and { indent = SUB_INDENT, enabled = alerting } or nil)
+            F:Check(label, desc, function() return mcfg[key] end, function(checked) mcfg[key] = checked end,
+                { indent = SUB_INDENT, enabled = alerting, rail = true, descGap = desc and 4 or nil })
         end
-        mention(L["Alert me when my name or a watch-word comes up in chat"], "enabled")
         mention(L["My own name"], "ownName")
         mention(L["Guild chat"], "guild")
         mention(L["Officer chat"], "officer", true)
-        mention(L["When somebody calls the officers in guild chat (officers only)"], "officerCall", true)
-        mention(L["Play a sound"], "sound")
+        mention(L["Alert me when someone calls for officers"], "officerCall", true,
+            L["Officers only. Fires on the words officer and officers (and your language's equivalents) in guild chat."])
 
-        F:Field(L["Watch-words:"], { w = 160, max = 40, saveText = L["Add"], hint = L["Click a word to remove it."],
+        F:Subhead(L["What happens"], { gap = 10 })
+        mention(L["Play a sound"], "sound")
+        F:Buttons({ { L["Test alert"], function() GuildOS.Mentions:TestAlert() end, w = 120 } },
+            { indent = SUB_INDENT, gap = 8 })
+        local cooldown = F:Buttons({ { "", function()
+            local cur = mcfg.cooldown or 5
+            local nextV = COOLDOWNS[1]
+            for i, v in ipairs(COOLDOWNS) do
+                if v == cur then nextV = COOLDOWNS[(i % #COOLDOWNS) + 1]; break end
+            end
+            mcfg.cooldown = nextV
+            F:Refresh()
+        end, w = 220 } }, { indent = SUB_INDENT, gap = 8 })[1]
+        F:Sync(function() cooldown.label:SetText(string.format(L["Repeat alerts after %s"], cooldownText(mcfg.cooldown or 5))) end)
+
+        F:Subhead(L["Quiet time"], { gap = 10 })
+        F:Buttons({
+            { L["Mute 30 min"], function() GuildOS.Mentions:Mute(30 * 60); F:Refresh() end, w = 130 },
+            { L["Mute 1 hour"], function() GuildOS.Mentions:Mute(60 * 60); F:Refresh() end, w = 130 },
+            { L["Unmute"], function() GuildOS.Mentions:Unmute(); F:Refresh() end, w = 100 },
+        }, { indent = SUB_INDENT })
+        local muteNote = F:Note("", { indent = SUB_INDENT, gap = 6 })
+        F:Sync(function()
+            local t = GuildOS.Mentions:MutedUntil()
+            muteNote:SetText(t and string.format(L["Alerts are muted until %s."], GuildOS:DateText(t, " %H:%M"))
+                or L["Alerts are on."])
+        end)
+
+        F:Subhead(L["Watch-words"], { gap = 10 })
+        F:Field(L["New word:"], { w = 160, max = 40, saveText = L["Add"], hint = L["Whole words, any case. Click a word to remove it."],
             indent = SUB_INDENT, labelW = 120,
             save = function(box)
                 mcfg.watchWords = mcfg.watchWords or {}
-                local status = GuildOS.Mentions:_AddWatchWord(mcfg.watchWords, box:GetText())
+                local text = strtrim(box:GetText())
+                local status = GuildOS.Mentions:_AddWatchWord(mcfg.watchWords, text)
                 if status == "ok" then
                     box:SetText("")
+                    if #text == 3 then GuildOS:Print(L["Three-letter words match a lot of messages. Added anyway."]) end
                     F:Refresh()
                 elseif status == "short" then
                     GuildOS:Print(L["Watch-words must be at least 3 characters."])
                 else
-                    GuildOS:Print(L["Already watching: |cffFFFFFF"] .. strtrim(box:GetText()):lower() .. "|r")
+                    GuildOS:Print(L["Already watching: |cffFFFFFF"] .. text:lower() .. "|r")
                 end
             end })
+        F:Note(L["Matches whole words in any case, ignoring punctuation: alt does not match alternate."], { indent = SUB_INDENT })
 
-        -- One chip per watch-word, up to WORD_MAX; clicking one removes it.
-        local WORD_MAX = 9
+        -- One chip per watch-word, alphabetical, with how often it has fired; clicking one removes it.
+        local WORD_MAX, CHIP_W, CHIP_GAP, CHIP_ROW = 18, 150, 6, 26
         local function words() return mcfg.watchWords or {} end
         local chipRow = CreateFrame("Frame", nil, F.content)
         chipRow:SetSize(1, 20)
         local chips = {}
         for i = 1, WORD_MAX do
-            local b = UI:CreateButton(chipRow, "", 130, 20)
+            local b = UI:CreateButton(chipRow, "", CHIP_W, 20)
             b:SetScript("OnClick", function(self)
+                if not self._word then return end
                 GuildOS.Mentions:_RemoveWatchWord(mcfg.watchWords, self._word)
+                if mcfg.hits then mcfg.hits[self._word] = nil end
                 F:Refresh()
             end)
             chips[i] = b
         end
         F:Sync(function()
-            local list = words()
+            local sorted = {}
+            for i, w in ipairs(words()) do sorted[i] = w end
+            table.sort(sorted)
             for i, b in ipairs(chips) do
-                b._word = list[i]
-                if list[i] then UI:SetChipText(b, list[i], 130) end
-                b:SetShown(list[i] ~= nil)
+                local w = sorted[i]
+                b._word = w
+                b:SetShown(w ~= nil)
+                if w then
+                    local n = mcfg.hits and mcfg.hits[w]
+                    UI:SetChipText(b, n and (w .. " (" .. n .. ")") or w, CHIP_W)
+                end
             end
         end)
         F:Row(chipRow, { indent = SUB_INDENT, gap = 6, shown = function() return #words() > 0 end,
             place = function(_, w)
-                local x, y = 0, 0
+                local cols = math.max(1, math.floor((w + CHIP_GAP) / (CHIP_W + CHIP_GAP)))
+                local n = 0
                 for _, b in ipairs(chips) do
                     if b:IsShown() then
-                        if x > 0 and x + 130 > w then x, y = 0, y + 24 end
                         b:ClearAllPoints()
-                        b:SetPoint("TOPLEFT", chipRow, "TOPLEFT", x, -y)
-                        x = x + 136
+                        b:SetPoint("TOPLEFT", chipRow, "TOPLEFT", (n % cols) * (CHIP_W + CHIP_GAP),
+                            -math.floor(n / cols) * CHIP_ROW)
+                        n = n + 1
                     end
                 end
-                chipRow:SetHeight(y + 20)
-                return y + 20
+                local rows = n == 0 and 1 or math.ceil(n / cols)
+                local h = (rows - 1) * CHIP_ROW + 20
+                chipRow:SetHeight(h)
+                return h
             end })
         local more = F:Note("", { indent = SUB_INDENT, shown = function() return #words() > WORD_MAX end })
-        F:Sync(function()
-            local n = #words()
-            more:SetText(n > WORD_MAX and string.format(L["+%d more (/gos mentions list)"], n - WORD_MAX) or "")
-        end)
+        F:Sync(function() more:SetText(string.format(L["+%d more (/gos mentions list)"], #words() - WORD_MAX)) end)
+
         F:Buttons({
-            { L["Recent mentions"], function() GuildOS.Mentions:PrintLog() end },
+            { L["Add my linked alts"], function()
+                mcfg.watchWords = mcfg.watchWords or {}
+                local me = (GuildOS.Compat.PlayerName() or ""):match("^([^-]+)") or ""
+                local added = 0
+                for _, n in ipairs(GuildOS.Mentions:_LinkedNames(me, GuildOS.db.altLinks)) do
+                    if GuildOS.Mentions:_AddWatchWord(mcfg.watchWords, n) == "ok" then added = added + 1 end
+                end
+                GuildOS:Print(string.format(L["Added %d linked names."], added))
+                F:Refresh()
+            end, w = 170 },
+            { L["Copy words"], function()
+                GuildOS.Settings_ShowTextIO("GuildOSWordsIO", "export", {
+                    copyTitle = L["Copy watch-words"],
+                    copyHint = L["Select the text and press Ctrl+C to copy the watch-words."],
+                    copyText = function() return GuildOS.Mentions:_ExportWords(words()) end,
+                })
+            end, w = 120 },
+            { L["Paste words"], function()
+                GuildOS.Settings_ShowTextIO("GuildOSWordsIO", "import", {
+                    pasteTitle = L["Paste watch-words"],
+                    pasteHint = L["Paste watch-words copied from another character, then press Apply."],
+                    paste = importWords,
+                })
+            end, w = 120 },
+        }, { indent = SUB_INDENT, gap = 8 })
+        F:Buttons({
+            { L["Mention history"], function() GuildOS.Mentions:PrintLog() end, w = 150 },
             { L["Clear watch-words"], function()
                 GuildOS.Dialogs["GUILDOS_CLEAR_WORDS"] = GuildOS.Dialogs["GUILDOS_CLEAR_WORDS"] or {
                     text = L["Clear every watch-word?"], button1 = L["Clear watch-words"], button2 = L["Cancel"],
@@ -688,18 +864,8 @@ PAGES.chat = function(F, isOfficer)
                     timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
                 }
                 GuildOS:ShowDialog("GUILDOS_CLEAR_WORDS", nil, nil, { after = function() F:Refresh() end })
-            end },
-        }, { indent = SUB_INDENT })
-    end
-
-    if GuildOS.db.lfgPrefs then
-        F:Section(L["Groups"])
-        F:Check(L["Tell me when a guildmate posts on the LFG board"], nil,
-            function() return GuildOS.db.lfgPrefs.notify end,
-            function(checked) GuildOS.db.lfgPrefs.notify = checked end)
-        F:Check(L["Show a small notice when a guildmate forms a group for my level"], nil,
-            function() return GuildOS.db.lfgPrefs.toast ~= false end,
-            function(checked) GuildOS.db.lfgPrefs.toast = checked and true or false end)
+            end, w = 160 },
+        }, { indent = SUB_INDENT, gap = 8 })
     end
 end
 
@@ -772,7 +938,6 @@ local RULES_TAG = "GOSRULES1"
 local RULE_CONFIRM = "OUTLAWOS_RULES_CONFIRM"
 local pendingRuleAccept     -- what Yes runs, set by confirmThen
 local rulesForm             -- the Rules page last built, refreshed after a paste
-local rulesIO               -- the copy and paste window, built on first use
 
 local function stampRule(key)
     local s = GuildOS.db and GuildOS.db.settings
@@ -926,8 +1091,10 @@ local function importRules(text)
     end)
 end
 
-local function buildRulesIO()
-    local f = CreateFrame("Frame", "GuildOSRulesIO", UIParent, "BackdropTemplate")
+-- A copy-or-paste window: a title, a hint, one text box, and Apply when pasting. One per name.
+local textIO = {}
+local function buildTextIO(frameName)
+    local f = CreateFrame("Frame", frameName, UIParent, "BackdropTemplate")
     f:SetSize(460, 260)
     f:SetPoint("CENTER")
     f:SetBackdrop({ bgFile = WHITE8, edgeFile = WHITE8, edgeSize = GuildOS.UI:Edge(f) })
@@ -940,7 +1107,7 @@ local function buildRulesIO()
     f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", function(self) self:StartMoving() end)
     f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
-    table.insert(UISpecialFrames, "GuildOSRulesIO")
+    table.insert(UISpecialFrames, frameName)
 
     f.title = UI:CreateTitle(f, "", 14)
     f.title:SetPoint("TOPLEFT", 14, -12)
@@ -954,7 +1121,7 @@ local function buildRulesIO()
     f.hint:SetJustifyH("LEFT")
     f.hint:SetWordWrap(true)
 
-    f.area = UI:CreateTextArea(f, 432, 110, { max = 1000 })
+    f.area = UI:CreateTextArea(f, 432, 110, { max = 2000 })
     f.area:SetPoint("TOPLEFT", 14, -84)
 
     f.apply = UI:CreateButton(f, L["Apply"], 90, 24)
@@ -965,24 +1132,41 @@ local function buildRulesIO()
     return f
 end
 
-local function showRulesIO(mode)
-    rulesIO = rulesIO or buildRulesIO()
+-- Opens a copy-or-paste window. `o` holds the copy side (copyTitle, copyHint, copyText) or the paste side
+-- (pasteTitle, pasteHint, paste). Copying shows the text selected; pasting applies it on Apply.
+local function showTextIO(frameName, mode, o)
+    local f = textIO[frameName] or buildTextIO(frameName)
+    textIO[frameName] = f
     if mode == "export" then
-        rulesIO.title:SetText(L["Copy rules"])
-        rulesIO.hint:SetText(L["Select the text and press Ctrl+C to copy it. Paste it into another officer's Guild OS to share these rules."])
-        rulesIO.area.edit:SetText(exportRules())
-        rulesIO.apply:Hide()
-        rulesIO.onApply = nil
+        f.title:SetText(o.copyTitle)
+        f.hint:SetText(o.copyHint)
+        f.area.edit:SetText(o.copyText())
+        f.apply:Hide()
+        f.onApply = nil
     else
-        rulesIO.title:SetText(L["Paste rules"])
-        rulesIO.hint:SetText(L["Paste rules copied from another officer, then press Apply. The whole guild sees the change."])
-        rulesIO.area.edit:SetText("")
-        rulesIO.apply:Show()
-        rulesIO.onApply = importRules
+        f.title:SetText(o.pasteTitle)
+        f.hint:SetText(o.pasteHint)
+        f.area.edit:SetText("")
+        f.apply:Show()
+        f.onApply = o.paste
     end
-    rulesIO:Show()
-    rulesIO.area.edit:SetFocus()
-    rulesIO.area.edit:HighlightText()
+    f:Show()
+    f.area.edit:SetFocus()
+    f.area.edit:HighlightText()
+end
+
+-- The watch-words window, for the Chat and alerts page.
+GuildOS.Settings_ShowTextIO = showTextIO
+
+local function showRulesIO(mode)
+    showTextIO("GuildOSRulesIO", mode, {
+        copyTitle = L["Copy rules"],
+        copyHint = L["Select the text and press Ctrl+C to copy it. Paste it into another officer's Guild OS to share these rules."],
+        copyText = exportRules,
+        pasteTitle = L["Paste rules"],
+        pasteHint = L["Paste rules copied from another officer, then press Apply. The whole guild sees the change."],
+        paste = importRules,
+    })
 end
 
 -- Officers change these for the whole guild; members read what applies.
