@@ -23,6 +23,8 @@ local OLD_KEYS = { general = "profile", raid = "rules", officer = "rules", about
 
 local MAX_W       = 640   -- one column of settings reads best at this width
 local TWO_COL_W   = 830   -- the module lists split in two from here (a 900px window: 900 - 2x12 - 24 - 20)
+local COL_GAP      = 40    -- between the two columns of a wide page
+local TWO_COLUMN_W = 920   -- from here a page that asks for columns splits in two (each 440 or more)
 local ROW_GAP     = 8
 local SUB_INDENT  = 22    -- a sub-option sits under its parent's label
 local NOTE_INDENT = 22    -- a checkbox's explanation starts where its label does
@@ -79,8 +81,8 @@ end
 local Form = {}
 Form.__index = Form
 
-local function newForm(content)
-    return setmetatable({ content = content, rows = {}, syncs = {} }, Form)
+local function newForm(content, opts)
+    return setmetatable({ content = content, rows = {}, syncs = {}, opts = opts or {} }, Form)
 end
 
 local function num(v, fallback)
@@ -97,11 +99,28 @@ local function textHeight(fs)
     return h > 0 and math.ceil(h) or 14
 end
 
+-- A row goes in the current column (Form:Column). A row shown only with its section's group is hidden
+-- while that group is folded; `ungrouped` keeps a section's own header out of the fold.
 function Form:Row(obj, opts)
     opts = opts or {}
+    local shown = opts.shown
+    local group = (not opts.ungrouped) and self.group or nil
+    if group then
+        local own = shown
+        shown = function()
+            if group.collapsed() then return false end
+            return own == nil or (own() and true or false)
+        end
+    end
     self.rows[#self.rows + 1] = { obj = obj, gap = opts.gap or ROW_GAP, indent = opts.indent or 0,
-        h = opts.h, wide = opts.wide, shown = opts.shown, place = opts.place }
+        h = opts.h, wide = opts.wide, shown = shown, place = opts.place, rule = opts.rule,
+        anchor = opts.anchor, col = self.col or 1 }
     return obj
+end
+
+-- Rows from here on go in the right-hand column of a page that splits (Form.columns).
+function Form:Column()
+    self.col = 2
 end
 
 -- `fn` re-reads one control's value; Refresh runs them all, then lays the page out again.
@@ -119,45 +138,73 @@ function Form:Layout(width)
     if width < 1 then width = num(self.content:GetWidth(), 0) end
     if width < 1 then width = self.width or MAX_W end
     self.width = width
-    local page = math.min(width, MAX_W)
-    local y, first = 0, true
+    -- Two columns only where the page is wide enough for two; a row's column is its `col`.
+    local split = self.columns and width >= TWO_COLUMN_W
+    local colW = split and math.min(MAX_W, math.floor((width - COL_GAP) / 2)) or math.min(width, MAX_W)
+    local ys, firsts = { 0, 0 }, { true, true }
+    self.anchors = {}   -- where each named row starts, so a page can jump to it
     for _, r in ipairs(self.rows) do
+        local c = (split and r.col == 2) and 2 or 1
         local on = not r.shown or r.shown() and true or false
+        -- A section's rule is no use at the head of a column.
+        if on and r.rule and firsts[c] and split then on = false end
         r.obj:SetShown(on)
         if on then
-            if not first then y = y + r.gap end
-            first = false
+            if not firsts[c] then ys[c] = ys[c] + r.gap end
+            firsts[c] = false
+            if r.anchor then self.anchors[r.anchor] = ys[c] end
+            local x = (split and c == 2) and (colW + COL_GAP) or 0
             r.obj:ClearAllPoints()
-            r.obj:SetPoint("TOPLEFT", self.content, "TOPLEFT", r.indent, -y)
-            if r.wide then r.obj:SetWidth(math.max(1, page - r.indent)) end
-            y = y + (r.place and r.place(r.obj, page - r.indent, width - r.indent) or r.h or textHeight(r.obj))
+            r.obj:SetPoint("TOPLEFT", self.content, "TOPLEFT", x + r.indent, -ys[c])
+            if r.wide then r.obj:SetWidth(math.max(1, colW - r.indent)) end
+            local full = (split and colW or width) - r.indent
+            ys[c] = ys[c] + (r.place and r.place(r.obj, colW - r.indent, full) or r.h or textHeight(r.obj))
         end
     end
+    local y = math.max(ys[1], ys[2])
     self.content:SetHeight(math.max(1, y))
     return y
 end
 
--- A section: a 1px rule (none above the first) and its title in Sans SemiBold 14.
-function Form:Section(title, shown)
+-- A section: a 1px rule (none above the first, or at the head of a column) and its title. opts: role (the
+-- title's font role), anchor (a name the page can jump to), toggle, isCollapsed and group: a header button
+-- folds the section's rows; group.collapsed says when they are folded.
+function Form:Section(title, shown, opts)
+    opts = opts or {}
     if #self.rows > 0 then
-        self:Row(UI:CreateSeparator(self.content), { gap = 20, wide = true, h = 1, shown = shown })
+        self:Row(UI:CreateSeparator(self.content), { gap = 20, wide = true, h = 1, shown = shown, rule = true })
     end
-    local fs = self.content:CreateFontString(nil, "OVERLAY")
-    GuildOS:ApplyFont(fs, nil, "sectionTitle")
+    local host = opts.toggle and CreateFrame("Frame", nil, self.content) or self.content
+    local fs = host:CreateFontString(nil, "OVERLAY")
+    GuildOS:ApplyFont(fs, nil, opts.role or "sectionTitle")
     fs:SetShadowOffset(0, 0)
     fs:SetTextColor(C.text.r, C.text.g, C.text.b)
     fs:SetJustifyH("LEFT")
     fs:SetText(title)
-    return self:Row(fs, { gap = 12, wide = true, shown = shown })
+    if not opts.toggle then
+        local row = self:Row(fs, { gap = 12, wide = true, shown = shown, anchor = opts.anchor, ungrouped = true })
+        self.group = nil
+        return row
+    end
+    local btn = UI:CreateButton(host, L["Hide"], 80, 22)
+    fs:SetPoint("LEFT", host, "LEFT", 0, 0)
+    btn:SetPoint("RIGHT", host, "RIGHT", 0, 0)
+    btn:SetScript("OnClick", function() opts.toggle(); self:Refresh() end)
+    self:Sync(function() btn.label:SetText(opts.isCollapsed() and L["Show"] or L["Hide"]) end)
+    local row = self:Row(host, { gap = 12, wide = true, shown = shown, anchor = opts.anchor, ungrouped = true,
+        place = function() return 22 end })
+    self.group = opts.group
+    return row
 end
 
--- A paragraph in Sans 11, textSoft, wrapped to the page.
+-- A paragraph in Sans 11, wrapped to the page: textSoft, or text on a page that asks for bright notes.
 function Form:Note(text, opts)
     opts = opts or {}
-    local fs = UI:CreateText(self.content, text, 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+    local tone = self.opts.bright and C.text or C.textSoft
+    local fs = UI:CreateText(self.content, text, 11, tone.r, tone.g, tone.b)
     fs:SetJustifyH("LEFT")
     fs:SetWordWrap(true)
-    return self:Row(fs, { gap = opts.gap or 2, indent = opts.indent, wide = true, shown = opts.shown })
+    return self:Row(fs, { gap = opts.gap or 2, indent = opts.indent, wide = true, shown = opts.shown, anchor = opts.anchor })
 end
 
 -- A checkbox, its explanation under the label. `set` gets true or false; the page re-syncs after it,
@@ -283,6 +330,56 @@ function Form:Field(label, opts)
     return box
 end
 
+-- Small numeric boxes on one line, each with its label, and one Save for all of them. fields: { key, label,
+-- w, max, get }. opts: save(items), saveText, gap, indent, shown, anchor. An item is { label, box, fd }.
+function Form:Inline(fields, opts)
+    opts = opts or {}
+    local holder = CreateFrame("Frame", nil, self.content)
+    holder:SetSize(1, 24)
+    local items = {}
+    for _, fd in ipairs(fields) do
+        local lbl = UI:CreateText(holder, fd.label, 12, C.text.r, C.text.g, C.text.b)
+        lbl:SetJustifyH("LEFT")
+        lbl:SetWordWrap(false)
+        local box = CreateFrame("EditBox", nil, holder, "BackdropTemplate")
+        box:SetSize(fd.w or 44, 22)
+        box:SetBackdrop({ bgFile = WHITE8, edgeFile = WHITE8, edgeSize = GuildOS.UI:Edge(box) })
+        box:SetBackdropColor(C.well.r, C.well.g, C.well.b, 1)
+        box:SetBackdropBorderColor(C.lineHi.r, C.lineHi.g, C.lineHi.b, 1)
+        box:SetTextInsets(6, 6, 0, 0)
+        GuildOS:ApplyFont(box, 12, "tableNum")
+        box:SetTextColor(C.text.r, C.text.g, C.text.b)
+        box:SetMaxLetters(fd.max or 3)
+        box:SetNumeric(true)
+        box:SetAutoFocus(false)
+        box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+        box:SetScript("OnEditFocusGained", function(self) self:SetBackdropBorderColor(C.gold.r, C.gold.g, C.gold.b, 1) end)
+        box:SetScript("OnEditFocusLost", function(self) self:SetBackdropBorderColor(C.lineHi.r, C.lineHi.g, C.lineHi.b, 1) end)
+        items[#items + 1] = { label = lbl, box = box, fd = fd }
+        if fd.get then
+            self:Sync(function() if not box:HasFocus() then box:SetText(tostring(fd.get() or "")) end end)
+        end
+    end
+    local save = UI:CreateButton(holder, opts.saveText or L["Save"], 80, 22)
+    save:SetScript("OnClick", function() if opts.save then opts.save(items) end end)
+    self:Row(holder, { wide = true, gap = opts.gap, indent = opts.indent, shown = opts.shown, anchor = opts.anchor,
+        place = function()
+            local x = 0
+            for _, it in ipairs(items) do
+                local lw = math.ceil(num(it.label:GetStringWidth(), 40))
+                it.label:ClearAllPoints()
+                it.label:SetPoint("LEFT", holder, "LEFT", x, 0)
+                it.box:ClearAllPoints()
+                it.box:SetPoint("LEFT", holder, "LEFT", x + lw + 6, 0)
+                x = x + lw + 6 + (it.fd.w or 44) + 18
+            end
+            save:ClearAllPoints()
+            save:SetPoint("LEFT", holder, "LEFT", x, 0)
+            return 24
+        end })
+    return items
+end
+
 -- A rule a member reads: its label, then its value, on one line.
 function Form:Value(label, value, opts)
     opts = opts or {}
@@ -319,7 +416,10 @@ function Form:Grid(make, list, cellH, opts)
     for _, item in ipairs(list) do cells[#cells + 1] = make(holder, item) end
     self:Row(holder, { gap = opts.gap, shown = opts.shown, place = function(_, w, full)
         local cols, colW
-        if opts.colW then
+        if opts.cols then
+            cols = math.max(1, math.min(opts.cols, #cells))
+            colW = math.floor((w - 24 * (cols - 1)) / cols)
+        elseif opts.colW then
             colW = opts.colW
             cols = math.max(1, math.floor((w + 24) / (colW + 24)))
         else
@@ -333,7 +433,7 @@ function Form:Grid(make, list, cellH, opts)
             c:SetWidth(colW)
         end
         local h = math.max(1, math.ceil(#cells / cols) * (cellH + 8) - 8)
-        holder:SetSize(cols == 2 and full or w, h)
+        holder:SetSize(opts.cols and w or (cols == 2 and full or w), h)
         return h
     end })
     return cells
@@ -666,8 +766,232 @@ PAGES.modules = function(F)
 end
 
 -- Officers change these for the whole guild; members read what applies.
+-- Guild rules: the helpers the page uses. A rule changed on this client is stamped, and the stamp shows
+-- under its section; nothing here is sent to the guild beyond the setters the page already calls.
+local RULES_TAG = "GOSRULES1"
+local RULE_CONFIRM = "OUTLAWOS_RULES_CONFIRM"
+local pendingRuleAccept     -- what Yes runs, set by confirmThen
+local rulesForm             -- the Rules page last built, refreshed after a paste
+local rulesIO               -- the copy and paste window, built on first use
+
+local function stampRule(key)
+    local s = GuildOS.db and GuildOS.db.settings
+    if not s then return end
+    s.ruleStamps = s.ruleStamps or {}
+    s.ruleStamps[key] = { by = UnitName("player") or "?", at = GetServerTime() }
+end
+
+-- Asks before a change the whole guild feels; `fn` runs only on Yes.
+local function confirmThen(text, fn)
+    local dialog = StaticPopupDialogs[RULE_CONFIRM]
+    if not dialog then
+        dialog = {
+            button1 = L["Yes"], button2 = L["Cancel"], timeout = 0, whileDead = true,
+            hideOnEscape = true, preferredIndex = 3,
+            OnAccept = function()
+                local run = pendingRuleAccept
+                pendingRuleAccept = nil
+                if run then run() end
+            end,
+            OnCancel = function() pendingRuleAccept = nil end,
+        }
+        StaticPopupDialogs[RULE_CONFIRM] = dialog
+    end
+    dialog.text = text
+    pendingRuleAccept = fn
+    StaticPopup_Show(RULE_CONFIRM)
+end
+
+-- The attendance penalties, in the order the page shows them. The checker's own penalty only where it exists.
+local function penaltyList()
+    local list = {
+        { key = "LATE", label = L["Late (missed first snapshot)"], short = L["Late"] },
+        { key = "LEFT_EARLY", label = L["Left Early (missed last snapshot)"], short = L["Left Early"] },
+    }
+    -- Consumables are checked only where the checker exists (TBC, ADR-0014; issue #184).
+    if GuildOS.ConsumableChecker then
+        list[#list + 1] = { key = "NO_CONSUMES", label = L["No Consumables (<50% snapshots)"], short = L["No Consumables"] }
+    end
+    return list
+end
+
+local function penaltyValue(key)
+    local RT = GuildOS.RaidTracker
+    return RT and RT:GetPenalties("")[key] or 0
+end
+
+local function penaltiesOn()
+    for _, p in ipairs(penaltyList()) do
+        if penaltyValue(p.key) > 0 then return true end
+    end
+    return false
+end
+
+-- Every penalty to one value, then the scores rebuilt once. The default is 10 (CoreManager).
+local function setPenalties(value)
+    local RT = GuildOS.RaidTracker
+    if not (GuildOS.CoreManager and RT) then return false end
+    for _, p in ipairs(penaltyList()) do GuildOS.CoreManager:SetPenalty(p.key, value, "") end
+    RT:RebuildAttendanceFromSessions()
+    stampRule("attendance")
+    return true
+end
+
+-- Under a section: who changed it on this client, and when, once somebody has.
+local function stampLine(F, S, key)
+    local note = F:Note("", { gap = 6, shown = function() return S.ruleStamps ~= nil and S.ruleStamps[key] ~= nil end })
+    F:Sync(function()
+        local st = S.ruleStamps and S.ruleStamps[key]
+        if st then
+            note:SetText(string.format(L["Last changed on this client by %s on %s."], st.by,
+                GuildOS:LocalDate(L["%d %b %Y"], st.at)))
+        end
+    end)
+    return note
+end
+
+-- The rules as one line of text: tag, then key=value pairs separated by semicolons.
+local function exportRules()
+    local s = GuildOS.db.settings
+    local parts = { RULES_TAG, "officers=" .. (s.officerMaxRank or 1), "events=" .. GuildOS:EventMaxRank() }
+    local Cal = GuildOS.Calendar
+    if Cal and Cal.KINDS then
+        local open = Cal:MemberKinds()
+        local kinds = {}
+        for _, k in ipairs(Cal.KINDS) do
+            if open == nil or open[k] then kinds[#kinds + 1] = k end
+        end
+        parts[#parts + 1] = "kinds=" .. table.concat(kinds, ",")
+    end
+    if GuildOS.RaidTracker then
+        for _, p in ipairs(penaltyList()) do
+            parts[#parts + 1] = string.lower(p.key) .. "=" .. penaltyValue(p.key)
+        end
+    end
+    parts[#parts + 1] = "ilvl=" .. (GuildOS.Readiness and GuildOS.Readiness:GetMinIlvl() or 0)
+    return table.concat(parts, ";")
+end
+
+-- The fields of a rules string, or nil when it is not one.
+local function parseRules(text)
+    text = strtrim(text or "")
+    local fields, first = {}, true
+    for part in string.gmatch(text, "[^;]+") do
+        if first then
+            if part ~= RULES_TAG then return nil end
+            first = false
+        else
+            local k, v = part:match("^(%w+)=(.*)$")
+            if not k then return nil end
+            fields[k] = v
+        end
+    end
+    if first then return nil end
+    return fields
+end
+
+local function importRules(text)
+    if not GuildOS:IsOfficer() then
+        GuildOS:Print(L["Only officers change these."])
+        return
+    end
+    local f = parseRules(text)
+    if not f then
+        GuildOS:Print(L["That is not a Guild OS rules string."])
+        return
+    end
+    confirmThen(L["Apply these rules to the whole guild? Every member sees the change."], function()
+        local RT, Cal = GuildOS.RaidTracker, GuildOS.Calendar
+        local officers, events, ilvl = tonumber(f.officers), tonumber(f.events), tonumber(f.ilvl)
+        if officers and GuildOS:SetOfficerMaxRank(officers) then stampRule("officers") end
+        if events and GuildOS:SetEventMaxRank(events) then stampRule("events") end
+        if f.kinds and Cal then
+            local list = {}
+            for k in string.gmatch(f.kinds, "[^,]+") do list[#list + 1] = k end
+            if Cal:SetMemberKinds(list) then stampRule("events") end
+        end
+        for _, p in ipairs(penaltyList()) do
+            local v = tonumber(f[string.lower(p.key)])
+            if v and GuildOS.CoreManager then GuildOS.CoreManager:SetPenalty(p.key, v, "") end
+        end
+        if RT then
+            RT:RebuildAttendanceFromSessions()
+            stampRule("attendance")
+        end
+        if ilvl and GuildOS.Readiness and GuildOS.Readiness:SetMinIlvl(ilvl ~= 0 and ilvl or nil) then
+            stampRule("readiness")
+        end
+        GuildOS:Print(L["Rules pasted and applied."])
+        if rulesForm then rulesForm:Refresh() end
+    end)
+end
+
+local function buildRulesIO()
+    local f = CreateFrame("Frame", "GuildOSRulesIO", UIParent, "BackdropTemplate")
+    f:SetSize(460, 260)
+    f:SetPoint("CENTER")
+    f:SetBackdrop({ bgFile = WHITE8, edgeFile = WHITE8, edgeSize = GuildOS.UI:Edge(f) })
+    f:SetBackdropColor(0.058, 0.058, 0.075, 0.98)
+    f:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, C.border.a)
+    UI:StylePopup(f)
+    f:SetFrameStrata("DIALOG")
+    f:SetMovable(true)
+    f:EnableMouse(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+    table.insert(UISpecialFrames, "GuildOSRulesIO")
+
+    f.title = UI:CreateTitle(f, "", 14)
+    f.title:SetPoint("TOPLEFT", 14, -12)
+    local close = UI:CreateCloseButton(f)
+    close:SetPoint("TOPRIGHT", -6, -6)
+    close:SetScript("OnClick", function() f:Hide() end)
+
+    f.hint = UI:CreateText(f, "", 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+    f.hint:SetPoint("TOPLEFT", 14, -40)
+    f.hint:SetWidth(432)
+    f.hint:SetJustifyH("LEFT")
+    f.hint:SetWordWrap(true)
+
+    f.area = UI:CreateTextArea(f, 432, 110, { max = 1000 })
+    f.area:SetPoint("TOPLEFT", 14, -84)
+
+    f.apply = UI:CreateButton(f, L["Apply"], 90, 24)
+    f.apply:SetPoint("BOTTOMRIGHT", -14, 14)
+    f.apply:SetScript("OnClick", function()
+        if f.onApply then f.onApply(f.area.edit:GetText()) end
+    end)
+    return f
+end
+
+local function showRulesIO(mode)
+    rulesIO = rulesIO or buildRulesIO()
+    if mode == "export" then
+        rulesIO.title:SetText(L["Copy rules"])
+        rulesIO.hint:SetText(L["Select the text and press Ctrl+C to copy it. Paste it into another officer's Guild OS to share these rules."])
+        rulesIO.area.edit:SetText(exportRules())
+        rulesIO.apply:Hide()
+        rulesIO.onApply = nil
+    else
+        rulesIO.title:SetText(L["Paste rules"])
+        rulesIO.hint:SetText(L["Paste rules copied from another officer, then press Apply. The whole guild sees the change."])
+        rulesIO.area.edit:SetText("")
+        rulesIO.apply:Show()
+        rulesIO.onApply = importRules
+    end
+    rulesIO:Show()
+    rulesIO.area.edit:SetFocus()
+    rulesIO.area.edit:HighlightText()
+end
+
+-- Officers change these for the whole guild; members read what applies.
 PAGES.rules = function(F, isOfficer)
     local S = GuildOS.db.settings
+    local RT, Cal = GuildOS.RaidTracker, GuildOS.Calendar
+    rulesForm = F
+    -- A wide window splits the page: officers and calendar on the left, attendance and the rest on the right.
+    F.columns = true
     F:Note(isOfficer and L["These apply to the whole guild: a change goes to every member running Guild OS."]
         or L["Only officers change these. This is what applies in your guild now."], { gap = 0 })
 
@@ -677,8 +1001,40 @@ PAGES.rules = function(F, isOfficer)
         return (n and n ~= "") and n or (L["Rank "] .. idx)
     end
 
+    -- A section with a header button that folds its rows. The fold is kept on this client.
+    local function section(key, title)
+        S.rulesCollapsed = S.rulesCollapsed or {}
+        local function folded() return S.rulesCollapsed[key] == true end
+        F:Section(title, nil, {
+            anchor = key, role = "itemName", isCollapsed = folded,
+            group = { collapsed = folded },
+            toggle = function() S.rulesCollapsed[key] = (not folded()) or nil end,
+        })
+    end
+
+    -- Jump to a section: the page scrolls to the row it starts at.
+    local function jumpTo(key)
+        local scroll = F.content:GetParent()
+        local y = F.anchors and F.anchors[key]
+        if y and scroll and scroll.SetVerticalScroll then scroll:SetVerticalScroll(math.max(0, y - 8)) end
+    end
+    local jumps = {
+        { L["Officers"], "officers", 120 },
+        { L["Calendar events"], "calendar", 150 },
+    }
+    if RT then jumps[#jumps + 1] = { L["Attendance"], "attendance", 120 } end
+    if not GuildOS.Client.isAnniversary and not GuildOS.Client.isRetail and GuildOS.Readiness then
+        jumps[#jumps + 1] = { L["Readiness"], "readiness", 120 }
+    end
+    if isOfficer then jumps[#jumps + 1] = { L["The !note command"], "note", 170 } end
+    local jumpSpecs = {}
+    for _, j in ipairs(jumps) do
+        jumpSpecs[#jumpSpecs + 1] = { j[1], function() jumpTo(j[2]) end, w = j[3] }
+    end
+    F:Buttons(jumpSpecs, { gap = 10 })
+
     -- Who is an officer (issue #81): the guild's threshold, rank 0 (the guild master) always in.
-    F:Section(L["Who is an officer in Guild OS"])
+    section("officers", L["Who is an officer in Guild OS"])
     if numRanks == 0 then
         F:Note(L["Guild rank info not available. Open the Guild panel first."])
     elseif isOfficer then
@@ -693,23 +1049,46 @@ PAGES.rules = function(F, isOfficer)
                 F:Refresh()
             end, w = 220 } }, { shown = function() return not S.officerMaxRankAt and share[1]:IsShown() end })
         end
+        F:Note(L["Tick a rank to make it an officer. Ticking one also ticks every rank above it."], { gap = 6 })
+        -- Members of each rank, counted once per refresh before the rank lines read it.
+        local counts = {}
+        F:Sync(function()
+            counts = {}
+            for i = 1, GetNumGuildMembers and GetNumGuildMembers() or 0 do
+                local _, _, rankIndex = GetGuildRosterInfo(i)
+                if rankIndex then counts[rankIndex] = (counts[rankIndex] or 0) + 1 end
+            end
+        end)
         for i = 0, numRanks - 1 do
             local isGM = i == 0
-            F:Check(rankName(i), isGM and L["Always an officer."] or nil,
+            F:Check(rankName(i), nil,
                 function() return i <= (S.officerMaxRank or 1) end,
                 function(checked)
                     -- Ticking a rank takes every rank above it; unticking one drops every rank below it.
                     local newMax = checked and math.max(i, S.officerMaxRank or 0) or math.max(0, i - 1)
-                    local wasOfficer = GuildOS:IsOfficer()
-                    -- No longer an officer (a change from elsewhere, the panel still open): nothing changed.
-                    if not GuildOS:SetOfficerMaxRank(newMax) then return end
-                    -- Ticking one's own rank off ends one's officer modules, at the next reload.
-                    if GuildOS:IsOfficer() ~= wasOfficer then markReload("officer", true) end
-                    GuildOS:Print(L["Officer threshold: ranks 0-"] .. newMax .. " (" .. rankName(newMax) .. L[" and above are officers)."])
+                    -- Asked first, as the whole guild's officers change with it. Refreshing after a
+                    -- No puts the tick back, since the threshold did not move.
+                    confirmThen(L["This changes who counts as an officer for the whole guild. Continue?"], function()
+                        local wasOfficer = GuildOS:IsOfficer()
+                        -- No longer an officer (a change from elsewhere, the panel still open): nothing changed.
+                        if not GuildOS:SetOfficerMaxRank(newMax) then return end
+                        stampRule("officers")
+                        -- Ticking one's own rank off ends one's officer modules, at the next reload.
+                        if GuildOS:IsOfficer() ~= wasOfficer then markReload("officer", true) end
+                        GuildOS:Print(L["Officer threshold: ranks 0-"] .. newMax .. " (" .. rankName(newMax) .. L[" and above are officers)."])
+                        F:Refresh()
+                    end)
                 end,
                 { enabled = function() return not isGM end, gap = 6 })
+            local line = F:Note("", { indent = NOTE_INDENT })
+            F:Sync(function()
+                local n = counts[i] or 0
+                local members = string.format(L["%d members"], n)
+                line:SetText(isGM and (L["Always an officer."] .. " " .. members) or members)
+            end)
         end
-        F:Note(L["Change takes effect immediately. Reload UI required to reload officer modules."], { gap = 8 })
+        F:Note(L["The threshold saves at once. Officer modules load or unload after you reload the interface."], { gap = 8 })
+        stampLine(F, S, "officers")
     else
         F:Value(L["Officers"], function()
             local names = {}
@@ -719,7 +1098,7 @@ PAGES.rules = function(F, isOfficer)
     end
 
     -- Who creates calendar events (issue #283) and of which kinds (#308).
-    F:Section(L["Calendar events"])
+    section("calendar", L["Calendar events"])
     local function whoCreates()
         local max = GuildOS:EventMaxRank()
         if max <= (S.officerMaxRank or 1) then return L["Officers"] end
@@ -737,7 +1116,10 @@ PAGES.rules = function(F, isOfficer)
             local last = (GuildControlGetNumRanks and GuildControlGetNumRanks() or 10) - 1
             local nextMax = GuildOS:EventMaxRank() + 1
             if nextMax > last then nextMax = officers end
-            if GuildOS:SetEventMaxRank(nextMax) then F:Refresh() end
+            if GuildOS:SetEventMaxRank(nextMax) then
+                stampRule("events")
+                F:Refresh()
+            end
         end)
         F:Sync(function() whoBtn.label:SetText(whoCreates()) end)
         F:Row(whoRow, { wide = true, place = function(_, w)
@@ -750,7 +1132,6 @@ PAGES.rules = function(F, isOfficer)
     else
         F:Value(L["Who creates events:"], whoCreates)
     end
-    local Cal = GuildOS.Calendar
     if Cal and Cal.KINDS then
         local function isOpen(k)
             local open = Cal:MemberKinds()
@@ -771,13 +1152,24 @@ PAGES.rules = function(F, isOfficer)
                 kb.kind = k
                 kb.checkbox.onChanged = function(box)
                     -- No longer an officer (a change from elsewhere, the panel still open): the tick goes back.
-                    if not Cal:SetMemberKinds(ticked()) then box:SetChecked(not box:GetChecked()) end
+                    if not Cal:SetMemberKinds(ticked()) then
+                        box:SetChecked(not box:GetChecked())
+                    else
+                        stampRule("events")
+                    end
                 end
                 F:Sync(function() kb.checkbox:SetChecked(isOpen(k)) end)
                 boxes[#boxes + 1] = kb
                 return kb
-            end, Cal.KINDS, 18, { gap = 6, colW = 130 })
+            end, Cal.KINDS, 18, { gap = 6, cols = 3 })
             F:Note(L["Officers can always create every type."], { gap = 6 })
+            F:Buttons({ { L["Reset calendar rules"], function()
+                local okMax = GuildOS:SetEventMaxRank(S.officerMaxRank or 1)
+                local okKinds = Cal:SetMemberKinds(Cal.KINDS)
+                if okMax or okKinds then stampRule("events") end
+                GuildOS:Print(L["Calendar rules reset to the defaults."])
+                F:Refresh()
+            end, w = 180 } }, { gap = 10 })
         else
             F:Value(L["Event types non-officers may create:"], function()
                 local names = {}
@@ -787,85 +1179,118 @@ PAGES.rules = function(F, isOfficer)
                 return #names > 0 and table.concat(names, ", ") or L["None"]
             end)
         end
+        stampLine(F, S, "events")
     end
+
+    -- The second column: attendance, readiness and !note.
+    F:Column()
 
     -- The guild's attendance weights (issue #55): what a raid outside any core scores with, and what a
     -- core takes when it set none of its own (Raids > Cores). 0 turns one off.
-    local RT = GuildOS.RaidTracker
     if RT then
-        F:Section(L["Attendance"])
-        F:Note(L["Attendance penalties (base score = 100, 0 turns one off):"], { gap = 0 })
+        section("attendance", L["Attendance"])
+        F:Note(L["Each penalty comes off a base score of 100. Set a penalty to 0 to turn it off."], { gap = 0 })
         F:Note(L["For raids outside a core, and for every core that set none of its own."])
-        local penalties = {
-            { key = "LATE",       label = L["Late (missed first snapshot)"] },
-            { key = "LEFT_EARLY", label = L["Left Early (missed last snapshot)"] },
-        }
-        -- Consumables are checked only where the checker exists (TBC, ADR-0014; issue #184).
-        if GuildOS.ConsumableChecker then
-            penalties[#penalties + 1] = { key = "NO_CONSUMES", label = L["No Consumables (<50% snapshots)"] }
-        end
-        local function penalty(key) return RT:GetPenalties("")[key] end
+        local meaning = L["Late: missed the first snapshot. Left early: missed the last."]
+        if GuildOS.ConsumableChecker then meaning = meaning .. " " .. L["No consumables: under half the snapshots."] end
+        F:Note(meaning)
+        F:Value(L["Penalties"], function() return penaltiesOn() and L["On"] or L["Off"] end, { gap = 10 })
         if isOfficer and GuildOS.CoreManager then
-            for i, p in ipairs(penalties) do
-                F:Field(p.label, { w = 44, max = 3, numeric = true, gap = i == 1 and 10 or nil,
-                    get = function() return penalty(p.key) end,
-                    save = function(box)
-                        local val = tonumber(box:GetText())
-                        if not val then   -- an empty box is a slip, not "off": 0 is typed
-                            box:SetText(tostring(penalty(p.key)))
-                            return
-                        end
-                        GuildOS.CoreManager:SetPenalty(p.key, val, "")
-                        RT:RebuildAttendanceFromSessions()
-                        box:SetText(tostring(penalty(p.key)))
-                        GuildOS:Print(L["Attendance penalty saved."])
-                    end })
+            local fields = {}
+            for _, p in ipairs(penaltyList()) do
+                fields[#fields + 1] = { key = p.key, label = p.short, w = 44, get = function() return penaltyValue(p.key) end }
             end
-            F:Buttons({ { L["Turn penalties off"], function()
-                for _, p in ipairs(penalties) do GuildOS.CoreManager:SetPenalty(p.key, 0, "") end
-                RT:RebuildAttendanceFromSessions()
-                GuildOS:Print(L["Attendance penalties are off."])
+            F:Inline(fields, { gap = 10, saveText = L["Save"], save = function(items)
+                local saved, empty = false, false
+                for _, it in ipairs(items) do
+                    local val = tonumber(it.box:GetText())
+                    if val then
+                        GuildOS.CoreManager:SetPenalty(it.fd.key, val, "")
+                        saved = true
+                    else
+                        empty = true
+                    end
+                end
+                if saved then
+                    RT:RebuildAttendanceFromSessions()
+                    stampRule("attendance")
+                    GuildOS:Print(L["Attendance penalty saved."])
+                end
+                if empty then GuildOS:Print(L["Enter a number for each penalty. 0 turns one off."]) end
                 F:Refresh()
-            end, w = 170 } })
-            -- The raid group the next session is tagged with; Raids > Cores sets it too.
+            end })
+            local toggle = F:Buttons({
+                { L["Turn penalties off"], function()
+                    local on = penaltiesOn()
+                    setPenalties(on and 0 or 10)
+                    GuildOS:Print(on and L["Attendance penalties are off."] or L["Attendance penalties are on."])
+                    F:Refresh()
+                end, w = 170 },
+                { L["Reset attendance to defaults"], function()
+                    setPenalties(10)
+                    GuildOS:Print(L["Attendance rules reset to the defaults."])
+                    F:Refresh()
+                end, w = 220 },
+            }, { gap = 10 })
+            F:Sync(function()
+                toggle[1].label:SetText(penaltiesOn() and L["Turn penalties off"] or L["Turn penalties on"])
+            end)
+            -- The raid group the next session is tagged with; Raids > Cores sets it too. Kept out of the reset.
             F:Field(L["Raid Group:"], { w = 160, max = 64, hint = L["Ex: Core 1, Core 2"], gap = 14,
                 get = function() return GuildOS.db.raidTracker and GuildOS.db.raidTracker.currentGroupTag or "" end,
                 save = function(box)
                     local name = strtrim(box:GetText())
                     RT:SetGroupTag(name)
-                    if name ~= "" then
-                        GuildOS:Print(L["Raid group set: "] .. "|cff9966FF" .. name .. "|r")
-                    else
+                    if name == "" then
                         GuildOS:Print(L["Raid group removed."])
+                        return
+                    end
+                    GuildOS:Print(L["Raid group set: "] .. "|cff9966FF" .. name .. "|r")
+                    local known = false
+                    for _, core in ipairs(GuildOS.CoreManager and GuildOS.CoreManager:GetSortedNames() or {}) do
+                        if core == name then known = true break end
+                    end
+                    if not known then
+                        GuildOS:Print(string.format(L["No core is called %s yet. The raid group is saved anyway."], name))
                     end
                 end })
         else
-            for i, p in ipairs(penalties) do
+            for i, p in ipairs(penaltyList()) do
                 F:Value(p.label, function()
-                    local v = penalty(p.key)
+                    local v = penaltyValue(p.key)
                     return v > 0 and ("-" .. v) or "0"
                 end, { numeric = true, gap = i == 1 and 10 or nil })
             end
         end
+        stampLine(F, S, "attendance")
     end
 
     -- WoW: Forever: the item level a 60 needs to be ready without a warning (issue #206).
     if not GuildOS.Client.isAnniversary and not GuildOS.Client.isRetail and GuildOS.Readiness then
-        F:Section(L["Readiness"])
+        section("readiness", L["Readiness"])
         if isOfficer then
-            F:Field(L["Minimum item level for a level 60:"], { w = 50, max = 3, numeric = true,
+            F:Field(L["Minimum item level for a level 60:"], { w = 50, max = 4, numeric = true,
                 get = function() return GuildOS.Readiness:GetMinIlvl() end,
                 save = function(box)
-                    GuildOS.Readiness:SetMinIlvl(tonumber(box:GetText()))
+                    local text = strtrim(box:GetText())
+                    local n = tonumber(text)
+                    -- 1 to 1000, a whole number; the empty box clears it. Readiness keeps the same range.
+                    if text ~= "" and not (n and n >= 1 and n <= 1000 and n == math.floor(n)) then
+                        GuildOS:Print(L["Enter a whole item level from 1 to 1000, or leave it empty for no minimum."])
+                        box:SetText(tostring(GuildOS.Readiness:GetMinIlvl() or ""))
+                        return
+                    end
+                    if GuildOS.Readiness:SetMinIlvl(n) then stampRule("readiness") end
                     box:SetText(tostring(GuildOS.Readiness:GetMinIlvl() or ""))
                 end })
-            F:Note(L["Empty: no minimum. Below it, a 60 still counts, with a warning."])
+            F:Note(L["Leave empty for no minimum. With 200 set, a level 60 at 190 still counts, with a warning."])
             -- The founding letter, for after the prompt was put away (issue #208): the GM records, an
             -- officer suggests.
             if GuildOS.Founding and GuildOS:IsFeatureEnabled("founding") then
-                F:Buttons({ { GuildOS.Founding:IsGM() and L["Record founding"] or L["Suggest founding date to your GM"],
+                F:Buttons({ { GuildOS.Founding:IsGM() and L["Record the founding date"] or L["Suggest founding date to your GM"],
                     function() GuildOS:ShowFoundingLetter(false) end, w = 240 } }, { gap = 12 })
             end
+            stampLine(F, S, "readiness")
         else
             F:Value(L["Minimum item level for a level 60:"], function()
                 return GuildOS.Readiness:GetMinIlvl() or L["None"]
@@ -876,14 +1301,23 @@ PAGES.rules = function(F, isOfficer)
     -- !note (issue #59): members set their public note by typing !note in guild chat, and a client that
     -- can edit notes applies it.
     if isOfficer then
-        F:Section(L["The !note command"])
-        F:Check(L["Apply !note requests from guild chat on this client"],
-            L["Members set their public note by typing !note in guild chat."],
+        section("note", L["The !note command"])
+        F:Check(L["Apply !note requests on this client"],
+            L["Members still type !note in guild chat. This only changes what this client does with it."],
             function() return GuildOS.db.noteCommand and GuildOS.db.noteCommand.enabled end,
             function(checked)
                 if GuildOS.db.noteCommand then GuildOS.db.noteCommand.enabled = checked end
             end)
     end
+
+    -- Copy the rules as text to another officer, and paste theirs in. Pasting needs an officer.
+    F:Section(L["Share these rules"], nil, { role = "itemName" })
+    F:Note(L["Copy the rules as text to share them with another officer. Paste a copied rules string to apply it."])
+    local shareSpecs = { { L["Copy rules"], function() showRulesIO("export") end, w = 140 } }
+    if isOfficer then
+        shareSpecs[#shareSpecs + 1] = { L["Paste rules"], function() showRulesIO("import") end, w = 140 }
+    end
+    F:Buttons(shareSpecs, { gap = 10 })
 end
 
 PAGES.data = function(F, isOfficer)
@@ -1067,7 +1501,7 @@ function GuildOS:RefreshSettingsPanel(content, key)
             for _, child in pairs({ content:GetChildren() }) do child:Hide() end
             for _, region in pairs({ content:GetRegions() }) do region:Hide() end
         end
-        F = newForm(content)
+        F = newForm(content, { bright = key == "rules" })
         PAGES[key](F, isOfficer)
         content.__settingsForm, content.__settingsShape = F, shape
     end

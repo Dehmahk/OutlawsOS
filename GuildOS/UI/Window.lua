@@ -123,8 +123,9 @@ function UI:RestoreWindowGeometry(f)
         f:SetSize(w, h)
         f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
     else
-        f:SetSize(math.min(DEFAULT_W, sw), math.min(DEFAULT_H, sh))
-        f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+        -- First open, nothing saved yet: fill the whole UI screen. A saved size still wins.
+        f:SetSize(sw, sh)
+        f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", 0, sh)
     end
 end
 
