@@ -1,7 +1,7 @@
 ----------------------------------------------------------------------
 -- Guild OS - Español (España / Latinoamérica)
 ----------------------------------------------------------------------
-local _loc = GetLocale and GetLocale()
+local _loc = GuildOS.Locale
 if _loc ~= "esES" and _loc ~= "esMX" then return end
 local L = GuildOS.L
 

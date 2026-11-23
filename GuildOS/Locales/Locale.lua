@@ -26,4 +26,5 @@ GuildOS.L = setmetatable({}, {
 
 -- Active client locale (e.g. "enUS", "ptBR", "deDE"). Exposed for any
 -- locale-specific behaviour beyond simple string lookups.
-GuildOS.Locale = (GetLocale and GetLocale()) or "enUS"
+-- The language picked on the Interface page (GuildOSDB.locale), else the client's own.
+GuildOS.Locale = (GuildOSDB and GuildOSDB.locale) or (GetLocale and GetLocale()) or "enUS"

@@ -133,6 +133,19 @@ function Form:Refresh()
     return self:Layout()
 end
 
+-- Scrolls a page to `v`, clamped to its range. The scrollbar holds the position the wheel moves from,
+-- so it is set too: setting only the frame's offset leaves the wheel working from the old value.
+local function setScroll(scroll, v)
+    local r = math.max(0, scroll:GetVerticalScrollRange() or 0)
+    v = math.max(0, math.min(v or 0, r))
+    local bar = scroll.ScrollBar
+    if type(bar) == "table" or type(bar) == "userdata" then
+        bar:SetMinMaxValues(0, r)
+        bar:SetValue(v)
+    end
+    scroll:SetVerticalScroll(v)
+end
+
 function Form:Layout(width)
     width = num(width, 0)
     if width < 1 then width = num(self.content:GetWidth(), 0) end
@@ -182,6 +195,10 @@ function Form:Layout(width)
     for i = #rails + 1, #self.railLines do self.railLines[i]:Hide() end
     local y = math.max(ys[1], ys[2])
     self.content:SetHeight(math.max(1, y))
+    -- A shorter page or a taller window can leave the scroll offset past the new range, which
+    -- WoW does not pull back on its own: the page then sits in a blank area and will not scroll.
+    local scrollFrame = self.content:GetParent()
+    if scrollFrame and scrollFrame.GetVerticalScroll then setScroll(scrollFrame, scrollFrame:GetVerticalScroll()) end
     return y
 end
 
@@ -194,6 +211,9 @@ function Form:Section(title, shown, opts)
         self:Row(UI:CreateSeparator(self.content), { gap = 20, wide = true, h = 1, shown = shown, rule = true })
     end
     local host = opts.toggle and CreateFrame("Frame", nil, self.content) or self.content
+    -- A folding header lives in a frame of its own; give it a height, or its title and Hide button
+    -- are anchored to nothing and do not draw.
+    if opts.toggle then host:SetSize(1, 22) end
     local fs = host:CreateFontString(nil, "OVERLAY")
     GuildOS:ApplyFont(fs, nil, opts.role or "sectionTitle")
     fs:SetShadowOffset(0, 0)
@@ -507,7 +527,32 @@ PAGES.profile = function(F)
     F:Note(L["Replay the first-run intro"], { gap = 6 })
 end
 
+-- The Interface page's form, refreshed after a reset.
+local interfaceForm
+
+-- Back to the defaults: the scale, the font, the guild lines on tooltips, the guild bank options and
+-- the footer. The language stays: it is a choice of its own.
+GuildOS.Dialogs["GUILDOS_RESET_INTERFACE"] = {
+    text = L["Reset the interface settings to their defaults? Your language stays."],
+    button1 = L["Reset"], button2 = L["Cancel"],
+    OnAccept = function()
+        GuildOS:SetSetting("uiScale", 1)
+        UI:ApplyScale()
+        GuildOSDB.font = nil
+        GuildOS:SetSetting("itemTooltip", "always")
+        GuildOS:SetSetting("gbankTooltip", true)
+        GuildOS:SetSetting("gbankBar", true)
+        GuildOS:SetSetting("hideFooter", false)
+        markReload("font", boot.font == true)
+        markReload("footer", boot.footer == true)
+        if interfaceForm then interfaceForm:Refresh() end
+    end,
+    timeout = 0, whileDead = true, hideOnEscape = true,
+}
+
 PAGES.interface = function(F)
+    interfaceForm = F
+    F.columns = true
     F:Section(L["Appearance"])
     local scaleRow = CreateFrame("Frame", nil, F.content)
     scaleRow:SetSize(1, 34)
@@ -553,6 +598,7 @@ PAGES.interface = function(F)
         styleRow:Hide()
     end
 
+    F:Subhead(L["Font"], { gap = 14 })
     -- The game's own font instead of GuildOS's (issue #57), for the whole account. A Korean or Chinese
     -- client, and the Forever style, always use it (#103).
     local forced = GuildOS.GameFontOnly or GuildOS.Style.gameFont
@@ -566,7 +612,41 @@ PAGES.interface = function(F)
         end,
         { enabled = function() return not forced end, gap = 12 })
 
+    -- The language OutlawOS's own text is in (Locales/), for this account. The client's own until one is
+    -- picked here; the game's own text stays in the game's language. Applies after a reload.
+    F:Subhead(L["Language"], { gap = 14 })
+    F:Note(L["Applies after a reload. The game's own text stays in the game's language."], { gap = 4 })
+    local LANGUAGES = {
+        { "enUS", "English" }, { "ptBR", "Português (Brasil)" }, { "esES", "Español" },
+        { "deDE", "Deutsch" }, { "frFR", "Français" }, { "ruRU", "Русский" },
+        { "koKR", "한국어" }, { "zhCN", "简体中文" }, { "zhTW", "繁體中文" }, { "itIT", "Italiano" },
+    }
+    local langList = {}
+    for _, lang in ipairs(LANGUAGES) do
+        local code = lang[1]
+        langList[#langList + 1] = { lang[2], function()
+            GuildOSDB.locale = code
+            markReload("language", code ~= boot.locale)
+            if interfaceForm then interfaceForm:Refresh() end
+        end }
+    end
+    local langBtns = F:Buttons(langList, { gap = 6 })
+    for i, lang in ipairs(LANGUAGES) do
+        if lang[1] == GuildOS.Locale then langBtns[i]:Disable() end
+    end
+
+    -- The footer: the motto and the site link along the bottom of the window (UI/Window.lua).
+    F:Check(L["Hide the footer"], L["The motto and guildos.me link along the bottom of the window. Applies after a reload."],
+        function() return GuildOS:GetSetting("hideFooter") == true end,
+        function(checked)
+            GuildOS:SetSetting("hideFooter", checked and true or false)
+            markReload("footer", checked ~= boot.footer)
+        end, { gap = 12 })
+
+    -- The second column: what the game shows, and the reset.
+    F:Column()
     F:Section(L["In the game"])
+    F:Note(L["Set a key for the Guild OS toggle under Key Bindings, AddOns, Guild OS."], { gap = 6 })
     F:Check(L["Show minimap button"], nil,
         function() return GuildOS.IsMinimapShown and GuildOS:IsMinimapShown() end,
         function(checked) if GuildOS.SetMinimapShown then GuildOS:SetMinimapShown(checked) end end)
@@ -597,16 +677,24 @@ PAGES.interface = function(F)
         end,
         { indent = SUB_INDENT, enabled = tooltipsOn })
     -- The guild bank (issue #380): how many the bank holds, on the item's tooltip, and the bar under
-    -- the game's bank. Where the client has a guild bank.
+    -- the game's bank. Where the client has a guild bank. Both are greyed out unless a guild bank is open.
     if GuildOS.GuildBank and GuildOS.GuildBank:Available() then
+        local function bankOpen() return GuildOS.GuildBank:IsOpen() and true or false end
+        F:Note(L["Open a guild bank to change these."], { gap = 12 })
         F:Check(L["Guild bank count on item tooltips"], L["How many the guild bank holds, and what it still needs."],
             function() return GuildOS:GetSetting("gbankTooltip") ~= false end,
             function(checked) GuildOS:SetSetting("gbankTooltip", checked) end,
-            { indent = SUB_INDENT, enabled = tooltipsOn })
+            { indent = SUB_INDENT, enabled = function() return tooltipsOn() and bankOpen() end })
         F:Check(L["Guild OS bar under the guild bank"], L["Organize the tab you are on, or every tab your rank may, from the bank itself."],
             function() return GuildOS:GetSetting("gbankBar") ~= false end,
-            function(checked) GuildOS:SetSetting("gbankBar", checked) end)
+            function(checked) GuildOS:SetSetting("gbankBar", checked) end,
+            { enabled = bankOpen })
     end
+
+    F:Subhead(L["Reset"], { gap = 14 })
+    F:Action(L["Reset interface settings"], L["Scale, font, tooltips, guild bank and footer."], function()
+        GuildOS:ShowDialog("GUILDOS_RESET_INTERFACE")
+    end)
 end
 
 -- Chat and alerts: personal display and alert settings, never synced (Modules/ChatTweaks.lua, Modules/Mentions.lua).
@@ -1200,7 +1288,9 @@ PAGES.rules = function(F, isOfficer)
     local function jumpTo(key)
         local scroll = F.content:GetParent()
         local y = F.anchors and F.anchors[key]
-        if y and scroll and scroll.SetVerticalScroll then scroll:SetVerticalScroll(math.max(0, y - 8)) end
+        if y and scroll and scroll.SetVerticalScroll then
+            setScroll(scroll, y - 8)
+        end
     end
     local jumps = {
         { L["Officers"], "officers", 120 },
@@ -1676,7 +1766,7 @@ end
 function GuildOS:RefreshSettingsPanel(content, key)
     key = OLD_KEYS[key] or key
     if not PAGES[key] then key = "profile" end
-    boot = boot or { font = GuildOSDB and GuildOSDB.font == "game", modules = {} }
+    boot = boot or { font = GuildOSDB and GuildOSDB.font == "game", footer = GuildOS:GetSetting("hideFooter") == true, locale = GuildOS.Locale, modules = {} }
     local isOfficer = GuildOS:IsOfficer()
     local shape = shapeOf(key, isOfficer)
     local F = content.__settingsForm

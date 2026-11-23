@@ -2,7 +2,7 @@
 -- Guild OS - 简体中文 (zhCN)
 -- One of the game's ten languages (#104). Machine-translated; corrections from players welcome.
 ----------------------------------------------------------------------
-if (GetLocale and GetLocale()) ~= "zhCN" then return end
+if GuildOS.Locale ~= "zhCN" then return end
 local L = GuildOS.L
 
 L["  %d. %s — %d items (%d epics, %.0f%%)"] = "  %d. %s — %d 件物品（%d 件史诗，%.0f%%）"

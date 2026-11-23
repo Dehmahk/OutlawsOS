@@ -1,7 +1,7 @@
 ----------------------------------------------------------------------
 -- Guild OS - Français
 ----------------------------------------------------------------------
-if (GetLocale and GetLocale()) ~= "frFR" then return end
+if GuildOS.Locale ~= "frFR" then return end
 local L = GuildOS.L
 
 -- Core/Commands.lua

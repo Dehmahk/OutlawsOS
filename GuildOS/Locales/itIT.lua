@@ -4,7 +4,7 @@
 -- client has one (Incursione, Spedizione, Gran Banca, Chiave del Potere, Appello, Responsabile del
 -- bottino...), read from the itIT client's own data; corrections from players welcome.
 ----------------------------------------------------------------------
-if (GetLocale and GetLocale()) ~= "itIT" then return end
+if GuildOS.Locale ~= "itIT" then return end
 local L = GuildOS.L
 
 -- Core/Commands.lua

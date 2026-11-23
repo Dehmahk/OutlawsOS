@@ -2,7 +2,7 @@
 -- Guild OS - 繁體中文 (zhTW)
 -- One of the game's ten languages (#104). Machine-translated; corrections from players welcome.
 ----------------------------------------------------------------------
-if (GetLocale and GetLocale()) ~= "zhTW" then return end
+if GuildOS.Locale ~= "zhTW" then return end
 local L = GuildOS.L
 
 L["  %d. %s — %d items (%d epics, %.0f%%)"] = "  %d. %s — %d 件物品（%d 件史詩，%.0f%%）"

@@ -1,7 +1,7 @@
 ----------------------------------------------------------------------
 -- Guild OS - Deutsch
 ----------------------------------------------------------------------
-if (GetLocale and GetLocale()) ~= "deDE" then return end
+if GuildOS.Locale ~= "deDE" then return end
 local L = GuildOS.L
 
 -- Core/Commands.lua

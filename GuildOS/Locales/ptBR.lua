@@ -1,7 +1,7 @@
 ----------------------------------------------------------------------
 -- Guild OS - Português (Brasil)
 ----------------------------------------------------------------------
-if (GetLocale and GetLocale()) ~= "ptBR" then return end
+if GuildOS.Locale ~= "ptBR" then return end
 local L = GuildOS.L
 
 -- Core/Commands.lua

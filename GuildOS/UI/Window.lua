@@ -206,6 +206,7 @@ local function createWindow()
     local sideL = nine and math.floor((nine.LeftEdge:GetWidth() or 0) + 0.5) or 0
     local sideR = nine and math.floor((nine.RightEdge:GetWidth() or 0) + 0.5) or 0
     local footLift = nine and METAL_EDGE or 0
+    local footHidden = GuildOS:GetSetting("hideFooter") == true   -- the Interface page can hide it
     local topInset = nine and METAL_EDGE or 0
 
     ------------------------------------------------------------------
@@ -667,13 +668,13 @@ local function createWindow()
 
         rule:SetShown(not isBar)
         content:SetShown(not isBar)
-        foot:SetShown(not isBar)
+        foot:SetShown(not isBar and not footHidden)
         rule:ClearAllPoints()
         rule:SetPoint("TOPLEFT", 0, -(top + titleH))
         rule:SetPoint("TOPRIGHT", 0, -(top + titleH))
         content:ClearAllPoints()
         content:SetPoint("TOPLEFT", pad, -(top + titleH + RULE_H + pad))
-        content:SetPoint("BOTTOMRIGHT", -pad, footLift + FOOT_H + pad)
+        content:SetPoint("BOTTOMRIGHT", -pad, footLift + (footHidden and 0 or FOOT_H) + pad)
 
         local home = self.tabPanels[HOME]
         if changed and isWatch and self.activeTab ~= HOME and not (home and home.buildFailed) then
