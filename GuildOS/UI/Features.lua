@@ -115,9 +115,11 @@ UI:RegisterFeature({
 })
 
 -- An officer's view has sub-tabs; Trials only for officers, while its feature is on (issue #367).
+-- Officers and Recruiters (Herald) only: members do not see this tab (1.37.12).
 UI:RegisterFeature({
     id = "recruitment", label = L["Recruitment"], order = 70,
     subs = { "recruiting", "scanner", "trials" },
+    condition = function() return GuildOS:CanRecruit() end,
     build = function(c, win) GuildOS:CreateRecruitmentPanel(c, win) end,
 })
 

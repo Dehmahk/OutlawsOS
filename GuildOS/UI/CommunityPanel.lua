@@ -546,163 +546,293 @@ end
 -- CALL TO ARMS sub-panel (issue #108): officers send, everyone sees the
 -- recent calls, answers them and sets how they want to be told.
 ----------------------------------------------------------------------
+local function shortName(n)
+    return (Ambiguate and Ambiguate(n or "", "short")) or (n or "")
+end
+
 local function BuildCallToArmsSub(panel)
     local CTA = GuildOS.CallToArms
-    local selected = "worldboss"
-    -- { row frame, its widgets, line height }: wrapped again on every resize. A row grows to the
-    -- lines it took, and what hangs below it moves down with it.
-    local rows = {}
-    local above             -- the last section placed; the next one hangs below it
+    local officer = GuildOS:IsOfficer()
+    local selected = CTA:Default()     -- the template the chips and Send use
+    local selectedMeet                 -- id of the meeting point picked, or nil
+    local rows = {}                    -- { frame, kids, rowH, manual }: wrapped again on every resize
+    local chips = {}                   -- template id -> its chip button
+    local lines = {}                   -- the pooled recent-call lines
+    local builtinRow, ownRow, meetRow, zoneRow, msgRow, meetInputRow, actionRow, alertRow, chatRow
+    local msgBox, zoneBox, whenBox, nameBox, meetBox
+    local renameBtn, dupBtn, deleteBtn, defaultBtn
+    local paintSelected, paintMeets, applyTemplate, buildChips
 
     local function reflow()
         -- As wide as the content: flush left, GAP short of the right edge (#371).
         local w = (panel:GetWidth() or 0) - GAP
         if w < 200 then w = 600 end   -- not laid out yet: OnSizeChanged wraps it again
         for _, r in ipairs(rows) do
-            r[1]:SetWidth(w)
-            UI:FlowBar(r[1], r[2], { gap = 4, rowGap = 4, rowH = r[3] })
+            r.frame:SetWidth(w)
+            if not r.manual then UI:FlowBar(r.frame, r.kids, { gap = 4, rowGap = 4, rowH = r.rowH }) end
         end
     end
     panel:SetScript("OnSizeChanged", reflow)
 
-    if GuildOS:IsOfficer() then
-        local head = UI:CreateSectionTitle(panel, L["Send a call"], true)
-        head:SetPoint("TOPLEFT", 0, -GAP)
-        local tplRow, cells = CreateFrame("Frame", nil, panel), {}
-        tplRow:SetPoint("TOPLEFT", head, "BOTTOMLEFT", 0, -GAP)
-        rows[#rows + 1] = { tplRow, cells, 22 }
+    -- A row under `anchor` (or at the top): its children are flowed into it by reflow.
+    local function newRow(anchor, gapY, rowH, manual)
+        local f = CreateFrame("Frame", nil, panel)
+        if anchor then f:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -(gapY or GAP))
+        else f:SetPoint("TOPLEFT", 0, -GAP) end
+        local r = { frame = f, kids = {}, rowH = rowH or 22, manual = manual }
+        rows[#rows + 1] = r
+        return r
+    end
+    local function label(anchor, text)
+        local fs = UI:CreateText(panel, text, 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+        fs:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -GAP)
+        return fs
+    end
+    local function clearRow(r)
+        for _, k in ipairs(r.kids) do k:Hide() end
+        r.kids = {}
+    end
+    local function chip(r, text, width, onClick)
+        local b = UI:CreateButton(r.frame, text, width, 22)
+        b:SetScript("OnClick", onClick)
+        r.kids[#r.kids + 1] = b
+        return b
+    end
+    local function setEnabled(b, on)
+        if on then b:Enable() else b:Disable() end
+    end
+    local function checkbox(r, text, get, set)
+        local cb = UI:CreateCheckbox(r.frame, text, 16)
+        cb:SetWidth(30 + (cb.label:GetStringWidth() or 100))
+        cb.checkbox:SetChecked(get())
+        cb.checkbox.onChanged = function(_, checked) set(checked and true or false) end
+        r.kids[#r.kids + 1] = cb
+        return cb
+    end
+    local function setting(key) return function(v) GuildOS:SetSetting(key, v) end end
 
+    -- Opens the Groups board: it lives here, not in the recent calls, so it is not taken for a filter.
+    local boardRow = newRow(nil, nil, 22)
+    if GuildOS.LFGBoard then
+        chip(boardRow, L["Open Groups board"], 180, function() GuildOS.LFGBoard:Show() end)
+    end
+    local above = boardRow.frame
+
+    if officer then
+        local head = UI:CreateSectionTitle(panel, L["Send a call"], false)
+        head:SetPoint("TOPLEFT", above, "BOTTOMLEFT", 0, -SECTION_SPACE)
+
+        local bl = label(head, L["Ready-made"])
+        builtinRow = newRow(bl, GAP, 22)
+        local ol = label(builtinRow.frame, L["Your templates"])
+        ownRow = newRow(ol, GAP, 22)
+
+        -- The message: left empty, the call carries the template's own message (#371).
         local sendBtn = UI:CreateButton(panel, L["Send"], 88, FIELD_H)
-        -- Left empty, the call carries the template's own message: the hint says so (#371).
-        local msgBox = UI:CreateInput(panel, 0, FIELD_H, { placeholder = L["Message (optional)"] })
-        msgBox:SetPoint("TOPLEFT", tplRow, "BOTTOMLEFT", 0, -GAP)
-        -- The row is as wide as the content; the box leaves the button its room.
-        msgBox:SetPoint("TOPRIGHT", tplRow, "BOTTOMRIGHT", -UI.ReserveFor(sendBtn, GAP), -GAP)
+        msgRow = newRow(ownRow.frame, GAP, FIELD_H, true)
+        msgRow.frame:SetHeight(FIELD_H)
+        msgBox = UI:CreateInput(msgRow.frame, 0, FIELD_H, { placeholder = L["Message (optional)"] })
+        msgBox:SetPoint("TOPLEFT", msgRow.frame, "TOPLEFT", 0, 0)
+        msgBox:SetPoint("TOPRIGHT", msgRow.frame, "TOPRIGHT", -UI.ReserveFor(sendBtn, GAP), 0)
         msgBox:SetMaxBytes(CTA.TEXT_MAX + 1)   -- the call is cut at bytes, not letters: Cyrillic is two each
-        local function send()
-            if CTA:Send(selected, msgBox:GetText()) then msgBox:ClearFocus() end
+        sendBtn:SetPoint("TOPRIGHT", msgRow.frame, "TOPRIGHT", 0, 0)
+
+        -- Where and when: the zone defaults to where I am, the time to now.
+        zoneRow = newRow(msgRow.frame, GAP, FIELD_H)
+        zoneBox = UI:CreateInput(zoneRow.frame, 170, FIELD_H, { max = 60, placeholder = L["Zone (blank = here)"] })
+        zoneRow.kids[#zoneRow.kids + 1] = zoneBox
+        whenBox = UI:CreateInput(zoneRow.frame, 170, FIELD_H, { max = 12, placeholder = L["When: now, +10 or 20:30"] })
+        zoneRow.kids[#zoneRow.kids + 1] = whenBox
+        local hereBtn = chip(zoneRow, L["Use my zone"], 110, function()
+            zoneBox:SetText((CTA:Where()))
+        end)
+        hereBtn:SetHeight(FIELD_H)
+
+        -- Meeting point: pick one of the saved ones, or none.
+        local ml = label(zoneRow.frame, L["Meet at"])
+        meetRow = newRow(ml, GAP, 22)
+        meetInputRow = newRow(meetRow.frame, GAP, FIELD_H)
+        meetBox = UI:CreateInput(meetInputRow.frame, 170, FIELD_H, { max = CTA.MEET_MAX, placeholder = L["New meeting point"] })
+        meetInputRow.kids[#meetInputRow.kids + 1] = meetBox
+        local saveMeet = chip(meetInputRow, L["Save point"], 110, function()
+            local ok, why = CTA:AddMeet(meetBox:GetText())
+            if not ok then GuildOS:Print(why) return end
+            meetBox:SetText("")
+            paintMeets()
+        end)
+        saveMeet:SetHeight(FIELD_H)
+        local removeMeet = chip(meetInputRow, L["Remove point"], 120, function()
+            if not selectedMeet then return end
+            CTA:RemoveMeet(selectedMeet)
+            selectedMeet = nil
+            paintMeets()
+        end)
+        removeMeet:SetHeight(FIELD_H)
+
+        -- Templates: save this message as one, and act on the one picked.
+        actionRow = newRow(meetInputRow.frame, GAP, FIELD_H)
+        nameBox = UI:CreateInput(actionRow.frame, 160, FIELD_H, { placeholder = L["Title"] })
+        nameBox:SetMaxBytes(CTA.NAME_MAX + 1)
+        actionRow.kids[#actionRow.kids + 1] = nameBox
+        chip(actionRow, L["Save as template"], 130, function()
+            local meetName = ""
+            if selectedMeet then
+                for _, m in ipairs(CTA:Meets()) do if m.id == selectedMeet then meetName = m.name end end
+            end
+            local tpl = CTA:Template(selected)
+            local ok, why = CTA:SaveTemplate(nameBox:GetText(), msgBox:GetText(), tpl and tpl.kind, meetName, whenBox:GetText())
+            if not ok then GuildOS:Print(why) return end
+            nameBox:SetText("")
+            buildChips()
+        end)
+        renameBtn = chip(actionRow, L["Rename"], 80, function()
+            local ok, why = CTA:RenameTemplate(selected, nameBox:GetText())
+            if not ok then GuildOS:Print(why) return end
+            nameBox:SetText("")
+            buildChips()
+        end)
+        dupBtn = chip(actionRow, L["Duplicate"], 90, function()
+            local ok, newId = CTA:DuplicateTemplate(selected)
+            if not ok then return end
+            selected = newId
+            buildChips()
+            applyTemplate(newId)
+        end)
+        defaultBtn = chip(actionRow, L["Make default"], 110, function()
+            CTA:SetDefault(selected)
+            buildChips()
+        end)
+        deleteBtn = chip(actionRow, L["Delete"], 80, function()
+            CTA:DeleteTemplate(selected)
+            selected = CTA:Default()
+            buildChips()
+            applyTemplate(selected)
+        end)
+
+        -- Send: the message box and the button share the row's width.
+        local send = function()
+            local meetName = ""
+            if selectedMeet then
+                for _, m in ipairs(CTA:Meets()) do if m.id == selectedMeet then meetName = m.name end end
+            end
+            local ok = CTA:Send(selected, msgBox:GetText(), { zone = zoneBox:GetText(), when = whenBox:GetText(), meet = meetName })
+            if ok then msgBox:ClearFocus() end
         end
-        sendBtn:SetPoint("LEFT", msgBox, "RIGHT", GAP, 0)
         sendBtn:SetScript("OnClick", send)
         msgBox:SetScript("OnEnterPressed", send)   -- a key press is a hardware event, as a click is
 
-        -- The chosen template is marked as every selection is, gold border and label, not with a
-        -- ">" before its name (#371).
-        local function paintSelected()
-            for _, cell in ipairs(cells) do
-                UI:SetSelected(cell.btn, cell.id == selected)
-                cell:SetWidth(cell.btn:GetWidth() + (cell.del and 19 or 0))
-            end
-            reflow()
-        end
-        -- Built again only when the list changes; picking one only marks it.
-        local function buildTemplates()
-            for i = #cells, 1, -1 do cells[i]:Hide(); cells[i] = nil end
+        -- Chips and the meeting points.
+        buildChips = function()
+            for k in pairs(chips) do chips[k] = nil end
+            clearRow(builtinRow)
+            clearRow(ownRow)
             for _, t in ipairs(CTA:Templates()) do
-                local cell = CreateFrame("Frame", nil, tplRow)
-                cell:SetHeight(22)
-                cell.id = t.id
-                cell.btn = UI:CreateButton(cell, t.name, 112, 22)
-                cell.btn:SetPoint("TOPLEFT")
-                local id, text = t.id, t.text
-                cell.btn:SetScript("OnClick", function()
-                    selected = id
-                    msgBox:SetText(text)
-                    paintSelected()
-                end)
-                if not t.builtin then
-                    cell.del = UI:CreateButton(cell, "\195\151", 18, 22)
-                    cell.del:SetPoint("LEFT", cell.btn, "RIGHT", 1, 0)
-                    cell.del:SetScript("OnClick", function()
-                        CTA:DeleteTemplate(id)
-                        if selected == id then selected = "worldboss" end
-                        buildTemplates()
-                    end)
-                end
-                cells[#cells + 1] = cell
+                local r = t.builtin and builtinRow or ownRow
+                local text = t.name
+                if t.id == CTA:Default() then text = string.format(L["%s (default)"], t.name) end
+                local id = t.id
+                chips[id] = chip(r, text, 150, function() applyTemplate(id) end)
             end
             paintSelected()
         end
-
-        -- A template's name is the title its calls go out under.
-        local nameBox = UI:CreateInput(panel, 160, FIELD_H, { placeholder = L["Title"] })
-        nameBox:SetPoint("TOPLEFT", msgBox, "BOTTOMLEFT", 0, -GAP)
-        nameBox:SetMaxBytes(CTA.NAME_MAX + 1)
-        local saveBtn = UI:CreateButton(panel, L["Save as template"], 130, FIELD_H)
-        saveBtn:SetPoint("LEFT", nameBox, "RIGHT", GAP, 0)
-        saveBtn:SetScript("OnClick", function()
-            local tpl = CTA:Template(selected)
-            local ok, why = CTA:SaveTemplate(nameBox:GetText(), msgBox:GetText(), tpl and tpl.kind)
-            if not ok then GuildOS:Print(why) return end
-            nameBox:SetText("")
-            buildTemplates()
-        end)
-        local chatCb = UI:CreateCheckbox(panel, L["Also post in guild chat"], 16)
-        chatCb:SetPoint("LEFT", saveBtn, "RIGHT", 12, 0)
-        chatCb.checkbox:SetChecked(CTA:ChatOn())
-        chatCb.checkbox.onChanged = function(_, checked) GuildOS:SetSetting("ctaChat", checked and true or false) end
-        above = nameBox
-
-        buildTemplates()
-        msgBox:SetText(CTA:Template(selected).text)
-    end
-
-    -- Everyone: how a call reaches me. A row of what to do with a call, then the types to hear.
-    local mine = UI:CreateSectionTitle(panel, L["My alerts"], above == nil)
-    if above then mine:SetPoint("TOPLEFT", above, "BOTTOMLEFT", 0, -SECTION_SPACE) else mine:SetPoint("TOPLEFT", 0, -GAP) end
-    local function checkRow(anchor, items)
-        local row = CreateFrame("Frame", nil, panel)
-        row:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -GAP)
-        local boxes = {}
-        for _, it in ipairs(items) do
-            local cb = UI:CreateCheckbox(row, it[1], 16)
-            cb:SetWidth(30 + (cb.label:GetStringWidth() or 100))
-            cb.checkbox:SetChecked(it[2]())
-            local set = it[3]
-            cb.checkbox.onChanged = function(_, checked) set(checked and true or false) end
-            boxes[#boxes + 1] = cb
+        paintSelected = function()
+            for id, b in pairs(chips) do UI:SetSelected(b, id == selected) end
+            local t = CTA:Template(selected)
+            local own = t and not t.builtin
+            setEnabled(renameBtn, own)
+            setEnabled(deleteBtn, own)
+            reflow()
         end
-        rows[#rows + 1] = { row, boxes, 18 }
-        return row
+        paintMeets = function()
+            clearRow(meetRow)
+            local none = chip(meetRow, L["No meeting point"], 140, function()
+                selectedMeet = nil
+                paintMeets()
+            end)
+            UI:SetSelected(none, selectedMeet == nil)
+            for _, m in ipairs(CTA:Meets()) do
+                local id = m.id
+                local b = chip(meetRow, m.name, 140, function()
+                    selectedMeet = id
+                    paintMeets()
+                end)
+                UI:SetSelected(b, selectedMeet == id)
+            end
+            reflow()
+        end
+        applyTemplate = function(id)
+            local t = CTA:Template(id)
+            if not t then return end
+            selected = id
+            msgBox:SetText(t.text or "")
+            whenBox:SetText(t.when or "")
+            selectedMeet = nil
+            if t.meet then
+                for _, m in ipairs(CTA:Meets()) do if m.name == t.meet then selectedMeet = m.id end end
+            end
+            paintMeets()
+            paintSelected()
+        end
+        zoneBox:SetText((CTA:Where()))
+        buildChips()
+        paintMeets()
+        applyTemplate(selected)
+        above = actionRow.frame
     end
-    local function setting(key) return function(v) GuildOS:SetSetting(key, v) end end
-    local how = checkRow(mine, {
-        { L["Show popups"], function() return CTA:PopupsOn() end, setting("ctaPopups") },
-        { L["Play a sound"], function() return CTA:SoundOn() end, setting("ctaSound") },
-        { L["Quiet in instances and combat"], function() return CTA:QuietOn() end, setting("ctaQuiet") },
-    })
-    local kinds = {}
-    for _, k in ipairs(CTA.KINDS) do
-        local id = k.id
-        kinds[#kinds + 1] = { k.title, function() return not CTA:Muted(id) end,
-                              function(v) GuildOS:SetSetting("ctaMute_" .. id, not v) end }
-    end
-    local hear = checkRow(how, kinds)
 
-    local recentHead = UI:CreateSectionTitle(panel, L["Recent calls"])
-    recentHead:SetPoint("TOPLEFT", hear, "BOTTOMLEFT", 0, -SECTION_SPACE)
-    -- /gos avail: who in the guild is free for a group, and listing yourself (#142).
-    if GuildOS.LFGBoard then
-        local boardBtn = UI:CreateButton(panel, L["Groups"], 180, 18)
-        boardBtn:SetPoint("LEFT", recentHead, "RIGHT", 12, 0)
-        boardBtn:SetScript("OnClick", function() GuildOS.LFGBoard:Show() end)
+    -- Everyone: how a call reaches me. Popups, then the types to hear, then the chat line.
+    local mine = UI:CreateSectionTitle(panel, L["My alerts"], not officer)
+    if officer then mine:SetPoint("TOPLEFT", above, "BOTTOMLEFT", 0, -SECTION_SPACE)
+    else mine:SetPoint("TOPLEFT", above, "BOTTOMLEFT", 0, -GAP) end
+    local pl = label(mine, L["Popups"])
+    local popRow = newRow(pl, GAP, 18)
+    checkbox(popRow, L["Show popups"], function() return CTA:PopupsOn() end, setting("ctaPopups"))
+    checkbox(popRow, L["Play a sound"], function() return CTA:SoundOn() end, setting("ctaSound"))
+    checkbox(popRow, L["Quiet in instances and combat"], function() return CTA:QuietOn() end, setting("ctaQuiet"))
+
+    local tl = label(popRow.frame, L["Call types"])
+    local typeRow = newRow(tl, GAP, 22)
+    checkbox(typeRow, L["Mute all"], function() return CTA:MuteAll() end, setting("ctaMuteAll"))
+    for _, k in ipairs(CTA.KINDS) do
+        local id, sound = k.id, k.sound
+        checkbox(typeRow, k.title, function() return not CTA:Muted(id) end,
+            function(v) GuildOS:SetSetting("ctaMute_" .. id, not v) end)
+        local hear = chip(typeRow, L["Hear"], 56, function()
+            if PlaySound then pcall(PlaySound, sound, "Master") end
+        end)
+        hear:SetHeight(18)
     end
+    above = typeRow.frame
+
+    if officer then
+        local cl = label(typeRow.frame, L["Chat"])
+        chatRow = newRow(cl, GAP, 18)
+        checkbox(chatRow, L["Also post in guild chat"], function() return CTA:ChatOn() end, setting("ctaChat"))
+        above = chatRow.frame
+    end
+
+    -- The recent calls: the newest first, with the answers and, for an officer, Close.
+    local recentHead = UI:CreateSectionTitle(panel, L["Recent calls"])
+    recentHead:SetPoint("TOPLEFT", above, "BOTTOMLEFT", 0, -SECTION_SPACE)
     local _, child = makeScroll(panel, "GuildOSHubCTAScroll", recentHead)
     reflow()
 
-    -- The recent calls, one pooled line each (there are never more than CTA.KEEP): an answer
-    -- arriving repaints them in place rather than drawing them all again.
-    local lines = {}
     local empty = UI:CreateText(child, L["No calls yet."], 12, C.textSoft.r, C.textSoft.g, C.textSoft.b)
     empty:SetPoint("TOPLEFT", 0, 0)
     local function lineAt(i)
-        if lines[i] then return lines[i] end
-        local ln = {}
+        local ln = lines[i]
+        if ln then return ln end
+        ln = {}
         ln.text = UI:CreateText(child, "", 12, C.text.r, C.text.g, C.text.b)
-        ln.text:SetJustifyH("LEFT")
         ln.meta = UI:CreateText(child, "", 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
-        ln.go = UI:CreateButton(child, L["On my way"], 90, 18)
-        ln.go:SetScript("OnClick", function() CTA:Answer(ln.id) end)
+        ln.go = UI:CreateButton(child, L["On my way"], 92, 20)
+        ln.go:SetScript("OnClick", function() CTA:Answer(ln.id, "going") end)
+        ln.maybe = UI:CreateButton(child, L["Maybe"], 62, 20)
+        ln.maybe:SetScript("OnClick", function() CTA:Answer(ln.id, "maybe") end)
+        ln.cant = UI:CreateButton(child, L["Can't"], 62, 20)
+        ln.cant:SetScript("OnClick", function() CTA:Answer(ln.id, "cant") end)
+        ln.close = UI:CreateButton(child, L["Close"], 56, 20)
+        ln.close:SetScript("OnClick", function() CTA:Close(ln.id) end)
         lines[i] = ln
         return ln
     end
@@ -710,38 +840,48 @@ local function BuildCallToArmsSub(panel)
     local function refresh()
         reflow()
         local now, y = GetServerTime(), 0
+        local amOfficer = GuildOS:IsOfficer()
         for i, e in ipairs(CTA.recent) do
             local ln = lineAt(i)
             ln.id = e.id
-            -- Anybody who has not answered can, from here too: with popups off, in quiet mode
-            -- or after dismissing one, this is the only place to.
-            local open = not e.mine and not e.answered and now - (tonumber(e.ts) or 0) <= CTA.MAX_AGE
-            ln.go:SetShown(open)
-            ln.go:ClearAllPoints()
-            ln.go:SetPoint("TOPRIGHT", 0, -y)
-            -- The call's title is a name, in the text colour as every name (#371); the line wraps
-            -- short of the button when there is one.
+            local open = not e.mine and not e.closed and now - (tonumber(e.ts) or 0) <= CTA.MAX_AGE
+            local vis = {}
+            if open then vis[#vis + 1] = ln.go; vis[#vis + 1] = ln.maybe; vis[#vis + 1] = ln.cant end
+            if amOfficer and not e.closed then vis[#vis + 1] = ln.close end
+            for _, b in ipairs({ ln.go, ln.maybe, ln.cant, ln.close }) do b:Hide() end
+            -- Placed from the right; the leftmost one is vis[1], and the text stops short of it.
+            local x = 0
+            for j = #vis, 1, -1 do
+                local b = vis[j]
+                b:ClearAllPoints()
+                b:SetPoint("TOPRIGHT", child, "TOPRIGHT", -x, -y)
+                b:Show()
+                x = x + b:GetWidth() + 4
+            end
             ln.text:SetText(string.format("%s  %s", e.title or "", e.text or ""))
             ln.text:ClearAllPoints()
             ln.text:SetPoint("TOPLEFT", 0, -y)
-            if open then
-                ln.text:SetPoint("TOPRIGHT", ln.go, "TOPLEFT", -GAP, 0)
-            else
-                ln.text:SetPoint("TOPRIGHT", 0, -y)
-            end
+            if vis[1] then ln.text:SetPoint("TOPRIGHT", vis[1], "TOPLEFT", -GAP, 0)
+            else ln.text:SetPoint("TOPRIGHT", 0, -y) end
             ln.text:Show()
             local th = ln.text:GetStringHeight() or 14
-            local n = CTA:GoingCount(e)
-            ln.meta:SetText(string.format("%s · %s · %s", e.zone or "",
-                (Ambiguate and Ambiguate(e.sender or "", "short")) or (e.sender or ""),
-                n > 0 and string.format(L["%d on the way"], n) or date("%H:%M", e.at or 0)))
+            local tail = CTA:CountText(e)
+            if tail == "" then tail = date("%H:%M", e.at or 0) end
+            local meta = string.format("%s · %s · %s", e.zone or "", shortName(e.sender), tail)
+            if e.meet then meta = meta .. " · " .. string.format(L["Meet at %s"], e.meet) end
+            local status = CTA:WhenLine(e)
+            if status then meta = meta .. " · " .. status end
+            if e.closed then meta = meta .. " · " .. L["Closed"] end
+            ln.meta:SetText(meta)
             ln.meta:ClearAllPoints()
-            ln.meta:SetPoint("TOPLEFT", 0, -(y + th + 2))
+            ln.meta:SetPoint("TOPLEFT", 0, -(y + math.max(th, 20) + 2))
             ln.meta:Show()
-            y = y + th + 22
+            y = y + math.max(th, 20) + 26
         end
         for i = #CTA.recent + 1, #lines do
-            lines[i].text:Hide(); lines[i].meta:Hide(); lines[i].go:Hide()
+            local ln = lines[i]
+            ln.text:Hide(); ln.meta:Hide()
+            for _, b in ipairs({ ln.go, ln.maybe, ln.cant, ln.close }) do b:Hide() end
         end
         empty:SetShown(#CTA.recent == 0)
         child:SetHeight(math.max(1, y))

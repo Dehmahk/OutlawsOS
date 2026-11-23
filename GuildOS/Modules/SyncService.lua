@@ -68,7 +68,7 @@ SyncService.MEMBER_ACTIONS = {
     event = { rsvp = true },    -- event signup
     allylink = { ask = true, have = true },   -- asking for the alliance code, and relaying an officer's
     poll  = { vote = true },    -- poll vote
-    cta   = { going = true },   -- "On my way" to an officer's call to arms (issue #108)
+    cta   = { going = true, maybe = true, cant = true },   -- answers to an officer's call to arms (issue #108)
 }
 
 -- Actions inside an officer domain that whoever the guild lets do them may send over GUILD (issue #283).

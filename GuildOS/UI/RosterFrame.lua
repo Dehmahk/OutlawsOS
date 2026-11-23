@@ -455,8 +455,16 @@ function GuildOS:CreateRaidHubPanel(container, mainFrame)
         { key = "raiders",   label = L["Raiders"],    panel = raidersPanel, officerOnly = false },
         { key = "cores",     label = L["Cores"],      panel = coresPanel,   officerOnly = true  },
         { key = "audit",     label = L["Audit"],      panel = auditPanel,   officerOnly = false },
-        { key = "raidtools", label = L["Raid Tools"], panel = rtPanel,      officerOnly = false },
+        { key = "raidtools", label = L["Raid Tools"], panel = rtPanel,      officerOnly = false, raidOnly = true },
     }
+
+    -- Officers, and the raid leader ranks set in Core settings, see the sub-tabs marked raidOnly;
+    -- everyone else does not (1.37.12).
+    local function canSee(st)
+        if st.officerOnly and not GuildOS:IsOfficer() then return false end
+        if st.raidOnly and not (GuildOS.CoreManager and GuildOS.CoreManager:IsRaidLeader()) then return false end
+        return true
+    end
 
     local activeSubTab = nil
     local subTabBtns   = {}
@@ -467,7 +475,7 @@ function GuildOS:CreateRaidHubPanel(container, mainFrame)
         -- also reachable directly (deep link from /gos open raids <sub>),
         -- so a non-officer key must be refused here too.
         for _, st in ipairs(SUBTABS) do
-            if st.key == key and st.officerOnly and not GuildOS:IsOfficer() then return end
+            if st.key == key and not canSee(st) then return end
         end
         activeSubTab = key
         for _, t in ipairs(subTabBtns) do t:SetActive(t.key == key) end
@@ -478,8 +486,8 @@ function GuildOS:CreateRaidHubPanel(container, mainFrame)
 
     local prevBtn = nil
     for _, st in ipairs(SUBTABS) do
-        -- Skip officer-only sub-tabs for non-officers
-        local visible = not st.officerOnly or GuildOS:IsOfficer()
+        -- Skip officer-only and raid-only sub-tabs for players who may not see them
+        local visible = canSee(st)
         if visible then
             local btn = UI:CreateTab(subBar, st.label, 110, true)
             if prevBtn then

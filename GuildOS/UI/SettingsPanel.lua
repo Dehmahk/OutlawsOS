@@ -490,6 +490,9 @@ PAGES.chat = function(F, isOfficer)
     local function annotating() return ct().enabled and true or false end
     F:Section(L["Guild chat"])
     F:Check(L["Annotate guild chat (class icon, level, alt tag)"], nil, annotating, setCt("enabled"))
+    F:Check(L["Rank symbol"], L["A symbol for each guild rank that has one, from Guild Master to Veteran Outlaw, and for the EKO roles that have one. Not for Herald, Alter Ego, Outlaw or Recruit."],
+        function() return ct().rank ~= false end, setCt("rank"),
+        { indent = SUB_INDENT, enabled = annotating })
     F:Check(L["Class icon"], nil, function() return ct().classIcon ~= false end, setCt("classIcon"),
         { indent = SUB_INDENT, enabled = annotating })
     F:Check(L["Level"], nil, function() return ct().level ~= false end, setCt("level"),
