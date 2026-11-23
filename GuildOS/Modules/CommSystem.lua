@@ -656,6 +656,13 @@ function CommSystem:_Answer()
                 GuildOS.Bulletin:Backfill()
             end)
         end
+
+        -- And the upcoming calendar events, for a member who was offline when they were made.
+        if GuildOS:IsOfficer() and GuildOS.Calendar then
+            C_Timer.After(6.5, function()
+                GuildOS.Calendar:Backfill()
+            end)
+        end
     end)
 end
 

@@ -246,6 +246,17 @@ end
 ----------------------------------------------------------------------
 -- An officer write counts only over GUILD: IsOfficerByName drops the realm, so a namesake on
 -- another realm could otherwise whisper as the officer (issue #81, as #78 for the rest).
+-- A calendar event from someone whose rank this client does not let create events drops here without a
+-- word. Say so, once per sender every ten minutes, so the event's sender and an officer can see why it
+-- is missing and an officer can log in to refresh the limit.
+local rankDropSaid = {}
+local function sayRankDrop(sender)
+    local now = GetTime and GetTime() or 0
+    if rankDropSaid[sender] and now - rankDropSaid[sender] < 600 then return end
+    rankDropSaid[sender] = now
+    GuildOS:Print(string.format("|cffFFD700%s|r made a calendar event this client did not take: their rank is above the event limit it holds (%d). An officer should log in to refresh it.", tostring(sender), GuildOS:EventMaxRank()))
+end
+
 function SyncService:Validate(env, sender, channel)
     if type(env) ~= "table" then return false end
     if not env.v or not env.id or not env.dom or not env.act then return false end
@@ -257,6 +268,7 @@ function SyncService:Validate(env, sender, channel)
         local ranked = self.RANKED_ACTIONS[env.dom]
         if not (member and member[env.act]) and not GuildOS:IsOfficerByName(sender)
             and not (ranked and ranked[env.act] and GuildOS:MayCreateEventsByName(sender)) then
+            if env.dom == "event" and ranked and ranked[env.act] then sayRankDrop(sender) end
             return false
         end
     end

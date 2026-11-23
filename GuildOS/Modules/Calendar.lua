@@ -1151,8 +1151,47 @@ function Calendar:AnyOfSeries(sid)
     end
 end
 
+-- Officers answer a member's login pull with the upcoming events (CommSystem answers it), so a client
+-- that was offline when an event was made converges on login. Each event goes with its own stored
+-- revision: a receiver applies it only if it is newer than what it holds. Events from two days back
+-- on, capped, and never the web's; the list is what the guild reads, not the whole history.
+local SNAPSHOT_MAX = 25
+local SNAPSHOT_BACK = 2 * 86400
+
+function Calendar:Backfill()
+    if not GuildOS:IsOfficer() or not GuildOS.SyncService then return end
+    local cutoff = GetServerTime() - SNAPSHOT_BACK
+    local picked = {}
+    for id, e in pairs(self:GetEvents()) do
+        local when = type(e) == "table" and tonumber(e.when)
+        if when and when >= cutoff and not self:IsWebEvent(e) and not self:IsDeleted(id) then
+            picked[#picked + 1] = e
+        end
+    end
+    table.sort(picked, function(a, b) return (tonumber(a.when) or 0) < (tonumber(b.when) or 0) end)
+    local out = {}
+    for i = 1, math.min(#picked, SNAPSHOT_MAX) do
+        local e = picked[i]
+        out[#out + 1] = { event = wireOf(e), rev = math.max(GuildOS.SyncService:GetRevision("event", e.id), 1) }
+    end
+    if #out == 0 then return end
+    GuildOS.SyncService:Publish("event", "snapshot", { events = out })
+end
+
 function Calendar:OnSync(env, sender)
     local d = env.data
+    -- A snapshot from an officer (SyncService checked it came over GUILD from one): each event applies
+    -- as an update under its own revision, through the same checks as a live one.
+    if env.act == "snapshot" then
+        if type(d) == "table" and type(d.events) == "table" then
+            for _, item in ipairs(d.events) do
+                if type(item) == "table" and type(item.event) == "table" then
+                    self:OnSync({ act = "update", rev = item.rev, data = { event = item.event } }, sender)
+                end
+            end
+        end
+        return
+    end
     -- A creator who is not an officer passed the wire for their own events only (issue #283).
     if rankedAct(env.act) and not GuildOS:IsOfficerByName(sender) then
         local id = type(d) == "table" and (d.id or (type(d.event) == "table" and d.event.id))
