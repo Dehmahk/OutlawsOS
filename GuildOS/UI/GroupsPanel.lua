@@ -697,6 +697,22 @@ function GuildOS:CreateGroupsPanel(parent)
     local y, width = 0, 400
     local paint   -- forward: the handlers below repaint
 
+    -- (#2) Search: filters the tiles and the lists by activity name. (#10) actFilter: the activity a
+    -- tile opened, shown alone over Active until the Active tab is picked again.
+    local search, actFilter = "", nil
+    local searchBox = CreateFrame("EditBox", nil, actions, "InputBoxTemplate")
+    searchBox:SetAutoFocus(false)
+    searchBox:SetHeight(22)
+    searchBox:SetFontObject(GameFontHighlightSmall)
+    searchBox:SetPoint("LEFT", myChips[LETTERS[#LETTERS]], "RIGHT", 14, 0)
+    searchBox:SetPoint("RIGHT", seekBtn, "LEFT", -10, 0)
+    searchBox:SetScript("OnTextChanged", function(self)
+        search = (self:GetText() or ""):lower()
+        GuildOS:SafeCall(function() paint() end)
+    end)
+    searchBox:SetScript("OnEscapePressed", function(self) self:SetText(""); self:ClearFocus() end)
+    searchBox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+
     -- A section title (#371): the shared one, held by a strip across the content so its rule reaches
     -- the right edge and goes with it when the pool hides it. The view's first title has no rule.
     -- Returns the strip, for what sits on the title's line (the scope button).
@@ -1347,6 +1363,49 @@ function GuildOS:CreateGroupsPanel(parent)
         b:SetPoint("RIGHT", strip, "RIGHT", 0, 0)
     end
 
+    -- (#2) Whether an activity's name matches the search box.
+    local function matchesSearch(act)
+        if search == "" then return true end
+        local name = B:ActivityName(act) or act
+        return tostring(name):lower():find(search, 1, true) ~= nil
+    end
+
+    -- (#2, #10) Whether a player looking is wanted here: by the tile's activity, or by the search.
+    local function seekerKeeps(e)
+        local acts = e.acts or {}
+        if #acts == 0 then return true end
+        if actFilter then
+            for _, a in ipairs(acts) do if a == actFilter then return true end end
+            return false
+        end
+        if search == "" then return true end
+        for _, a in ipairs(acts) do if matchesSearch(a) then return true end end
+        return false
+    end
+
+    -- (#18) An empty Active tab offers the dungeons this level can run, one click each. Pooled, as all rows.
+    local function startRow(myLevel)
+        local picks = {}
+        for _, s in ipairs(Cat:Sections("dungeon")) do
+            for _, it in ipairs(s.items) do
+                if #picks < 3 and it.min and it.max and myLevel >= it.min and myLevel <= it.max then
+                    picks[#picks + 1] = it
+                end
+            end
+        end
+        if #picks == 0 then return end
+        local x = 0
+        for _, it in ipairs(picks) do
+            local b = acquire("start", function() return UI:CreateButton(content, "", 120, 22) end)
+            b:ClearAllPoints()
+            b:SetPoint("TOPLEFT", x, -y)
+            fit(b, B:ActivityName(it.id))
+            b:SetScript("OnClick", function() openComposer(it.id) end)
+            x = x + b:GetWidth() + 6
+        end
+        y = y + 22 + GAP
+    end
+
     local function paintActive()
         local now = GetServerTime()
         local onlineSet, classByKey = B:_BuildOnlineRoster()
@@ -1358,11 +1417,18 @@ function GuildOS:CreateGroupsPanel(parent)
         for _, def in ipairs(K.FILTERS) do known = known or def.key == cat end
         if not known then cat = "all" end
         local levelByKey = rosterLevels()
+        -- (#20) What this view is.
+        if actFilter then
+            line(string.format(L["Showing %s only. Pick Active now for every group."], B:ActivityName(actFilter)))
+        else
+            line(L["Groups being formed right now, and players looking for one."])
+        end
 
         -- The groups of others that pass the filter, those for me first (#378), then newest.
         local groups, forMe, nForMe = {}, {}, 0
         for _, g in ipairs(G:ActiveList(GuildOS.db.lfgGroups, now, onlineSet)) do
-            if g.key ~= mine and keeps(g.act, cat, levelOnly, myLevel) then
+            if g.key ~= mine and keeps(g.act, cat, levelOnly, myLevel) and matchesSearch(g.act)
+                and (not actFilter or g.act == actFilter) then
                 groups[#groups + 1] = g
                 if G:FitsMe(g, myLevel, myRoles) then
                     forMe[g.key] = true
@@ -1378,7 +1444,7 @@ function GuildOS:CreateGroupsPanel(parent)
 
         local seekers = {}
         for _, e in ipairs(B:ActiveList(GuildOS.db.lfgBoard, now, onlineSet)) do
-            if keepsSeeker(e, cat, levelOnly, myLevel) then seekers[#seekers + 1] = e end
+            if keepsSeeker(e, cat, levelOnly, myLevel) and seekerKeeps(e) then seekers[#seekers + 1] = e end
         end
         local ally = GuildOS.Alliance
         local inAlliance = ally and ally:Get() ~= nil
@@ -1421,6 +1487,7 @@ function GuildOS:CreateGroupsPanel(parent)
         if inAlliance then scopeButton(strip) end
         if #seekers == 0 then
             line(L["Nobody is available right now. Be the first!"])
+            if #groups == 0 and not actFilter and search == "" then startRow(myLevel) end
             return
         end
         for i = 1, math.min(#seekers, SEEKERS_MAX) do seekerRow(seekers[i], now, classByKey, levelByKey, mine) end
@@ -1449,30 +1516,57 @@ function GuildOS:CreateGroupsPanel(parent)
         t.groups = UI:CreateText(t, "", 10, C.ok.r, C.ok.g, C.ok.b)
         t.groups:SetPoint("TOPLEFT", 8, -5)
         t.seekers = UI:CreateText(t, "", 10, C.info.r, C.info.g, C.info.b)
+        -- (#10) Its own Form button: the tile shows its groups, Form starts one.
+        t.form = UI:SetButtonVariant(UI:CreateButton(t, L["Form"], 56, 20), "primary")
+        t.form:SetPoint("BOTTOMRIGHT", -5, 5)
+        t.form:SetScript("OnClick", function() if t.id then openComposer(t.id) end end)
+        t:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        -- Left-click shows the activity's groups and players alone over Active. Right-click whispers the
+        -- leader of the first group forming (#11).
+        t:SetScript("OnClick", function(self, button)
+            if button == "RightButton" then
+                if self.first then whisper(self.first.key) end
+            else
+                actFilter = self.id
+                parent.SelectSub("active")
+            end
+        end)
         -- Hovered, a tile lights its border as a secondary button does (`label`): gold is for selection.
         t:SetScript("OnEnter", function(self)
             self:SetBackdropBorderColor(C.label.r, C.label.g, C.label.b, 1)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:AddLine(self.title, C.text.r, C.text.g, C.text.b)
             if self.detail then GameTooltip:AddLine(self.detail, 1, 1, 1) end
-            GameTooltip:AddLine(L["Click to form a group or list yourself."], C.label.r, C.label.g, C.label.b, true)
+            for _, txt in ipairs(self.lines or {}) do GameTooltip:AddLine(txt, 0.8, 0.8, 0.8) end
+            if self.first then
+                GameTooltip:AddLine(L["Click to see its groups. Right-click to whisper the first leader. Form starts yours."], C.label.r, C.label.g, C.label.b, true)
+            else
+                GameTooltip:AddLine(L["Click to see its groups. Form starts yours."], C.label.r, C.label.g, C.label.b, true)
+            end
             GameTooltip:Show()
         end)
         t:SetScript("OnLeave", function(self)
-            self:SetBackdropBorderColor(C.line.r, C.line.g, C.line.b, 1)
+            local e = self.edge or C.line
+            self:SetBackdropBorderColor(e.r, e.g, e.b, 1)
             GameTooltip:Hide()
         end)
         return t
     end
 
-    local function tile(it, x, w, counts, myLevel)
+    -- info: { c = the activity's counts, list = the groups forming for it, online = guildmates online in
+    -- its range, bounty = on this week's Bounty Board }.
+    local function tile(it, x, w, info, myLevel, now)
         local t = acquire("tile", makeTile)
         t:ClearAllPoints()
         t:SetPoint("TOPLEFT", x, -y)
         t:SetSize(w, TILE_H)
-        t:SetBackdropBorderColor(C.line.r, C.line.g, C.line.b, 1)
-        -- A tile with no art of its own (WoW: Forever's new dungeons) is a flat `panel` card, not the
-        -- dark well the art sits on, so it reads as a tile beside the others and not an empty box (#371).
+        -- (#6) Green border at my level, gold a few levels off, plain past that. Dimmed out of range.
+        local exact = it.min and it.max and myLevel >= it.min and myLevel <= it.max
+        local near = it.min and it.max and not exact and myLevel >= it.min and myLevel <= it.max + LEVEL_SLACK
+        local edge = exact and C.ok or (near and C.label or C.line)
+        t.edge = edge
+        t:SetBackdropBorderColor(edge.r, edge.g, edge.b, 1)
+        -- A tile with no art of its own (WoW: Forever's new dungeons) is a flat `panel` card (#371).
         local artOk = hasArt(it)
         local fill = artOk and C.well or C.panel
         t:SetBackdropColor(fill.r, fill.g, fill.b, 1)
@@ -1483,38 +1577,69 @@ function GuildOS:CreateGroupsPanel(parent)
             t.art:Hide()
         end
         local name = B:ActivityName(it.id)
-        t.title = name
-        t.name:SetWidth(w - 16)
+        t.title, t.id = name, it.id
+        t.name:SetWidth(w - 84)
         t.name:SetText(name)
         local range = rangeOf(it)
         t.level:SetText(range)
+        local list = info.list or {}
         local details = {}
         if it.min then details[#details + 1] = string.format(L["Level %s"], range) end
         details[#details + 1] = string.format(L["%d players"], it.size)
+        -- (#7) How far off my level it is.
+        if it.min and it.max and myLevel < it.min then
+            details[#details + 1] = string.format(L["%d levels to go"], it.min - myLevel)
+        elseif it.min and it.max and myLevel > it.max then
+            details[#details + 1] = string.format(L["%d levels over"], myLevel - it.max)
+        end
+        if info.online > 0 then details[#details + 1] = string.format(L["%d guildmates in range"], info.online) end
+        if info.bounty then details[#details + 1] = L["Bounty this week"] end
         t.detail = table.concat(details, DOT)
-        local c = counts[it.id]
-        t.groups:SetText(c and c.groups > 0 and string.format(L["%d forming"], c.groups) or "")
+        -- (#8, #12) The tooltip: the open spots, then the first groups forming for it.
+        local open, soonest = {}, nil
+        for _, g in ipairs(list) do
+            for _, k in ipairs(LETTERS) do open[k] = (open[k] or 0) + ((g.need and g.need[k]) or 0) end
+            local left = (g.ts or now) + (g.ttl or 0) - now
+            if not soonest or left < soonest then soonest = left end
+        end
+        t.lines = {}
+        local spots = G:NeedText(open)
+        if #list > 0 and spots ~= "" then t.lines[#t.lines + 1] = string.format(L["Open: %s"], spots) end
+        for i = 1, math.min(3, #list) do
+            local g = list[i]
+            t.lines[#t.lines + 1] = string.format("%s  %d/%d", g.name, g.n, g.max)
+        end
+        t.first = list[1]
+        -- (#9) How long the soonest listing has left, beside the groups count.
+        local c = info.c
+        local gtext = (c and c.groups > 0) and string.format(L["%d forming"], c.groups) or ""
+        if soonest and soonest > 0 then
+            local left = string.format(L["%d min left"], math.max(1, math.floor(soonest / 60)))
+            gtext = gtext ~= "" and (gtext .. DOT .. left) or left
+        end
+        t.groups:ClearAllPoints()
+        t.groups:SetPoint("TOPLEFT", 8, -5)
+        t.groups:SetText(gtext)
         t.seekers:ClearAllPoints()
-        if c and c.groups > 0 then
+        if gtext ~= "" then
             t.seekers:SetPoint("LEFT", t.groups, "RIGHT", 8, 0)
         else
             t.seekers:SetPoint("TOPLEFT", 8, -5)
         end
-        t.seekers:SetText(c and c.seekers > 0 and string.format(L["%d looking"], c.seekers) or "")
+        t.seekers:SetText((c and c.seekers > 0) and string.format(L["%d looking"], c.seekers) or "")
         local mine = not it.min or (myLevel >= it.min and myLevel <= it.max + LEVEL_SLACK)
         t:SetAlpha(mine and 1 or OFF_LEVEL_ALPHA)
         local ink = mine and C.text or C.label   -- a dimmed tile's title steps down too (#371)
         t.name:SetTextColor(ink.r, ink.g, ink.b)
-        local id = it.id
-        t:SetScript("OnClick", function() openComposer(id) end)
     end
 
-    local function tileSection(title, items, counts, myLevel, cols, w)
+    local function tileSection(title, items, cols, w, myLevel, now, infoOf)
+        if #items == 0 then return end
         head(title)
         for i, it in ipairs(items) do
             local col = (i - 1) % cols
             if col == 0 and i > 1 then y = y + TILE_H + GAP end
-            tile(it, col * (w + GAP), w, counts, myLevel)
+            tile(it, col * (w + GAP), w, infoOf(it), myLevel, now)
         end
         y = y + TILE_H
     end
@@ -1523,13 +1648,49 @@ function GuildOS:CreateGroupsPanel(parent)
         local now = GetServerTime()
         local onlineSet = B:_BuildOnlineRoster()
         local counts = G:Counts(now, onlineSet)
+        local listsBy = {}
+        for _, g in ipairs(G:ActiveList(GuildOS.db.lfgGroups, now, onlineSet)) do
+            listsBy[g.act] = listsBy[g.act] or {}
+            listsBy[g.act][#listsBy[g.act] + 1] = g
+        end
+        local levels = rosterLevels()
+        local bountyText = GuildOS.EKO and GuildOS.EKO.BountyNames and GuildOS.EKO:BountyNames()
+        local bounties = bountyText and (", " .. bountyText:lower() .. ", ") or nil
         local myLevel = UnitLevel("player") or 1
         local cols = math.max(1, math.floor((width + GAP) / (TILE_MIN_W + GAP)))
         local w = math.floor((width - GAP * (cols - 1)) / cols)
+        local function infoOf(it)
+            local online = 0
+            if it.min and it.max then
+                for _, lvl in pairs(levels) do
+                    if lvl >= it.min and lvl <= it.max then online = online + 1 end
+                end
+            end
+            local bounty = bounties ~= nil and bounties:find(", " .. B:ActivityName(it.id):lower() .. ", ", 1, true) ~= nil
+            return { c = counts[it.id], list = listsBy[it.id] or {}, online = online, bounty = bounty }
+        end
+        -- (#4) The busiest first; ties keep the catalogue's order.
+        local function score(it)
+            local c = counts[it.id]
+            return c and (c.groups + c.seekers) or 0
+        end
+        local function ranked(items)
+            local rows = {}
+            for i, it in ipairs(items) do
+                if matchesSearch(it.id) then rows[#rows + 1] = { it = it, i = i, s = score(it) } end
+            end
+            table.sort(rows, function(a, b)
+                if a.s ~= b.s then return a.s > b.s end
+                return a.i < b.i
+            end)
+            local out = {}
+            for _, r in ipairs(rows) do out[#out + 1] = r.it end
+            return out
+        end
+        -- (#20, #6) What the numbers and the borders on a tile mean.
+        line(L["Each tile: groups forming, then players looking. Green border: your level. Click a tile for its groups, or Form to start one."])
         local sections = Cat:Sections(cat)
-        -- Dungeons open on what I can run now (#373): every tile whose range holds my level, once,
-        -- before the sections that list them all. Strictly the range: the slack that keeps a tile lit
-        -- a few levels past it is for reading the full list, not for recommending.
+        -- Dungeons open on what I can run now (#373): every tile whose range holds my level, once.
         if cat == "dungeon" then
             local mine, seen = {}, {}
             for _, s in ipairs(sections) do
@@ -1540,9 +1701,9 @@ function GuildOS:CreateGroupsPanel(parent)
                     end
                 end
             end
-            if #mine > 0 then tileSection(L["For your level"], mine, counts, myLevel, cols, w) end
+            tileSection(L["For your level"], ranked(mine), cols, w, myLevel, now, infoOf)
         end
-        for _, s in ipairs(sections) do tileSection(s.title, s.items, counts, myLevel, cols, w) end
+        for _, s in ipairs(sections) do tileSection(s.title, ranked(s.items), cols, w, myLevel, now, infoOf) end
     end
 
     ------------------------------------------------------------------
@@ -1558,6 +1719,29 @@ function GuildOS:CreateGroupsPanel(parent)
         local w = scroll:GetWidth() or 0
         width = (w > 1 and w or 400) - UI.SCROLL_GUTTER
         content:SetWidth(width)
+        -- (#3, #19) The sub-tabs say how much is on each, and how many are asking my group.
+        local tnow = GetServerTime()
+        local tonline = B:_BuildOnlineRoster()
+        local tcounts = G:Counts(tnow, tonline)
+        local perCat, total = {}, 0
+        for act, c in pairs(tcounts) do
+            local it = Cat.byId[act]
+            local n = c.groups + c.seekers
+            total = total + n
+            if it then perCat[it.cat] = (perCat[it.cat] or 0) + n end
+        end
+        local asking = G:Mine() and #G:Requests() or 0
+        for _, t in ipairs(SUBS) do
+            local btn = subTabs[t.key]
+            local n = t.key == "active" and total or (perCat[t.key] or 0)
+            local text = t.label
+            if t.key == "active" and asking > 0 then text = text .. string.format(" [%d asking]", asking) end
+            if n > 0 then text = text .. " (" .. n .. ")" end
+            btn.label:SetText(text)
+            btn:SetWidth(math.max(TAB_MIN_W, math.ceil(btn.label:GetStringWidth()) + TAB_PAD))
+        end
+        UI:FlowBar(bar, subList, { gap = 4, rowGap = 4, rowH = TAB_H })
+
         y = 0
         if parent.activeSub == "active" then paintActive() else paintTiles(parent.activeSub) end
         content:SetHeight(math.max(1, y + 8))
@@ -1582,7 +1766,7 @@ function GuildOS:CreateGroupsPanel(parent)
     for _, t in ipairs(SUBS) do
         local btn = UI:CreateTab(bar, t.label, TAB_MIN_W, true)
         btn:SetWidth(math.max(TAB_MIN_W, math.ceil(btn.label:GetStringWidth()) + TAB_PAD))
-        btn:SetScript("OnClick", function() selectSub(t.key) end)
+        btn:SetScript("OnClick", function() actFilter = nil; selectSub(t.key) end)
         subTabs[t.key] = btn
         subList[#subList + 1] = btn
     end

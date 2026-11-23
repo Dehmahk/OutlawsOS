@@ -136,13 +136,15 @@ else
 end
 
 -- What is no instance: the same on every client.
-section("other", L["Quests and more"], {
+section("other", L["Open world"], {
     item("elite-quests", L["Elite quests"]),
     item("world-boss", L["World boss"], nil, nil, nil, nil, 40),
-    item("battlegrounds", L["Battlegrounds"], nil, nil, nil, nil, 10),
     item("world-pvp", L["World PvP"], nil, nil, nil, nil, 40),
     item("farming", L["Farming and reputation"]),
     item("leveling", L["Leveling together"]),
+})
+section("other", L["Battlegrounds and more"], {
+    item("battlegrounds", L["Battlegrounds"], nil, nil, nil, nil, 10),
     item("other", L["Something else"]),
 })
 
