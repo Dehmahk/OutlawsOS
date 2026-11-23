@@ -483,6 +483,11 @@ local function openComposer(act, mode)
     composer:Open(act, mode)
 end
 
+-- Opens the composer from outside the panel (the Tavern's Ride Out buttons).
+function GuildOS.OpenGroupComposer(act, mode)
+    openComposer(act, mode)
+end
+
 ----------------------------------------------------------------------
 -- The notice (#378): a small card at the top of the screen that goes away by itself. Two kinds,
 -- which Modules/Groups.lua decides: a guildmate formed a group I fit ("group"), or somebody asks for
@@ -601,6 +606,22 @@ end
 ----------------------------------------------------------------------
 -- The tab
 ----------------------------------------------------------------------
+-- Guild members in my party, me included: the count a bounty clear is logged with.
+local function partyOutlaws()
+    local members = GuildOS.Compat.GroupRoster()
+    local outlaws = IsInGuild() and 1 or 0
+    for key in pairs(members) do
+        if GuildOS.db.members and GuildOS.db.members[key] then outlaws = outlaws + 1 end
+    end
+    return outlaws
+end
+
+-- The activities on this week's Bounty Board, as a set of ids (EKO builds it; empty without EKO).
+local function bountyActs()
+    local EKO = GuildOS.EKO
+    return (EKO and EKO.BountyActSet and EKO:BountyActSet()) or {}
+end
+
 function GuildOS:CreateGroupsPanel(parent)
     local B, G, Cat = GuildOS.LFGBoard, GuildOS.Groups, GuildOS.GroupActivities
     parent.activeSub = "active"
@@ -837,6 +858,7 @@ function GuildOS:CreateGroupsPanel(parent)
     -- What a card says about time: how full, when it starts (if later), how long it stays up.
     local function whenText(g, now)
         local parts = { string.format("%d/%d", g.n or 1, g.max or 5) }
+        if bountyActs()[g.act] and (g.n or 1) >= (g.max or 5) then parts[#parts + 1] = L["double points when full"] end
         local startIn = G:StartsIn(g, now)
         if startIn then parts[#parts + 1] = string.format(L["starts in %dm"], math.ceil(startIn / 60)) end
         parts[#parts + 1] = string.format(L["%dm"], B:_Remaining(g, now))
@@ -951,8 +973,11 @@ function GuildOS:CreateGroupsPanel(parent)
         card:SetHeight(K.H)
         card:SetBackdropBorderColor(C.lineHi.r, C.lineHi.g, C.lineHi.b, 1)
         local startIn = G:StartsIn(g, now)
+        local underThree = bountyActs()[g.act] and partyOutlaws() < 3
+        local badge = startIn and string.format(L["starts in %dm"], math.ceil(startIn / 60)) or nil
+        if underThree then badge = (badge and (badge .. DOT) or "") .. L["under 3 Outlaws: no bounty points"] end
         paintBand(card, g, now, width, string.format(L["Your group: %s"], B:ActivityName(g.act)),
-            startIn and string.format(L["starts in %dm"], math.ceil(startIn / 60)) or nil, C.info)
+            badge, underThree and C.danger or C.info)
 
         local open, after = paintSeats(card, g, width, K.SEATS, 0.6)
         card.missing:ClearAllPoints()
@@ -1020,7 +1045,8 @@ function GuildOS:CreateGroupsPanel(parent)
 
         -- The band: art, name and level range, as the activity's tile shows them, and "for you" on a
         -- group of my level with a spot in a role I play (#378).
-        paintBand(card, g, now, w, B:ActivityName(g.act), forMe and L["for you"] or nil, C.ok)
+        local bounty = bountyActs()[g.act]
+        paintBand(card, g, now, w, B:ActivityName(g.act), forMe and L["for you"] or (bounty and L["Bounty"]) or nil, forMe and C.ok or C.label)
 
         -- Who leads, in their class colour; how full and for how long.
         local key, name = g.key, g.name
@@ -1245,6 +1271,8 @@ function GuildOS:CreateGroupsPanel(parent)
         strip.chips[1]:SetValue(tostring(nGroups))
         strip.chips[2]:SetValue(tostring(nSeekers))
         strip.chips[3]:SetValue(tostring(nForMe))
+        local idle = nGroups == 0 and nSeekers == 0 and nForMe == 0
+        for _, chip in ipairs(strip.chips) do chip:SetShown(not idle) end
         local cat = B:Pref("filterCat") or "all"
         local row = { strip.level }
         for i = #strip.filters, 1, -1 do row[#row + 1] = strip.filters[i].button end
@@ -1382,6 +1410,8 @@ function GuildOS:CreateGroupsPanel(parent)
 
         head(L["Groups being formed"], tostring(#groups))
         if #groups == 0 then
+            local bountyLine = GuildOS.EKO and GuildOS.EKO.BountyNames and GuildOS.EKO:BountyNames()
+            if bountyLine then line(string.format(L["Bounty Board this week: %s. Form a group for one."], bountyLine)) end
             line(L["No group is being formed right now. Pick an activity to start one."])
         else
             groupGrid(groups, now, classByKey, forMe)

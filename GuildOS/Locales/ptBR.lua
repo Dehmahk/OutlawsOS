@@ -56,7 +56,7 @@ L["Guild button now opens the Blizzard guild UI. Open Guild OS from the minimap 
     "Botão de guilda agora abre a UI de guilda da Blizzard. Abra o Guild OS pelo botão do minimapa."
 
 -- Core/Core.lua
-L[" loaded. Type |cffFFD700/guildos|r to open."] = " carregado. Digite |cffFFD700/guildos|r para abrir."
+L[" loaded. Type |cffFFD700/outlawos|r to open."] = " carregado. Digite |cffFFD700/outlawos|r para abrir."
 L["|cff888888Not in a guild - addon inactive.|r"] = "|cff888888Você não está em uma guilda - addon inativo.|r"
 L["|cffFF4444Could not load guild info. Try /reload.|r"] = "|cffFF4444Não foi possível carregar as informações da guilda. Tente /reload.|r"
 L["|cff888888Not in a guild \226\128\148 addon inactive.|r"] = "|cff888888Você não está em uma guilda \226\128\148 addon inativo.|r"

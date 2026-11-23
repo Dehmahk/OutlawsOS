@@ -122,7 +122,7 @@ L["Usage: /gos open <feature>. Try /gos open roster."] = "Uso: /gos open <funzio
 L["Unknown command. Type %s for the list."] = "Comando sconosciuto. Digita %s per l'elenco."
 
 -- Core/Core.lua
-L[" loaded. Type |cffFFD700/guildos|r to open."] = " caricato. Digita |cffFFD700/guildos|r per aprirlo."
+L[" loaded. Type |cffFFD700/outlawos|r to open."] = " caricato. Digita |cffFFD700/outlawos|r per aprirlo."
 L["|cffFF4444Could not load guild info. Try /reload.|r"] = "|cffFF4444Impossibile caricare le informazioni della gilda. Prova /reload.|r"
 L["%d start-up problem(s) on this client. Type /guildos errors for details."] = "%d problema/i all'avvio su questo client. Digita /guildos errors per i dettagli."
 L["|cff888888Not in a guild — addon inactive.|r"] = "|cff888888Non sei in una gilda — addon inattivo.|r"

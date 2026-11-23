@@ -691,7 +691,7 @@ local ABOUT_SECTIONS = {
     } },
     { title = "Weekly Events", lines = {
         EKO_GOLD .. "Bounty Board|r: Every Monday, 6 dungeons go up (Low, Mid and High). Clear one with 3+ Outlaws and post your group screenshot in #bb-submissions to earn Bounty Points and raffle entries. Run them as often as you want. A full party of 5 Outlaws earns double points.",
-        EKO_GOLD .. "Sunday Raffle|r: 1st 5g, 2nd 3g, 3rd 1g, with more places unlocking as more Outlaws join in. Most Bounty Points each month wins Bounty Hunter of the Month.",
+        EKO_GOLD .. "Sunday Raffle|r: 1st 5g, 2nd 3g, 3rd 1g. Then 4th and 5th get 70s at 20+ Outlaws entered, 6th and 7th get 50s at 30+, and 8th to 10th get 30s at 40+. Most Bounty Points each month wins Bounty Hunter of the Month.",
         EKO_GOLD .. "Location of the Week|r: New Easy, Medium and Hard spots every Friday. The first 3 to find each spot and post a screenshot with their character in #lotw-submissions win gold. 1 entry per week.",
         EKO_GOLD .. "Raids|r: Our first raids launch December 9, plus a Raid of the Month bounty on the 1st of every month.",
     } },

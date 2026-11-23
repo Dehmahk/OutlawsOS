@@ -351,6 +351,11 @@ PAGES.profile = function(F)
     F:Row(picker, { h = 24, gap = 10 })
     F:Note(L["Roles you're willing to play. Your guild's Raiders list picks this up automatically, so no officer has to set it."], { gap = 6 })
 
+    F:Section(L["My Char"])
+    F:Action(L["Open My Char"], L["Your main and offspec. The guild sees them on your roster tooltip."], function()
+        GuildOS.UI:OpenWindow("mychar")
+    end)
+
     F:Section(L["Notices"])
     F:Check(L["Show login digest"], L["What changed in the guild since your last login."],
         function() return not (GuildOS.db.digest and GuildOS.db.digest.enabled == false) end,

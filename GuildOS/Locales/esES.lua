@@ -32,7 +32,7 @@ L["Usage: /gos ban <name> [reason]"] = "Uso: /gos ban <nombre> [motivo]"
 L["Usage: /gos tempban <name> <days> [reason]"] = "Uso: /gos tempban <nombre> <días> [motivo]"
 
 -- Core/Core.lua
-L[" loaded. Type |cffFFD700/guildos|r to open."] = " cargado. Escribe |cffFFD700/guildos|r para abrir."
+L[" loaded. Type |cffFFD700/outlawos|r to open."] = " cargado. Escribe |cffFFD700/outlawos|r para abrir."
 L["|cff888888Not in a guild - addon inactive.|r"] = "|cff888888No estás en una hermandad - addon inactivo.|r"
 L["|cffFF4444Could not load guild info. Try /reload.|r"] = "|cffFF4444No se pudo cargar la info de la hermandad. Prueba /reload.|r"
 L["|cff888888Not in a guild \226\128\148 addon inactive.|r"] = "|cff888888No estás en una hermandad \226\128\148 addon inactivo.|r"

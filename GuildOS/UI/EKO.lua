@@ -1429,6 +1429,59 @@ end
 -- The Bounty Board: this week's dungeons, set by an officer, synced (domain "ekobounty").
 ----------------------------------------------------------------------
 -- "Low: The Hall of Thanes" lines -> { { tier, name } }.
+-- A dungeon name as a key: "The Hall of Thanes" and "Hall of Thanes" both become "hallofthanes".
+local function nameKey(s)
+    local k = tostring(s or ""):lower():gsub("^the%s+", "")
+    return (k:gsub("[^%w]", ""))
+end
+
+-- The group finder's activity id for a bounty dungeon, or nil.
+function EKO:BountyActId(name)
+    local cat = GuildOS.GroupActivities
+    if not cat or not cat.byId then return nil end
+    local want = nameKey(name)
+    if want == "" then return nil end
+    for id, it in pairs(cat.byId) do
+        if nameKey(it.name) == want then return id end
+    end
+    return nil
+end
+
+-- This week's Bounty Board dungeons as a set of group finder activity ids: { [id] = true }.
+function EKO:BountyActSet()
+    local set = {}
+    local bt = self:Bounties()
+    if not bt then return set end
+    for _, bnt in ipairs(self:ParseBounties(bt.text)) do
+        local id = self:BountyActId(bnt.name)
+        if id then set[id] = true end
+    end
+    return set
+end
+
+-- This week's Bounty Board dungeon names, comma-separated, or nil when none are posted.
+-- How many active listings in the group finder want this activity.
+function EKO:BountyLooking(actId)
+    local B, store = GuildOS.LFGBoard, GuildOS.db and GuildOS.db.lfgBoard
+    if not (actId and B and store) then return 0 end
+    local n = 0
+    for _, e in ipairs(B:ActiveList(store, GetServerTime())) do
+        for _, id in ipairs(e.acts or {}) do
+            if id == actId then n = n + 1 break end
+        end
+    end
+    return n
+end
+
+function EKO:BountyNames()
+    local bt = self:Bounties()
+    local list = bt and self:ParseBounties(bt.text) or {}
+    if #list == 0 then return nil end
+    local names = {}
+    for _, bnt in ipairs(list) do names[#names + 1] = bnt.name end
+    return table.concat(names, ", ")
+end
+
 function EKO:ParseBounties(text)
     local out = {}
     for raw in (tostring(text or ""):gsub("|", "") .. "\n"):gmatch("([^\n]*)\n") do
@@ -2256,21 +2309,47 @@ function EKO:ParseRaffle(text)
     return out, total
 end
 
+-- The places, what each pays in gold (0.7 is 70s), and how many Outlaws must have entered before a
+-- place is drawn: 1st to 3rd from the start, 4th and 5th at 20, 6th and 7th at 30, 8th to 10th at 40.
+EKO.RAFFLE_PRIZES = { 5, 3, 1, 0.7, 0.7, 0.5, 0.5, 0.3, 0.3, 0.3 }
+EKO.RAFFLE_MIN_ENTRANTS = { 0, 0, 0, 20, 20, 30, 30, 40, 40, 40 }
+local PLACE_WORD = { "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th" }
+
+-- A prize as the game shows it: 5g, or 70s for 0.7.
+local function prizeText(p)
+    if p >= 1 then return string.format("%dg", p) end
+    return string.format("%ds", math.floor(p * 100 + 0.5))
+end
+
 function EKO:Raffle()
     local r = shared("raffle")
-    return type(r) == "table" and r or { text = self.RAFFLE_SEED or "", prizes = { 5, 3, 1 }, winners = {} }
+    if type(r) ~= "table" then r = { text = self.RAFFLE_SEED or "", winners = {} } end
+    -- A raffle saved with only the older three places (or none) takes the current places.
+    local prizes = r.prizes
+    if type(prizes) ~= "table" or #prizes < 4 then
+        prizes = {}
+        for i, v in ipairs(self.RAFFLE_PRIZES) do prizes[i] = v end
+    end
+    return { text = r.text or self.RAFFLE_SEED or "", prizes = prizes, winners = r.winners or {}, drawnAt = r.drawnAt }
 end
 
 local pendingRoll
 function EKO:DrawRaffle()
     local r = self:Raffle()
     local winners = r.winners or {}
-    local prizes = r.prizes or { 5, 3, 1 }
-    if #winners >= #prizes then GuildOS:Print("All places are drawn. Reset to start a new raffle.") return end
+    local prizes = r.prizes
+    local place = #winners + 1
+    if place > #prizes then GuildOS:Print("All places are drawn. Reset to start a new raffle.") return end
+    local entries = self:ParseRaffle(r.text)
+    local need = self.RAFFLE_MIN_ENTRANTS[place] or 0
+    if #entries < need then
+        GuildOS:Print(string.format("The %s place opens at %d Outlaws entered. So far there are %d.", PLACE_WORD[place], need, #entries))
+        return
+    end
     local pool, total = {}, 0
     local won = {}
     for _, w in ipairs(winners) do won[w.name] = true end
-    for _, e in ipairs((self:ParseRaffle(r.text))) do
+    for _, e in ipairs(entries) do
         if not won[e.name] then pool[#pool + 1] = e; total = total + e.n end
     end
     if total == 0 then GuildOS:Print("No raffle entries left to draw from.") return end
@@ -2279,7 +2358,7 @@ function EKO:DrawRaffle()
         pendingRoll = nil
         GuildOS:Print("Couldn't roll. Try /roll 1-" .. total .. " yourself.")
     else
-        GuildOS:Print(string.format("Rolling 1-%d for place %d...", total, #winners + 1))
+        GuildOS:Print(string.format("Rolling 1-%d for the %s place...", total, PLACE_WORD[place]))
     end
 end
 
@@ -2302,21 +2381,21 @@ rollEv:SetScript("OnEvent", function(_, _, msg)
     local winners = {}
     for _, w in ipairs(r.winners or {}) do winners[#winners + 1] = w end
     local place = #winners + 1
-    local prize = (r.prizes or { 5, 3, 1 })[place] or 0
+    local prize = (r.prizes or EKO.RAFFLE_PRIZES)[place] or 0
     winners[place] = { name = pick.name, roll = roll, prize = prize }
-    EKO:SetShared("raffle", { text = r.text, prizes = r.prizes or { 5, 3, 1 }, winners = winners, drawnAt = now() })
-    GuildOS:Print(string.format("%sPlace %d: %s|r (rolled %d, %d entr%s) wins %dg!", GOLDC, place, pick.name, roll, pick.n, pick.n == 1 and "y" or "ies", prize))
+    EKO:SetShared("raffle", { text = r.text, prizes = r.prizes, winners = winners, drawnAt = now() })
+    GuildOS:Print(string.format("%s%s place: %s|r (rolled %d, %d entr%s) wins %s!", GOLDC, PLACE_WORD[place] or (place .. "th"), pick.name, roll, pick.n, pick.n == 1 and "y" or "ies", prizeText(prize)))
     playSound("LEVELUPSOUND", 888)
 end)
 
 function EKO:RaffleAnnouncement()
     local r = self:Raffle()
     local parts = {}
-    local places = { "1st", "2nd", "3rd", "4th", "5th", "6th" }
-    for i, w in ipairs(r.winners or {}) do parts[#parts + 1] = string.format("%s %s (%dg)", places[i] or (i .. "th"), w.name, w.prize or 0) end
+    for i, w in ipairs(r.winners or {}) do
+        parts[#parts + 1] = string.format("%s %s %s", PLACE_WORD[i] or (i .. "th"), w.name, prizeText(w.prize or 0))
+    end
     if #parts == 0 then return nil end
-    local _, total = self:ParseRaffle(r.text)
-    return string.format("Sunday Raffle winners: %s! %d entries this week. Congrats Outlaws, new bounties go up Monday!", table.concat(parts, ", "), total)
+    return "Sunday Raffle winners: " .. table.concat(parts, ", ") .. ". New bounties go up Monday!"
 end
 
 ----------------------------------------------------------------------
@@ -2539,7 +2618,7 @@ function EKO:GazetteGenerated()
     local r = self:Raffle()
     if r.winners and #r.winners > 0 then
         local w = {}
-        for i, x in ipairs(r.winners) do w[#w + 1] = string.format("%d. %s (%dg)", i, x.name, x.prize or 0) end
+        for i, x in ipairs(r.winners) do w[#w + 1] = string.format("%d. %s (%s)", i, x.name, prizeText(x.prize or 0)) end
         L[#L + 1] = "**Raffle winners:** " .. table.concat(w, ", ")
     end
     local ann = self:Anniversaries()
@@ -2745,30 +2824,30 @@ function EKO:BuildRaffleSub(panel)
                 x = x + w + 6
                 return b
             end
-            hb("Reset", 60, function() EKO:SetShared("raffle", { text = r.text, prizes = r.prizes or { 5, 3, 1 }, winners = {} }) end)
+            hb("Reset", 60, function() EKO:SetShared("raffle", { text = r.text, prizes = r.prizes, winners = {} }) end)
             hb("Announce", 80, function()
                 local a = EKO:RaffleAnnouncement()
                 if a then ChatFrame_OpenChat("/g " .. a) else GuildOS:Print("Draw a winner first.") end
             end)
             hb("Draw next place", 120, function() EKO:DrawRaffle() end)
             hb("Prizes", 70, function()
-                EKO:TextPopup("Raffle prizes", "Gold per place, one per line (1st on the first line). More lines = more places.",
-                    table.concat(r.prizes or { 5, 3, 1 }, "\n"), function(t)
+                EKO:TextPopup("Raffle prizes", "Gold per place, one per line (1st on the first line). Use 0.7 for 70s, 0.5 for 50s, 0.3 for 30s.",
+                    table.concat(r.prizes, "\n"), function(t)
                         local p = {}
-                        for n in t:gmatch("%d+") do p[#p + 1] = tonumber(n) end
+                        for n in t:gmatch("%d+%.?%d*") do p[#p + 1] = tonumber(n) end
                         if #p > 0 then EKO:SetShared("raffle", { text = r.text, prizes = p, winners = r.winners or {} }) end
                     end)
             end)
             hb("Set entries", 90, function()
                 EKO:TextPopup("Raffle entries", "One Outlaw per line with their entries, e.g.  Ryzen Moros 4  (copy them from the Bounty Board sheet's Leaderboard).",
-                    r.text or "", function(t) EKO:SetShared("raffle", { text = t, prizes = r.prizes or { 5, 3, 1 }, winners = {} }) end)
+                    r.text or "", function(t) EKO:SetShared("raffle", { text = t, prizes = r.prizes, winners = {} }) end)
             end)
         end
         y = y + 26
-        local prizes = r.prizes or { 5, 3, 1 }
-        local places = { "1st", "2nd", "3rd", "4th", "5th", "6th" }
+        local prizes = r.prizes
+        local places = PLACE_WORD
         local pp = {}
-        for i, g in ipairs(prizes) do pp[#pp + 1] = (places[i] or i .. "th") .. " " .. g .. "g" end
+        for i, g in ipairs(prizes) do pp[#pp + 1] = (places[i] or i .. "th") .. " " .. prizeText(g) end
         txt(child, "Prizes: " .. GOLDC .. table.concat(pp, ",  ") .. "|r", 0, y, width, 13)
         y = y + 24
         if r.winners and #r.winners > 0 then
@@ -2777,7 +2856,7 @@ function EKO:BuildRaffleSub(panel)
                 local row = newRow(child, y, i, 26)
                 cell(row, GOLDC .. (places[i] or i .. "th") .. "|r", 8, 50)
                 cell(row, w.name, 60, 220)
-                cell(row, (w.prize or 0) .. "g", 290, 60)
+                cell(row, prizeText(w.prize or 0), 290, 60)
                 cell(row, "rolled " .. (w.roll or "?"), 360, 120, C.textSoft.r, C.textSoft.g, C.textSoft.b)
                 y = y + 28
             end
@@ -2852,9 +2931,15 @@ function EKO:BuildTavernSub(panel)
         else
             local x = 0
             for _, bnt in ipairs(list) do
-                local label = "Ride out: " .. bnt.name
+                local act = EKO:BountyActId(bnt.name)
+                local looking = EKO:BountyLooking(act)
+                local label = "Ride out: " .. bnt.name .. (looking > 0 and string.format(L["  (%d looking)"], looking) or "")
                 local b = btn(child, label, 0, function()
-                    ChatFrame_OpenChat(string.format("/g Riding out for %s (%sbounty)! Need a crew of Outlaws, whisper me for an invite.", bnt.name, bnt.tier and (bnt.tier .. " ") or ""))
+                    if act and GuildOS.OpenGroupComposer then
+                        GuildOS.OpenGroupComposer(act, "seek")
+                    else
+                        ChatFrame_OpenChat(string.format("/g Riding out for %s (%sbounty)! Need a crew of Outlaws, whisper me for an invite.", bnt.name, bnt.tier and (bnt.tier .. " ") or ""))
+                    end
                 end)
                 b:SetWidth(math.ceil(b.label:GetStringWidth() or 100) + 20)
                 if x + b:GetWidth() > width then x = 0; y = y + 26 end

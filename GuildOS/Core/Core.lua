@@ -148,7 +148,7 @@ function GuildOS:Initialize()
 
     self.Compat.RegisterAddonPrefix(self.PREFIX)
 
-    self:Print("v" .. self.VERSION .. " |cffFFD700by Chehul|r" .. L[" loaded. Type |cffFFD700/guildos|r to open."])
+    self:Print("v" .. self.VERSION .. " |cffFFD700by Chehul|r, rehauled by |cffFFD700Vyctoria|r" .. L[" loaded. Type |cffFFD700/outlawos|r to open."])
 end
 
 ----------------------------------------------------------------------
