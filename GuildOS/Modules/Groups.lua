@@ -310,7 +310,7 @@ function Groups:_Publish()
 end
 
 -- List my group, or change the one I have. Returns the stored listing, or nil and why not.
--- `toGuild` is the composer's box, as on the board: one line in guild chat, five minutes apart.
+-- `toGuild` is the composer's box, as on the board: one line in guild chat, two minutes apart.
 function Groups:Create(act, need, note, ttl, toGuild, startIn)
     local B = board()
     act = B:_SanitizeAct(act)
@@ -340,7 +340,7 @@ function Groups:Create(act, need, note, ttl, toGuild, startIn)
     -- The line is said again every ANNOUNCE_EVERY while the group is up (#378); the flag stays here,
     -- it never crosses the wire (payloadOf).
     g.announce = toGuild and true or nil
-    -- A line the five-minute cooldown held back is tried again on the next tick.
+    -- A line the guild-chat cooldown held back is tried again on the next tick.
     if toGuild then
         g.announcedAt = B:_SayInGuild(nil, nil, nil, self:_GuildLine(g)) and g.ts or (g.ts - ANNOUNCE_EVERY)
     end
@@ -353,7 +353,7 @@ end
 -- whoever asks, the word that gets a guildmate with no addon an invite (#378).
 function Groups:_GuildLine(g)
     local name = string.format("%s (%d/%d)", board():ActivityName(g.act), g.n or 1, g.max or SIZE_DEFAULT)
-    local line = string.format(L["[Guild OS] Group for %s, looking for %s"], name, self:NeedText(g.need))
+    local line = string.format(L["[OutlawOS] Group for %s, looking for %s"], name, self:NeedText(g.need))
     if g.note and g.note ~= "" then line = line .. ": " .. g.note end
     local startIn = self:StartsIn(g)
     if startIn then line = line .. string.format(L[" (starts in %dm)"], math.ceil(startIn / 60)) end
@@ -416,7 +416,7 @@ end
 function Groups:PostNow()
     local g = self:Mine()
     if not g then return false, 0 end
-    local wait = board():GuildLineWait()
+    local wait = board():GuildLineWait(nil, "lastGroupLine")
     if wait > 0 then return false, wait end
     if not board():_SayInGuild(nil, nil, nil, self:_GuildLine(g)) then return false, 0 end
     g.announcedAt = GetServerTime()

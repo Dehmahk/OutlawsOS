@@ -579,17 +579,19 @@ function Digest:Show(lines)
     for _, r in pairs({ f.body:GetRegions() }) do r:Hide() end
 
     local y = 0
+    -- Text width from the window itself: f.body can report 0 width on the first show of a session.
+    local bodyW = f:GetWidth() - 32
     if #lines == 0 then
         local empty = UI:CreateText(f.body, L["Nothing new since your last login."], 11, C.silver.r, C.silver.g, C.silver.b)
         empty:SetPoint("TOPLEFT", 2, -y)
-        empty:SetWidth(f.body:GetWidth() - 4)
+        empty:SetWidth(bodyW - 4)
     else
         for _, line in ipairs(lines) do
             local dot = UI:CreateText(f.body, "|cffEDCC7B*|r", 12, C.gold.r, C.gold.g, C.gold.b)
             dot:SetPoint("TOPLEFT", 2, -y)
             local fs = UI:CreateText(f.body, line, 11, C.text.r, C.text.g, C.text.b)
             fs:SetPoint("TOPLEFT", 18, -y)
-            fs:SetWidth(f.body:GetWidth() - 22)
+            fs:SetWidth(bodyW - 22)
             fs:SetJustifyH("LEFT")
             y = y + math.max(20, (fs:GetStringHeight() or 14) + 8)
         end

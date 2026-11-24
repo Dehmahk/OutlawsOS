@@ -181,8 +181,8 @@ L["|cffFF4444OFF|r"] = "|cffFF4444OFF|r"
 
 -- Modules/LFGBoard.lua (/gos avail board window)
 L["Looking for"] = "Looking for"
-L["[Guild OS] LFG"] = "[Guild OS] LFG"
-L["[Guild OS] LFG as %s"] = "[Guild OS] LFG as %s"
+L["[OutlawOS] LFG"] = "[OutlawOS] LFG"
+L["[OutlawOS] LFG as %s"] = "[OutlawOS] LFG as %s"
 L["Tank"] = "Tank"
 L["Healer"] = "Healer"
 L["DPS"] = "DPS"

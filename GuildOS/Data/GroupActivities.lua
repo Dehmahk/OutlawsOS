@@ -41,7 +41,10 @@ local CLASSIC_LOW = {
     item("stockade", "The Stockade", 34, 24, 32, "StormwindStockades"),
     item("gnomeregan", "Gnomeregan", 90, 29, 38, "Gnomeregan"),
     item("razorfen-kraul", "Razorfen Kraul", 47, 29, 38, "RazorfenKraul"),
-    item("scarlet-monastery", "Scarlet Monastery", 189, 34, 45, "ScarletMonastery"),
+    item("scarlet-graveyard", "Scarlet Monastery: Graveyard", 189, 30, 38, "ScarletMonastery"),
+    item("scarlet-library", "Scarlet Monastery: Library", 189, 33, 41, "ScarletMonastery"),
+    item("scarlet-armory", "Scarlet Monastery: Armory", 189, 36, 44, "ScarletMonastery"),
+    item("scarlet-cathedral", "Scarlet Monastery: Cathedral", 189, 38, 46, "ScarletMonastery"),
     item("razorfen-downs", "Razorfen Downs", 129, 37, 46, "RazorfenDowns"),
 }
 local CLASSIC_HIGH = {

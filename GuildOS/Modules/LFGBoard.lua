@@ -18,7 +18,7 @@ local NOTE_MAX    = 60
 local ACTS_MAX    = 6      -- activities one listing names
 local ACT_ID_MAX  = 32     -- bytes of an activity id
 local ENTRY_COOLDOWN = 5   -- accept at most one entry per sender per 5s
-local GUILD_LINE_COOLDOWN = 300   -- at most one line in guild chat per 5 minutes
+local GUILD_LINE_COOLDOWN = 120   -- at most one group line and one LFG line in guild chat per 2 minutes each
 
 LFGBoard.DEFAULTS = { notify = true, postToGuild = true, lastRole = "ANY", lastNote = "",
                       lastTtl = DEFAULT_TTL, allianceScope = false, roles = "", lastMode = "seek",
@@ -496,28 +496,31 @@ function LFGBoard:Describe(entry)
 end
 
 -- The post in guild chat, which is what reaches somebody with the board closed, or with no addon
--- at all (#243). At most one every five minutes, saved so a /reload does not skip it, because taking
+-- at all (#243). At most one every two minutes, saved so a /reload does not skip it, because taking
 -- a post down and putting it back is one click each. The addon's notice goes out regardless, even if
 -- it says the same thing: a line can be dropped with no error (a rank that may not speak), and not
 -- everybody shows guild chat, so nothing here can know the line reached anyone. `line` is the whole
--- line when Modules/Groups.lua speaks for a group: one cooldown for both, so a leader cannot say two.
+-- line when Modules/Groups.lua speaks for a group: it has its own cooldown (lastGroupLine), so a group
+-- fill and an LFG line do not hold each other back.
 function LFGBoard:_SayInGuild(role, note, acts, line)
     local prefs, now = GuildOS.db.lfgPrefs, GetServerTime()
-    if not IsInGuild() or now - (prefs.lastGuildLine or 0) < GUILD_LINE_COOLDOWN then return false end
+    local key = line and "lastGroupLine" or "lastGuildLine"
+    if not IsInGuild() or now - (prefs[key] or 0) < GUILD_LINE_COOLDOWN then return false end
     if not line then
-        line = role == "ANY" and L["[Guild OS] LFG"] or string.format(L["[Guild OS] LFG as %s"], roleDisplay(role))
+        line = role == "ANY" and L["[OutlawOS] LFG"] or string.format(L["[OutlawOS] LFG as %s"], roleDisplay(role))
         local what = self:Describe({ acts = acts, note = note })
         if what ~= "" then line = line .. ": " .. what end
     end
     if not GuildOS.Compat.SendChatMessage(line, "GUILD") then return false end
-    prefs.lastGuildLine = now
+    prefs[key] = now
     return true
 end
 
--- Seconds until the guild line's cooldown lets another out, 0 when it does now (#378).
-function LFGBoard:GuildLineWait(now)
+-- Seconds until the guild line's cooldown lets another out, 0 when it does now (#378). `key` picks
+-- the group line's cooldown ("lastGroupLine") or the LFG line's (default "lastGuildLine").
+function LFGBoard:GuildLineWait(now, key)
     local prefs = GuildOS.db and GuildOS.db.lfgPrefs
-    local last = prefs and prefs.lastGuildLine or 0
+    local last = prefs and prefs[key or "lastGuildLine"] or 0
     return math.max(0, GUILD_LINE_COOLDOWN - ((now or GetServerTime()) - last))
 end
 

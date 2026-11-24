@@ -1,8 +1,13 @@
 # Changelog
 
-## Unreleased (since 1.37.14)
+## 1.38.0 (since 1.37.14)
 
 Addon title is now "OutlawOS" in the addon list.
+
+### Eastern Kingdoms Outlaws
+- Ledger anniversaries: the panel lists the last 7 days by milestone (2, 3 and 4 weeks, then months) and a "Coming up" list for the next 14 days.
+- Bounty Board clears are counted from this week's dungeon clears logged by members with OutlawOS. The Bounty Board status and your bounty points on the Dashboard use the same count.
+- Raffle entries are counted from this week's clears, one per clear. Officers can still paste a list to override the count for that week.
 
 ### Guild chat
 - Timestamps on the name line, a line-length cap, a 2-minute split for a speaker's run, and day dividers.

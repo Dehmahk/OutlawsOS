@@ -3096,15 +3096,67 @@ function EKO:BuildDeskSub(panel)
             if not u.v then
                 cell(r, "|cffff6060NOT INSTALLED|r", 435, 150)
             elseif u.v == CURRENT then
-                cell(r, GREEN .. "v" .. u.v .. "|r", 435, 150)
+                cell(r, GREEN .. "current|r", 435, 150)
             else
-                cell(r, "|cffff6060v" .. tostring(u.v) .. "  UPDATE OutlawOS|r", 435, 150)
+                cell(r, "|cffff6060UPDATE OutlawOS|r", 435, 150)
             end
-            cell(r, u.at and ("last seen " .. date("%b %d %I:%M %p", u.at)) or "", 590, 200, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+            cell(r, u.v and ("v" .. tostring(u.v)) or "", 590, 200, C.textSoft.r, C.textSoft.g, C.textSoft.b)
             y = y + 24
         end
         txt(child, "Each leader's version is the one they check in with at login. NOT INSTALLED means no check-in yet; UPDATE OutlawOS means an older version.", 0, y + 2, width, 10, C.textSoft)
         y = y + 26
+
+        -- Install check: every guild member. A check-in in the last EKO.PATCH_RECENT_DAYS days is OutlawOS; a
+        -- member the guild's addon sync shows on GuildOS without one is still on GuildOS; the rest show no addon.
+        local recent = now() - EKO.PATCH_RECENT_DAYS * DAY
+        local checked = {}
+        for _, u in ipairs(EKO:PatchUsers()) do
+            if u.at and u.at >= recent then checked[short(u.name)] = u end
+        end
+        local gdb = (GuildOS.db and GuildOS.db.members) or {}
+        local still, onOutlaw, noAddon = {}, {}, {}
+        for name, m in pairs(EKO:Roster()) do
+            local mem = gdb[name]
+            if checked[name] then
+                onOutlaw[#onOutlaw + 1] = { name = name, m = m, online = m.online }
+            elseif mem and mem.addonVersion then
+                still[#still + 1] = { name = name, m = m, online = m.online, v = mem.addonVersion }
+            else
+                noAddon[#noAddon + 1] = { name = name, m = m, online = m.online }
+            end
+        end
+        local function byOnline(a, b)
+            if (a.online and 1 or 0) ~= (b.online and 1 or 0) then return a.online end
+            return a.name < b.name
+        end
+        table.sort(still, byOnline)
+        table.sort(onOutlaw, byOnline)
+        table.sort(noAddon, byOnline)
+        local function joinNames(list)
+            if #list == 0 then return "None." end
+            local out = {}
+            for i, u in ipairs(list) do out[i] = u.name end
+            return table.concat(out, ", ")
+        end
+        sectionAt(child, string.format("INSTALL CHECK  ·  %d on OutlawOS, %d still on GuildOS, %d no addon", #onOutlaw, #still, #noAddon), y)
+        y = y + 26
+        local inote = txt(child, "On OutlawOS: a check-in in the last " .. EKO.PATCH_RECENT_DAYS .. " days. Still on GuildOS: the guild's addon sync shows GuildOS and no recent check-in. Use Check who's online above to refresh.", 0, y, width, 10, C.textSoft)
+        y = y + (inote:GetStringHeight() or 12) + 10
+        for i, u in ipairs(still) do
+            local r = newRow(child, y, i, 22)
+            cell(r, u.m and classColored(u.m) or u.name, 8, 200)
+            cell(r, "|cffff6060GuildOS|r  v" .. tostring(u.v), 215, 200)
+            cell(r, u.online and (GREEN .. "online|r") or (GREY .. "offline|r"), 430, 70)
+            y = y + 24
+        end
+        if #still == 0 then txt(child, "Nobody is still on GuildOS.", 0, y, width, 12, C.textSoft); y = y + 22 end
+        y = y + 8
+        sectionAt(child, "ON OUTLAWOS  ·  " .. #onOutlaw, y); y = y + 26
+        local t1 = txt(child, joinNames(onOutlaw), 0, y, width, 11, C.text)
+        y = y + (t1:GetStringHeight() or 14) + 12
+        sectionAt(child, "NO ADDON DATA  ·  " .. #noAddon, y); y = y + 26
+        local t2 = txt(child, joinNames(noAddon), 0, y, width, 11, C.textSoft)
+        y = y + (t2:GetStringHeight() or 14) + 12
 
         -- Anniversaries
         -- Milestones grouped by tier: a heading with a count, then the first few names and "and N more".
@@ -3328,6 +3380,8 @@ end
 -- "ekowho", guild only). Kept in db.eko.patchUsers[name] = { v, at }.
 ----------------------------------------------------------------------
 EKO.PATCH_VERSION = GuildOS.VERSION or "?"   -- the CurseForge version each client checks in with
+-- A check-in this many days old or less counts as OutlawOS in the install check.
+EKO.PATCH_RECENT_DAYS = 14
 
 local function rememberPatch(name, v)
     local db = EKO:DB()

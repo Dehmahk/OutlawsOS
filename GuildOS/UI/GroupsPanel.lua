@@ -1011,7 +1011,7 @@ function GuildOS:CreateGroupsPanel(parent)
         card.meta:SetText(table.concat(parts, DOT))
         oneLine(card.meta, width - 20)
 
-        local wait = B:GuildLineWait(now)
+        local wait = B:GuildLineWait(now, "lastGroupLine")
         fit(card.post, wait > 0 and (L["Post in chat"] .. " (" .. string.format(L["in %dm"], math.ceil(wait / 60)) .. ")")
             or L["Post in chat"])
         if wait > 0 then card.post:Disable() else card.post:Enable() end
