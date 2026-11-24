@@ -1,5 +1,5 @@
 ## Interface: 20506, 16001, 120105
-## Title: |cffFFD700Guild OS|r |cff888888Guild Manager|r
+## Title: |cffFFD700OutlawOS|r |cff888888Guild Manager|r
 ## Notes: Guild manager for WoW: Forever and Retail: roster, raid attendance, cores, recruitment and professions
 ## Author: Chehul (danielcosta42)
 ## Version: 1.37.14
