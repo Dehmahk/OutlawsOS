@@ -2166,7 +2166,7 @@ end
 ----------------------------------------------------------------------
 -- Anniversaries
 ----------------------------------------------------------------------
-EKO.ANNIVERSARIES = { 7, 30, 90, 180, 365 }
+EKO.ANNIVERSARIES = { 7, 14, 21, 28, 30, 90, 180, 365 }
 
 -- Members who reached a milestone in the last 7 days: { name, days, at }.
 function EKO:Anniversaries()
@@ -2185,8 +2185,32 @@ function EKO:Anniversaries()
     return out
 end
 
+-- Members who reach a milestone in the next `within` days (default 14), soonest first.
+function EKO:UpcomingAnniversaries(within)
+    local out = {}
+    local t = now()
+    local span = (within or 14) * DAY
+    for name in pairs(self:Roster()) do
+        local joined = self:JoinedAt(name)
+        if joined then
+            for _, d in ipairs(self.ANNIVERSARIES) do
+                local at = joined + d * DAY
+                if at > t and at - t <= span then out[#out + 1] = { name = name, days = d, at = at } end
+            end
+        end
+    end
+    table.sort(out, function(a, b)
+        if a.at ~= b.at then return a.at < b.at end
+        return a.name < b.name
+    end)
+    return out
+end
+
 local function annText(d)
     if d == 7 then return "1 week" end
+    if d == 14 then return "2 weeks" end
+    if d == 21 then return "3 weeks" end
+    if d == 28 then return "4 weeks" end
     if d == 30 then return "1 month" end
     if d == 90 then return "3 months" end
     if d == 180 then return "6 months" end
@@ -3081,22 +3105,39 @@ function EKO:BuildDeskSub(panel)
         y = y + 26
 
         -- Anniversaries
-        sectionAt(child, "LEDGER ANNIVERSARIES  ·  last 7 days", y); y = y + 26
-        local ann = EKO:Anniversaries()
-        if #ann == 0 then txt(child, "No anniversaries this week.", 0, y, width, 12, C.textSoft); y = y + 22 end
-        for i = 1, math.min(15, #ann) do
-            local a = ann[i]
-            local r = newRow(child, y, i, 24)
-            cell(r, a.name, 8, 220)
-            cell(r, GOLDC .. annText(a.days) .. "|r on the Ledger", 240, 200)
-            cell(r, date("%b %d", a.at), 450, 80, C.textSoft.r, C.textSoft.g, C.textSoft.b)
-            local s = btn(r, "Shout out", 80, function()
-                ChatFrame_OpenChat(string.format("/g Happy Ledger anniversary %s! %s with the Outlaws. Free by choice, bound by bond!", a.name, annText(a.days)))
-            end)
-            s:SetPoint("RIGHT", -8, 0)
-            y = y + 26
+        -- Milestones grouped by tier: a heading with a count, then the first few names and "and N more".
+        local function annSection(title, list, emptyText, showShout)
+            sectionAt(child, title, y); y = y + 26
+            if #list == 0 then txt(child, emptyText, 0, y, width, 12, C.textSoft); y = y + 22; return end
+            local byDays, order = {}, {}
+            for _, a in ipairs(list) do
+                if not byDays[a.days] then byDays[a.days] = {}; order[#order + 1] = a.days end
+                table.insert(byDays[a.days], a)
+            end
+            table.sort(order)
+            for _, d in ipairs(order) do
+                local g = byDays[d]
+                txt(child, GOLDC .. annText(d) .. "|r  ·  " .. #g .. " member" .. (#g == 1 and "" or "s"), 0, y, width, 12, C.text)
+                y = y + 18
+                for i = 1, math.min(5, #g) do
+                    local a = g[i]
+                    local r = newRow(child, y, i, 24)
+                    cell(r, a.name, 8, 220)
+                    cell(r, date("%b %d", a.at), 240, 80, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+                    if showShout then
+                        local s = btn(r, "Shout out", 80, function()
+                            ChatFrame_OpenChat(string.format("/g Happy Ledger anniversary %s! %s with the Outlaws. Free by choice, bound by bond!", a.name, annText(a.days)))
+                        end)
+                        s:SetPoint("RIGHT", -8, 0)
+                    end
+                    y = y + 26
+                end
+                if #g > 5 then txt(child, string.format("... and %d more.", #g - 5), 0, y, width, 11, C.textSoft); y = y + 18 end
+                y = y + 6
+            end
         end
-        if #ann > 15 then txt(child, string.format("... and %d more.", #ann - 15), 0, y, width, 11, C.textSoft); y = y + 18 end
+        annSection("LEDGER ANNIVERSARIES  ·  last 7 days", EKO:Anniversaries(), "No anniversaries this week.", true)
+        annSection("COMING UP  ·  next 14 days", EKO:UpcomingAnniversaries(14), "Nobody reaches a milestone in the next 14 days.", false)
 
         -- Quote the Code
         y = y + 12
