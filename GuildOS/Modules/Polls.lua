@@ -34,16 +34,27 @@ function Polls:GetSorted()
     local list = {}
     for _, p in pairs(self:GetList()) do list[#list + 1] = p end
     table.sort(list, function(a, b)
-        if (a.closed and true or false) ~= (b.closed and true or false) then return not a.closed end
+        local ca, cb = self:IsClosed(a), self:IsClosed(b)
+        if ca ~= cb then return not ca end
         return (a.ts or 0) > (b.ts or 0)
     end)
     return list
 end
 
+-- Closed: closed by an officer, or past the day it was set to close (#10). Every client works it out
+-- from the same stored day, so no one needs a message to close a poll on time.
+function Polls:IsClosed(p)
+    if not p then return true end
+    if p.closed then return true end
+    local at = tonumber(p.closesAt)
+    return at ~= nil and GetServerTime() >= at
+end
+
 ----------------------------------------------------------------------
 -- Mutations
 ----------------------------------------------------------------------
-function Polls:Create(question, options)
+-- `opts`: hideResults (the tallies stay hidden until it closes, #9), days (it closes that many days on, #10).
+function Polls:Create(question, options, opts)
     if not GuildOS:IsOfficer() then
         GuildOS:Print(L["|cffFF4444Officers only.|r"])
         return
@@ -53,15 +64,20 @@ function Polls:Create(question, options)
         GuildOS:Print(L["A poll needs a question and at least 2 options."])
         return
     end
+    opts = opts or {}
+    local now = GetServerTime()
     local p = {
         id = newId(), question = question, options = options, votes = {},
-        author = GuildOS.Compat.PlayerName(), ts = GetServerTime(), closed = false,
+        author = GuildOS.Compat.PlayerName(), ts = now, closed = false,
+        hideResults = opts.hideResults and true or nil,
+        closesAt = (tonumber(opts.days) and opts.days > 0) and (now + opts.days * 86400) or nil,
     }
     self:GetList()[p.id] = p
     if GuildOS.SyncService then
         local rev = GuildOS.SyncService:NextRevision("poll", p.id)
         GuildOS.SyncService:Publish("poll", "create", { poll = {
             id = p.id, question = p.question, options = p.options, author = p.author, ts = p.ts,
+            hideResults = p.hideResults, closesAt = p.closesAt,
         } }, { rev = rev })
     end
     self:Refresh()
@@ -69,7 +85,7 @@ end
 
 function Polls:Vote(id, opt)
     local p = self:GetList()[id]
-    if not p or p.closed then return end
+    if not p or self:IsClosed(p) then return end
     p.votes = p.votes or {}
     p.votes[keyOf(GuildOS.Compat.PlayerName())] = opt
     if GuildOS.SyncService then
@@ -85,6 +101,30 @@ function Polls:Close(id)
     p.closed = true
     if GuildOS.SyncService then
         GuildOS.SyncService:Publish("poll", "close", { id = id })
+    end
+    self:Refresh()
+end
+
+-- Opens a closed poll again (#12): it stays open until closed by hand, and its set close day is dropped.
+function Polls:Reopen(id)
+    if not GuildOS:IsOfficer() then return end
+    local p = self:GetList()[id]
+    if not p then return end
+    p.closed = false
+    p.closesAt = nil
+    if GuildOS.SyncService then
+        GuildOS.SyncService:Publish("poll", "reopen", { id = id })
+    end
+    self:Refresh()
+end
+
+-- Removes a poll and its votes everywhere (#11).
+function Polls:Delete(id)
+    if not GuildOS:IsOfficer() then return end
+    if not self:GetList()[id] then return end
+    self:GetList()[id] = nil
+    if GuildOS.SyncService then
+        GuildOS.SyncService:Publish("poll", "delete", { id = id })
     end
     self:Refresh()
 end
@@ -106,9 +146,14 @@ function Polls:OnSync(env, sender)
     elseif env.act == "close" and d and d.id then
         local p = self:GetList()[d.id]
         if p then p.closed = true; self:Refresh() end
+    elseif env.act == "reopen" and d and d.id then
+        local p = self:GetList()[d.id]
+        if p then p.closed = false; p.closesAt = nil; self:Refresh() end
+    elseif env.act == "delete" and d and d.id then
+        if self:GetList()[d.id] then self:GetList()[d.id] = nil; self:Refresh() end
     elseif env.act == "vote" and d and d.id and d.opt then
         local p = self:GetList()[d.id]
-        if p and not p.closed then
+        if p and not self:IsClosed(p) then
             p.votes = p.votes or {}
             p.votes[keyOf(sender)] = d.opt
             self:Refresh()

@@ -1137,13 +1137,85 @@ end
 ----------------------------------------------------------------------
 -- POLLS sub-panel
 ----------------------------------------------------------------------
+GuildOS.Dialogs["GUILDOS_POLL_CLOSE"] = {
+    text = "%s", button1 = L["Close"], button2 = L["Cancel"],
+    OnAccept = function(self)
+        local d = self and self.data
+        if d and d.run then d.run() end
+    end,
+    timeout = 0, whileDead = true, hideOnEscape = true,
+}
+GuildOS.Dialogs["GUILDOS_POLL_DELETE"] = {
+    text = "%s", button1 = L["Delete"], button2 = L["Cancel"],
+    OnAccept = function(self)
+        local d = self and self.data
+        if d and d.run then d.run() end
+    end,
+    timeout = 0, whileDead = true, hideOnEscape = true,
+}
+GuildOS.Dialogs["GUILDOS_POLL_CHAT"] = {
+    text = "%s", button1 = L["Send"], button2 = L["Cancel"],
+    OnAccept = function(self)
+        local d = self and self.data
+        if d and d.run then d.run() end
+    end,
+    timeout = 0, whileDead = true, hideOnEscape = true,
+}
+GuildOS.Dialogs["GUILDOS_POLL_NOTICE"] = {
+    text = "%s", button1 = L["Post"], button2 = L["Cancel"],
+    OnAccept = function(self)
+        local d = self and self.data
+        if d and d.run then d.run() end
+    end,
+    timeout = 0, whileDead = true, hideOnEscape = true,
+}
+
 local function BuildPollsSub(panel)
-    local listTop = GAP
-    if GuildOS:IsOfficer() then
+    local isOfficer = GuildOS:IsOfficer()
+    local POLL_DAYS = { false, 3, 7, 14 }     -- the close-after choices on the form (#10)
+    local POLL_MAX_OPTIONS = 6
+    local POLL_MAX_QUESTION = 150
+    local POLL_FILTERS = { { "open", "Open" }, { "closed", "Closed" }, { "all", "All" } }
+    local filter = "open"                      -- which polls the list shows (#14)
+    local dayIdx = 1                           -- into POLL_DAYS, the form's close-after choice
+    local formMsg                              -- the form's own message line (#18)
+    local formLast                             -- the form's last line; the filters hang under it
+    local refresh                              -- set below; the filters and the buttons repaint through it
+
+    local soft = C.textSoft
+    local function setFormMsg(text, col)
+        if not formMsg then return end
+        formMsg:SetText(text or "")
+        local c = col or soft
+        formMsg:SetTextColor(c.r, c.g, c.b)
+    end
+
+    -- A tooltip with a title and plain lines under it: who picked an option, or a note (#8).
+    local function listTip(frame, title, lines)
+        frame:HookScript("OnEnter", function(self)
+            if not GameTooltip then return end
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine(title, C.text.r, C.text.g, C.text.b, true)
+            for _, line in ipairs(lines) do
+                GameTooltip:AddLine(line, soft.r, soft.g, soft.b, true)
+            end
+            GameTooltip:Show()
+        end)
+        frame:HookScript("OnLeave", function()
+            if GameTooltip then GameTooltip:Hide() end
+        end)
+    end
+
+    -- The poll as one line for guild chat or the bulletin board (#13).
+    local function pollLine(p)
+        return string.format(L["Poll: %s (%s)"], p.question or "", table.concat(p.options or {}, " / "))
+    end
+
+    if isOfficer then
         -- The question says what it is while empty; the options box is three lines tall with its
         -- hint right under it (#371).
         local createBtn = UI:CreateButton(panel, L["Create Poll"], 110, FIELD_H)
-        local qBox = UI:CreateInput(panel, 0, FIELD_H, { max = 150, placeholder = L["Question..."] })
+        local qBox = UI:CreateInput(panel, 0, FIELD_H, { max = POLL_MAX_QUESTION, placeholder = L["Question..."] })
         qBox:SetPoint("TOPLEFT", 0, -GAP)
         qBox:SetPoint("TOPRIGHT", -(GAP + UI.ReserveFor(createBtn, GAP)), -GAP)
         createBtn:SetPoint("LEFT", qBox, "RIGHT", GAP, 0)
@@ -1151,74 +1223,313 @@ local function BuildPollsSub(panel)
         oArea:SetPoint("TOPLEFT", qBox, "BOTTOMLEFT", 0, -GAP)
         oArea:SetPoint("TOPRIGHT", createBtn, "BOTTOMRIGHT", 0, -GAP)
         local oBox = oArea.edit
-        local hint = UI:CreateText(panel, L["One option per line (2-6)"], 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+        local hint = UI:CreateText(panel, L["One option per line (2-6)"], 11, soft.r, soft.g, soft.b)
         hint:SetPoint("TOPLEFT", oArea, "BOTTOMLEFT", 0, -4)
-        listTop = hint
+        local countFS = UI:CreateText(panel, "", 11, soft.r, soft.g, soft.b)
+        countFS:SetPoint("TOPRIGHT", oArea, "BOTTOMRIGHT", 0, -4)
+
+        local function countQuestion()
+            countFS:SetText(string.format(L["Question: %d of %d characters"], #(qBox:GetText() or ""), POLL_MAX_QUESTION))
+        end
+        qBox:HookScript("OnTextChanged", countQuestion)
+        countQuestion()
+
+        -- The hint turns to a warning past six options: only six are kept (#17).
+        local function paintOptions()
+            local n = 0
+            for line in (oBox:GetText() .. "\n"):gmatch("([^\n]*)\n") do
+                if strtrim(line) ~= "" then n = n + 1 end
+            end
+            if n > POLL_MAX_OPTIONS then
+                hint:SetText(string.format(L["Only the first %d options count."], POLL_MAX_OPTIONS))
+                hint:SetTextColor(C.warn.r, C.warn.g, C.warn.b)
+            else
+                hint:SetText(L["One option per line (2-6)"])
+                hint:SetTextColor(soft.r, soft.g, soft.b)
+            end
+        end
+        oBox:HookScript("OnTextChanged", paintOptions)
+
+        -- Hidden results until it closes, and a close time for it on its own (#9, #10).
+        local hideCb = UI:CreateCheckbox(panel, L["Hide results until closed"], 16)
+        hideCb:SetPoint("TOPLEFT", hint, "BOTTOMLEFT", 0, -GAP)
+        local dayBtn = UI:CreateButton(panel, "", 170, FIELD_H)
+        dayBtn:SetPoint("TOPLEFT", hideCb, "BOTTOMLEFT", 0, -GAP)
+        local function dayText()
+            local d = POLL_DAYS[dayIdx]
+            return d and string.format(L["Closes in %d days"], d) or L["Stays open"]
+        end
+        dayBtn.label:SetText(dayText())
+        dayBtn:SetScript("OnClick", function()
+            dayIdx = dayIdx % #POLL_DAYS + 1
+            dayBtn.label:SetText(dayText())
+        end)
+        tipOn(dayBtn, L["How long the poll stays open. It closes on its own after that."])
+
+        formMsg = UI:CreateText(panel, "", 11, soft.r, soft.g, soft.b)
+        formMsg:SetPoint("TOPLEFT", dayBtn, "BOTTOMLEFT", 0, -GAP)
+        formLast = formMsg
+
         createBtn:SetScript("OnClick", function()
-            local opts = {}
+            local question = strtrim(qBox:GetText() or "")
+            local opts, extra = {}, 0
             for line in (oBox:GetText() .. "\n"):gmatch("([^\n]*)\n") do
                 local t = strtrim(line)
-                if t ~= "" and #opts < 6 then opts[#opts + 1] = t end
+                if t ~= "" then
+                    if #opts < POLL_MAX_OPTIONS then opts[#opts + 1] = t else extra = extra + 1 end
+                end
             end
-            if GuildOS.Polls then GuildOS.Polls:Create(qBox:GetText(), opts) end
-            qBox:SetText(""); oBox:SetText(""); qBox:ClearFocus(); oBox:ClearFocus()
+            if question == "" then
+                setFormMsg(L["Type a question first."], C.warn)
+                qBox:SetFocus()
+                return
+            end
+            if #opts < 2 then
+                setFormMsg(L["Add at least 2 options."], C.warn)
+                oBox:SetFocus()
+                return
+            end
+            if GuildOS.Polls then
+                GuildOS.Polls:Create(question, opts, {
+                    hideResults = hideCb.checkbox:GetChecked() and true or nil,
+                    days = POLL_DAYS[dayIdx],
+                })
+            end
+            qBox:SetText(""); oBox:SetText("")
+            qBox:ClearFocus(); oBox:ClearFocus()
+            paintOptions(); countQuestion()
+            if extra > 0 then
+                setFormMsg(string.format(L["Only the first %d options count."], POLL_MAX_OPTIONS), C.warn)
+            else
+                setFormMsg(L["Poll created."], soft)
+            end
         end)
     end
-    local _, child = makeScroll(panel, "GuildOSHubPollsScroll", listTop)
+
+    -- The filters (#14), and the summary of how many are open and closed (#16). The list hangs under them.
+    local filterBtns, firstFilter, prevFilter = {}, nil, nil
+    for _, d in ipairs(POLL_FILTERS) do
+        local key = d[1]
+        local b = UI:CreateButton(panel, L[d[2]], 70, 20)
+        if prevFilter then
+            b:SetPoint("LEFT", prevFilter, "RIGHT", 4, 0)
+        elseif formLast then
+            b:SetPoint("TOPLEFT", formLast, "BOTTOMLEFT", 0, -GAP)
+        else
+            b:SetPoint("TOPLEFT", 0, -GAP)
+        end
+        b:SetScript("OnClick", function()
+            filter = key
+            refresh()
+        end)
+        filterBtns[key] = b
+        firstFilter = firstFilter or b
+        prevFilter = b
+    end
+    local summaryFS = UI:CreateText(panel, "", 11, soft.r, soft.g, soft.b)
+    summaryFS:SetPoint("LEFT", prevFilter, "RIGHT", GAP, 0)
+
+    local _, child = makeScroll(panel, "GuildOSHubPollsScroll", firstFilter)
 
     local function keyOf(name)
         local short = (name or ""):match("^([^-]+)") or name
         return GuildOS:GetPlayerKey(short, GetRealmName())
     end
 
-    local function refresh()
+    refresh = function()
         clear(child)
-        local polls = (GuildOS.Polls and GuildOS.Polls:GetSorted()) or {}
-        local isOfficer = GuildOS:IsOfficer()
+        local P = GuildOS.Polls
+        for key, b in pairs(filterBtns) do UI:SetSelected(b, filter == key) end
+        local list = (P and P:GetSorted()) or {}
         local myKey = keyOf(GuildOS.Compat.PlayerName())
-        local y = 0
-        for _, p in ipairs(polls) do
-            -- The question in the text colour, a closed one in the soft one (#371).
-            local qc = p.closed and C.textSoft or C.text
-            local q = UI:CreateText(child, (p.closed and "[" .. L["closed"] .. "] " or "") .. p.question, 12, qc.r, qc.g, qc.b)
-            local closable = isOfficer and not p.closed
-            q:SetPoint("TOPLEFT", 0, -y)
-            q:SetPoint("TOPRIGHT", closable and -(56 + GAP) or 0, -y)
-            q:SetJustifyH("LEFT")
-            if closable then
-                local closeBtn = UI:CreateButton(child, L["Close"], 56, 18)
-                closeBtn:SetPoint("TOPRIGHT", 0, -y)
-                local id = p.id
-                closeBtn:SetScript("OnClick", function() if GuildOS.Polls then GuildOS.Polls:Close(id) end end)
-            end
-            y = y + math.max(18, (q:GetStringHeight() or 14) + 4)
-
-            local total, counts = 0, {}
-            for _, opt in pairs(p.votes or {}) do counts[opt] = (counts[opt] or 0) + 1; total = total + 1 end
-            local myVote = p.votes and p.votes[myKey]
-            for idx, optText in ipairs(p.options or {}) do
-                local n = counts[idx] or 0
-                local pct = total > 0 and math.floor(n / total * 100 + 0.5) or 0
-                local btn = UI:CreateButton(child, string.format("%s  (%d · %d%%)", optText, n, pct), 1, 20)
-                btn:SetPoint("TOPLEFT", 0, -y)
-                btn:SetPoint("TOPRIGHT", 0, -y)
-                -- My vote is the selected option, as every selection is marked (#371).
-                UI:SetSelected(btn, myVote == idx)
-                btn.label:ClearAllPoints()
-                btn.label:SetPoint("LEFT", 8, 0)
-                if not p.closed then
-                    local id, oi = p.id, idx
-                    btn:SetScript("OnClick", function() if GuildOS.Polls then GuildOS.Polls:Vote(id, oi) end end)
-                end
-                y = y + 22
-            end
-            local meta = UI:CreateText(child, string.format(L["%d vote(s) · by %s"], total, p.author or "?"),
-                11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
-            meta:SetPoint("TOPLEFT", 0, -y)
-            y = y + 22
+        local openN, closedN = 0, 0
+        for _, p in ipairs(list) do
+            if P:IsClosed(p) then closedN = closedN + 1 else openN = openN + 1 end
         end
-        if #polls == 0 then
-            local empty = UI:CreateText(child, L["No polls yet."], 12, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+        summaryFS:SetText(string.format(L["%d open · %d closed"], openN, closedN))
+
+        local y, shown = 0, 0
+        for _, p in ipairs(list) do
+            local isClosed = P:IsClosed(p)
+            if filter == "all" or (filter == "closed") == isClosed then
+                shown = shown + 1
+                if shown > 1 then
+                    -- A rule between one poll and the next (#6).
+                    y = y + 12
+                    local rule = child:CreateTexture(nil, "ARTWORK")
+                    rule:SetColorTexture(C.line.r, C.line.g, C.line.b, 1)
+                    rule:SetHeight(1)
+                    rule:SetPoint("TOPLEFT", 0, -(y - 6))
+                    rule:SetPoint("TOPRIGHT", 0, -(y - 6))
+                end
+
+                -- The question in the text colour, a closed one in the soft one (#371).
+                local qc = isClosed and soft or C.text
+                local prefix = isClosed and ("[" .. L["closed"] .. "] ") or ""
+                local q = UI:CreateText(child, prefix .. (p.question or ""), 12, qc.r, qc.g, qc.b)
+                q:SetPoint("TOPLEFT", 0, -y)
+                q:SetPoint("TOPRIGHT", 0, -y)
+                q:SetJustifyH("LEFT")
+                y = y + math.max(18, (q:GetStringHeight() or 14) + 4)
+
+                -- The tallies. Hidden results show no counts until the poll closes (#9).
+                local total, counts, voters = 0, {}, {}
+                for voterKey, opt in pairs(p.votes or {}) do
+                    counts[opt] = (counts[opt] or 0) + 1
+                    total = total + 1
+                    voters[opt] = voters[opt] or {}
+                    voters[opt][#voters[opt] + 1] = voterKey:match("^([^%-]+)") or voterKey
+                end
+                for _, names in pairs(voters) do table.sort(names) end
+                local hidden = p.hideResults and not isClosed
+                local topCount = 0
+                if isClosed then
+                    for i = 1, #(p.options or {}) do topCount = math.max(topCount, counts[i] or 0) end
+                end
+                local myVote = p.votes and p.votes[myKey]
+
+                for idx, optText in ipairs(p.options or {}) do
+                    local n = counts[idx] or 0
+                    local pct = total > 0 and math.floor(n / total * 100 + 0.5) or 0
+                    local label = optText
+                    if not hidden then
+                        label = string.format("%s  (%d · %d%%)", optText, n, pct)
+                        -- The option or options with the most votes, once it has closed (#2).
+                        if isClosed and topCount > 0 and n == topCount then
+                            label = label .. "  " .. rgbHex(C.gold) .. L["Leading"] .. "|r"
+                        end
+                    end
+                    local btn = UI:CreateButton(child, label, 1, 20)
+                    btn:SetPoint("TOPLEFT", 0, -y)
+                    btn:SetPoint("TOPRIGHT", 0, -y)
+                    -- My vote is the selected option, as every selection is marked (#371).
+                    UI:SetSelected(btn, myVote == idx)
+                    btn.label:ClearAllPoints()
+                    btn.label:SetPoint("LEFT", 8, 0)
+
+                    -- The share of the vote, as a bar behind the option (#1).
+                    if not hidden and total > 0 and n > 0 then
+                        local fill = btn:CreateTexture(nil, "BORDER")
+                        fill:SetColorTexture(C.lineHi.r, C.lineHi.g, C.lineHi.b, 0.45)
+                        fill:SetPoint("TOPLEFT", 1, -1)
+                        fill:SetPoint("BOTTOMLEFT", 1, 1)
+                        local share = n / total
+                        local function size() fill:SetWidth(math.max(1, (btn:GetWidth() - 2) * share)) end
+                        btn:HookScript("OnSizeChanged", size)
+                        size()
+                    end
+
+                    -- Hover: who picked it (#8), or why the tallies are hidden.
+                    local names = voters[idx] or {}
+                    local lines = {}
+                    if not isClosed then lines[#lines + 1] = L["Click to vote."] end
+                    if hidden then
+                        lines[#lines + 1] = L["Results are hidden until the poll closes."]
+                    elseif #names > 0 then
+                        for _, nm in ipairs(names) do lines[#lines + 1] = nm end
+                    else
+                        lines[#lines + 1] = L["Nobody has voted for this yet."]
+                    end
+                    listTip(btn, optText, lines)
+
+                    if not isClosed then
+                        local id, oi = p.id, idx
+                        btn:SetScript("OnClick", function() if GuildOS.Polls then GuildOS.Polls:Vote(id, oi) end end)
+                    end
+                    y = y + 22
+                end
+
+                -- The meta line: the votes and the author in their class colour (#4), and when it was posted (#5).
+                local metaY = y + 2
+                local votesKey = total == 1 and L["%d vote · by %s"] or L["%d votes · by %s"]
+                local meta = UI:CreateText(child, table.concat({
+                    string.format(votesKey, total, authorText(p.author)),
+                    GuildOS:TimeAgo(p.ts or 0),
+                }, " · "), 11, soft.r, soft.g, soft.b)
+                meta:SetPoint("TOPLEFT", 0, -metaY)
+                local hit = CreateFrame("Frame", nil, child)
+                hit:SetPoint("TOPLEFT", meta, "TOPLEFT", 0, 0)
+                hit:SetSize(math.max(20, meta:GetStringWidth() or 20), 14)
+                hit:EnableMouse(true)
+                tipOn(hit, string.format(L["Posted %s"], GuildOS:DateText(p.ts or 0, " %H:%M")))
+
+                -- The status line: closed or when it closes (#3, #10), hidden results, and my vote (#15).
+                local status = {}
+                if p.closed then
+                    status[#status + 1] = L["Closed"]
+                elseif isClosed then
+                    status[#status + 1] = string.format(L["Closed %s"], GuildOS:DateText(p.closesAt or 0, ""))
+                elseif p.closesAt then
+                    status[#status + 1] = string.format(L["Closes %s"], GuildOS:DateText(p.closesAt, ""))
+                end
+                if hidden then status[#status + 1] = L["Results hidden until closed"] end
+                if myVote and p.options and p.options[myVote] then
+                    status[#status + 1] = string.format(L["You voted: %s"], p.options[myVote])
+                elseif isClosed then
+                    status[#status + 1] = L["You did not vote."]
+                else
+                    status[#status + 1] = L["You have not voted yet."]
+                end
+                local statusFS = UI:CreateText(child, table.concat(status, " · "), 11, soft.r, soft.g, soft.b)
+                statusFS:SetPoint("TOPLEFT", 0, -(metaY + 15))
+                y = metaY + 32
+
+                if isOfficer then
+                    local id = p.id
+                    local line = pollLine(p)
+                    -- Delete (#11), Notice (#13), Chat (#13), then Close or Reopen (#12, #19).
+                    local del = UI:CreateButton(child, L["Delete"], 56, 18)
+                    del:SetPoint("TOPRIGHT", child, "TOPRIGHT", 0, -(metaY - 2))
+                    tipOn(del, L["Delete this poll and its votes."])
+                    del:SetScript("OnClick", function()
+                        GuildOS:ShowDialog("GUILDOS_POLL_DELETE", L["Delete this poll? Its votes go with it."], nil, {
+                            run = function() if GuildOS.Polls then GuildOS.Polls:Delete(id) end end,
+                        })
+                    end)
+
+                    local notice = UI:CreateButton(child, L["Notice"], 56, 18)
+                    notice:SetPoint("RIGHT", del, "LEFT", -4, 0)
+                    tipOn(notice, L["Post this poll to the bulletin board."])
+                    notice:SetScript("OnClick", function()
+                        GuildOS:ShowDialog("GUILDOS_POLL_NOTICE", L["Post this poll to the bulletin board?"], nil, {
+                            run = function() if GuildOS.Bulletin then GuildOS.Bulletin:Post(line) end end,
+                        })
+                    end)
+
+                    local chat = UI:CreateButton(child, L["Chat"], 52, 18)
+                    chat:SetPoint("RIGHT", notice, "LEFT", -4, 0)
+                    tipOn(chat, L["Send this poll to guild chat."])
+                    chat:SetScript("OnClick", function()
+                        GuildOS:ShowDialog("GUILDOS_POLL_CHAT", L["Send this poll to guild chat?"], nil, {
+                            run = function() GuildOS.Compat.SendChatMessage(line:sub(1, 255), "GUILD") end,
+                        })
+                    end)
+
+                    local toggle = UI:CreateButton(child, isClosed and L["Reopen"] or L["Close"], 62, 18)
+                    toggle:SetPoint("RIGHT", chat, "LEFT", -4, 0)
+                    if isClosed then
+                        tipOn(toggle, L["Open this poll for votes again."])
+                        toggle:SetScript("OnClick", function() if GuildOS.Polls then GuildOS.Polls:Reopen(id) end end)
+                    else
+                        tipOn(toggle, L["Close this poll. Nobody can vote after."])
+                        toggle:SetScript("OnClick", function()
+                            GuildOS:ShowDialog("GUILDOS_POLL_CLOSE", L["Close this poll? Nobody can vote after."], nil, {
+                                run = function() if GuildOS.Polls then GuildOS.Polls:Close(id) end end,
+                            })
+                        end)
+                    end
+                end
+            end
+        end
+
+        if shown == 0 then
+            local msg = L["No open polls."]
+            if #list == 0 then
+                msg = L["No polls yet."]
+            elseif filter == "closed" then
+                msg = L["No closed polls."]
+            end
+            local empty = UI:CreateText(child, msg, 12, soft.r, soft.g, soft.b)
             empty:SetPoint("TOPLEFT", 0, 0)
         end
         child:SetHeight(math.max(1, y))
