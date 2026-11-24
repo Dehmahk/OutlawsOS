@@ -580,6 +580,7 @@ function GuildOS:CreateAchievementsPanel(parent)
         whoFS:SetPoint("TOPRIGHT", -(COL_W + GAP), -y)
         whoFS:SetWidth(WHO_W)
         whoFS:SetJustifyH("RIGHT")
+        whoFS:SetWordWrap(false)   -- one line: a long name no longer breaks onto a second
         whoFS:SetText(who and who.key and memberName(who.key) or "")
         drawn.who = whoFS
 

@@ -488,56 +488,298 @@ end
 ----------------------------------------------------------------------
 -- BULLETIN sub-panel
 ----------------------------------------------------------------------
+-- The expiry a post gets, by index: for ever, a week, a month (#10).
+local BULLETIN_DAYS = { false, 7, 30 }
+local BULLETIN_MAX_CHARS = 200   -- the field's cap
+
+GuildOS.Dialogs["GUILDOS_BULLETIN_DELETE"] = {
+    text = "%s", button1 = L["Delete"], button2 = L["Cancel"],
+    OnAccept = function(self)
+        local d = self and self.data
+        if d and d.run then d.run() end
+    end,
+    timeout = 0, whileDead = true, hideOnEscape = true,
+}
+GuildOS.Dialogs["GUILDOS_BULLETIN_CHAT"] = {
+    text = "%s", button1 = L["Send"], button2 = L["Cancel"],
+    OnAccept = function(self)
+        local d = self and self.data
+        if d and d.run then d.run() end
+    end,
+    timeout = 0, whileDead = true, hideOnEscape = true,
+}
+
+-- A hover tooltip. HookScript, so the button's own hover tint (SetScript in UI:CreateButton) keeps working.
+local function tipOn(frame, text)
+    frame:HookScript("OnEnter", function(self)
+        if not GameTooltip then return end
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine(text, C.text.r, C.text.g, C.text.b, true)
+        GameTooltip:Show()
+    end)
+    frame:HookScript("OnLeave", function()
+        if GameTooltip then GameTooltip:Hide() end
+    end)
+end
+
+local function rgbHex(c)
+    return string.format("|cff%02x%02x%02x", math.floor(c.r * 255 + 0.5), math.floor(c.g * 255 + 0.5), math.floor(c.b * 255 + 0.5))
+end
+
+-- The author's name in their class colour, when the roster knows their class (#2).
+local function authorText(author)
+    if type(author) ~= "string" or author == "" then return author or "?" end
+    local m = GuildOS.db and GuildOS.db.members and GuildOS.db.members[GuildOS:LocalMemberKey(author)]
+    local cls = type(m) == "table" and m.class
+    if not cls then return author end
+    local r, g, b = GuildOS:GetClassColor(cls)
+    return rgbHex({ r = r, g = g, b = b }) .. author .. "|r"
+end
+
+local function expiryText(i)
+    local d = BULLETIN_DAYS[i]
+    return d and string.format(L["Lasts: %d days"], d) or L["Lasts: forever"]
+end
+
 local function BuildBulletinSub(panel)
-    local listTop = GAP
-    local box
-    if GuildOS:IsOfficer() then
-        -- One field, so one label beside it, then its button (#371).
+    local isOfficer = GuildOS:IsOfficer()
+    local MAX = (GuildOS.Bulletin and GuildOS.Bulletin.MAX) or 20
+    local editingId        -- the notice being edited, while the field holds its text (#9)
+    local expiry = 1       -- an index into BULLETIN_DAYS: what the next post gets (#10)
+    local search = ""      -- the search text, lower-cased (#11)
+    local refresh, updateEditing
+
+    -- Offsets from the panel's top: the field row, the search and controls row, the status line, the list.
+    local R1 = GAP
+    local R2 = isOfficer and (GAP + FIELD_H + GAP) or GAP
+    local R3 = R2 + FIELD_H + GAP
+    local listTop = R3 + 16 + GAP
+
+    local box, postBtn, cancelBtn, counterFS, expiryBtn
+    if isOfficer then
+        -- One field, so one label beside it, then its button (#371). It shows a hint while empty (#3).
         local label = UI:CreateText(panel, L["Notice:"], 12)
-        local postBtn = UI:CreateButton(panel, L["Post"], 84, FIELD_H)
-        box = UI:CreateInput(panel, 0, FIELD_H, { max = 200 })
-        box:SetPoint("TOPLEFT", math.ceil(label:GetStringWidth() or 0) + GAP, -GAP)
-        box:SetPoint("TOPRIGHT", -(GAP + UI.ReserveFor(postBtn, GAP)), -GAP)
+        postBtn = UI:CreateButton(panel, L["Post"], 84, FIELD_H)
+        box = UI:CreateInput(panel, 0, FIELD_H, { max = BULLETIN_MAX_CHARS, placeholder = L["Write a notice..."] })
+        box:SetPoint("TOPLEFT", math.ceil(label:GetStringWidth() or 0) + GAP, -R1)
+        box:SetPoint("TOPRIGHT", -(GAP + UI.ReserveFor(postBtn, GAP)), -R1)
         label:SetPoint("RIGHT", box, "LEFT", -GAP, 0)
         postBtn:SetPoint("LEFT", box, "RIGHT", GAP, 0)
+    end
+
+    -- The search box, on both rows of controls (#11).
+    local searchBox = UI:CreateInput(panel, 200, FIELD_H, { placeholder = L["Search notices..."] })
+    searchBox:SetPoint("TOPLEFT", 0, -R2)
+
+    if isOfficer then
+        expiryBtn = UI:CreateButton(panel, expiryText(expiry), 124, FIELD_H)
+        expiryBtn:SetPoint("LEFT", searchBox, "RIGHT", GAP, 0)
+        tipOn(expiryBtn, L["How long the next notice stays up."])
+        expiryBtn:SetScript("OnClick", function()
+            expiry = expiry % #BULLETIN_DAYS + 1
+            expiryBtn.label:SetText(expiryText(expiry))
+        end)
+
+        cancelBtn = UI:CreateButton(panel, L["Cancel"], 84, FIELD_H)
+        cancelBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", 0, -R2)
+        cancelBtn:Hide()
+        counterFS = UI:CreateText(panel, "", 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+        counterFS:SetText(string.format(L["%d / %d"], 0, BULLETIN_MAX_CHARS))
+        box:HookScript("OnTextChanged", function(self)
+            local t = self:GetText() or ""
+            local n = (strlenutf8 and strlenutf8(t)) or #t
+            counterFS:SetText(string.format(L["%d / %d"], n, BULLETIN_MAX_CHARS))
+        end)
+    end
+
+    -- The counter sits at the right, or beside Cancel while a notice is being edited (#4, #9).
+    local function placeCounter()
+        if not counterFS then return end
+        counterFS:ClearAllPoints()
+        if editingId then
+            counterFS:SetPoint("RIGHT", cancelBtn, "LEFT", -GAP, 0)
+        else
+            counterFS:SetPoint("TOPRIGHT", panel, "TOPRIGHT", 0, -(R2 + math.floor((FIELD_H - 12) / 2)))
+        end
+    end
+
+    -- While editing, the button says Save and Cancel shows; otherwise it says Post.
+    updateEditing = function()
+        if postBtn then postBtn.label:SetText(editingId and L["Save"] or L["Post"]) end
+        if cancelBtn then cancelBtn:SetShown(editingId ~= nil) end
+        placeCounter()
+    end
+
+    local statusFS = UI:CreateText(panel, "", 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+    statusFS:SetPoint("TOPLEFT", 0, -R3)
+    local syncFS = UI:CreateText(panel, "", 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+    syncFS:SetPoint("TOPRIGHT", 0, -R3)
+
+    local _, child = makeScroll(panel, "GuildOSHubBulletinScroll", listTop)
+
+    if isOfficer then
         local function doPost()
-            if GuildOS.Bulletin then GuildOS.Bulletin:Post(box:GetText()) end
-            box:SetText(""); box:ClearFocus()
+            local text = strtrim(box:GetText() or "")
+            if text == "" then
+                GuildOS:Print(L["Type a notice first."])
+                box:SetFocus()
+                return
+            end
+            if GuildOS.Bulletin then
+                if editingId then
+                    GuildOS.Bulletin:Edit(editingId, text)
+                else
+                    GuildOS.Bulletin:Post(text, BULLETIN_DAYS[expiry])
+                end
+            end
+            editingId = nil
+            box:SetText("")
+            box:SetFocus()   -- it stays in the field for the next notice (#18)
+            updateEditing()
         end
         box:SetScript("OnEnterPressed", doPost)
         postBtn:SetScript("OnClick", doPost)
-        listTop = GAP + FIELD_H + GAP
+        tipOn(postBtn, L["Post this notice."])
+        cancelBtn:SetScript("OnClick", function()
+            editingId = nil
+            box:SetText("")
+            box:ClearFocus()
+            updateEditing()
+        end)
+        tipOn(cancelBtn, L["Stop editing and clear the field."])
     end
-    local _, child = makeScroll(panel, "GuildOSHubBulletinScroll", listTop)
 
-    local function refresh()
+    searchBox:HookScript("OnTextChanged", function(self, userInput)
+        if not userInput then return end
+        search = strtrim(self:GetText() or ""):lower()
+        GuildOS:SafeCall(refresh)
+    end)
+
+    refresh = function()
         clear(child)
-        local msgs = (GuildOS.Bulletin and GuildOS.Bulletin:GetMessages()) or {}
-        local isOfficer = GuildOS:IsOfficer()
+        local bulletin = GuildOS.Bulletin
+        local stored = (bulletin and bulletin:GetMessages()) or {}
+        local all = (bulletin and bulletin:Shown()) or {}
+
+        -- The search keeps the notices whose text or author has its text (#11).
+        local shown = {}
+        for _, m in ipairs(all) do
+            local text = (m.text or ""):lower()
+            local who = (m.author or ""):lower()
+            if search == "" or text:find(search, 1, true) or who:find(search, 1, true) then
+                shown[#shown + 1] = m
+            end
+        end
+
+        -- The status line: how many the board holds, against its cap (#12), or who may post (#14); and when it
+        -- last changed here (#15).
+        if isOfficer then
+            local n = #stored
+            statusFS:SetText(string.format(L["%d of %d notices"], n, MAX))
+            local near = n >= MAX - 4
+            local col = near and C.warn or C.textSoft
+            statusFS:SetTextColor(col.r, col.g, col.b)
+        else
+            statusFS:SetText(L["Officers post notices here."])
+        end
+        local at = GuildOS.db and GuildOS.db.bulletin and GuildOS.db.bulletin.syncedAt
+        syncFS:SetText(at and string.format(L["Updated %s"], GuildOS:DateText(at, " %H:%M")) or "")
+
+        -- The newest notice that is not pinned: its "Latest" tag (#7).
+        local newest
+        for _, m in ipairs(all) do
+            if not m.pinned and (not newest or (m.ts or 0) > (newest.ts or 0)) then newest = m end
+        end
+
         local y = 0
-        for _, m in ipairs(msgs) do
-            local textFS = UI:CreateText(child, m.text, 12, C.text.r, C.text.g, C.text.b)
+        for _, m in ipairs(shown) do
+            local id, text = m.id, m.text or ""
+            local textFS = UI:CreateText(child, text, 12, C.text.r, C.text.g, C.text.b)
             textFS:SetPoint("TOPLEFT", 0, -y)
-            textFS:SetPoint("TOPRIGHT", isOfficer and -(22 + GAP) or 0, -y)
+            textFS:SetPoint("TOPRIGHT", 0, -y)
             textFS:SetJustifyH("LEFT")
             local th = textFS:GetStringHeight() or 14
-            local meta = UI:CreateText(child, (m.author or "?") .. " · " .. GuildOS:DateText(m.ts or 0, " %H:%M"),
-                11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
-            meta:SetPoint("TOPLEFT", 0, -(y + th + 2))
-            if isOfficer then
-                local del = UI:CreateButton(child, "\195\151", 22, 18)
-                del:SetPoint("TOPRIGHT", 0, -y)
-                local id = m.id
-                del:SetScript("OnClick", function() if GuildOS.Bulletin then GuildOS.Bulletin:Remove(id) end end)
+
+            -- A rule between one notice and the next (#1).
+            if y > 0 then
+                local rule = child:CreateTexture(nil, "ARTWORK")
+                rule:SetColorTexture(C.line.r, C.line.g, C.line.b, 1)
+                rule:SetHeight(1)
+                rule:SetPoint("TOPLEFT", 0, -(y - 7))
+                rule:SetPoint("TOPRIGHT", 0, -(y - 7))
             end
-            y = y + th + 22
+
+            -- The meta line: author (#2), how long ago (#6), edited, its expiry (#10), and the Pinned or Latest tag (#7, #8).
+            local metaY = y + th + 2
+            local bits = { authorText(m.author), GuildOS:TimeAgo(m.ts or 0) }
+            if m.edited then bits[#bits + 1] = L["edited"] end
+            if m.expires then bits[#bits + 1] = string.format(L["until %s"], GuildOS:DateText(m.expires, "")) end
+            if m.pinned then
+                bits[#bits + 1] = rgbHex(C.gold) .. L["Pinned"] .. "|r"
+            elseif newest and newest.id == id then
+                bits[#bits + 1] = rgbHex(C.gold) .. L["Latest"] .. "|r"
+            end
+            local meta = UI:CreateText(child, table.concat(bits, " · "), 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+            meta:SetPoint("TOPLEFT", 0, -metaY)
+
+            -- The full time on hover over the meta line (#6).
+            local hit = CreateFrame("Frame", nil, child)
+            hit:SetPoint("TOPLEFT", meta, "TOPLEFT", 0, 0)
+            hit:SetSize(math.max(20, meta:GetStringWidth() or 20), 14)
+            hit:EnableMouse(true)
+            tipOn(hit, string.format(L["Posted %s"], GuildOS:DateText(m.ts or 0, " %H:%M")))
+
+            if isOfficer then
+                local del = UI:CreateButton(child, "\195\151", 24, 18)   -- the multiplication sign
+                del:SetPoint("TOPRIGHT", child, "TOPRIGHT", 0, -(metaY - 2))
+                tipOn(del, L["Delete this notice."])
+                del:SetScript("OnClick", function()
+                    GuildOS:ShowDialog("GUILDOS_BULLETIN_DELETE", L["Delete this notice? Everyone in the guild loses it."], nil, {
+                        run = function() if GuildOS.Bulletin then GuildOS.Bulletin:Remove(id) end end,
+                    })
+                end)
+
+                local chat = UI:CreateButton(child, L["Chat"], 52, 18)
+                chat:SetPoint("RIGHT", del, "LEFT", -4, 0)
+                tipOn(chat, L["Send this notice to guild chat."])
+                chat:SetScript("OnClick", function()
+                    GuildOS:ShowDialog("GUILDOS_BULLETIN_CHAT", L["Send this notice to guild chat?"], nil, {
+                        run = function() GuildOS.Compat.SendChatMessage(text, "GUILD") end,
+                    })
+                end)
+
+                local edit = UI:CreateButton(child, L["Edit"], 48, 18)
+                edit:SetPoint("RIGHT", chat, "LEFT", -4, 0)
+                tipOn(edit, L["Edit this notice."])
+                edit:SetScript("OnClick", function()
+                    editingId = id
+                    box:SetText(text)
+                    box:SetFocus()
+                    updateEditing()
+                end)
+
+                local pin = UI:CreateButton(child, m.pinned and L["Unpin"] or L["Pin"], 52, 18)
+                pin:SetPoint("RIGHT", edit, "LEFT", -4, 0)
+                tipOn(pin, m.pinned and L["Unpin this notice."] or L["Pin this notice to the top."])
+                pin:SetScript("OnClick", function() if GuildOS.Bulletin then GuildOS.Bulletin:Pin(id) end end)
+            end
+
+            y = y + th + 2 + (isOfficer and 18 or 14) + 14
         end
-        if #msgs == 0 then
-            local empty = UI:CreateText(child, L["No notices yet."], 12, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+
+        if #all == 0 then
+            local empty = UI:CreateText(child,
+                isOfficer and L["No notices yet. Write the first one above."] or L["Officers will post news here."],
+                12, C.textSoft.r, C.textSoft.g, C.textSoft.b)
             empty:SetPoint("TOPLEFT", 0, 0)
+        elseif #shown == 0 then
+            local none = UI:CreateText(child, L["No notices match that search."], 12, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+            none:SetPoint("TOPLEFT", 0, 0)
         end
         child:SetHeight(math.max(1, y))
     end
+
+    updateEditing()
     if GuildOS.Bulletin then GuildOS.Bulletin.uiRefresh = refresh end
     return refresh
 end
@@ -546,6 +788,7 @@ end
 -- CALL TO ARMS sub-panel (issue #108): officers send, everyone sees the
 -- recent calls, answers them and sets how they want to be told.
 ----------------------------------------------------------------------
+
 local function shortName(n)
     return (Ambiguate and Ambiguate(n or "", "short")) or (n or "")
 end

@@ -10,6 +10,7 @@ GuildOS.Bulletin = Bulletin
 local L = GuildOS.L
 
 local MAX = 20
+Bulletin.MAX = MAX   -- the notices the board holds; the oldest goes past it
 
 function Bulletin:Initialize()
     GuildOS.db.bulletin = GuildOS.db.bulletin or { messages = {} }
@@ -23,6 +24,20 @@ function Bulletin:GetMessages()
     return (GuildOS.db.bulletin and GuildOS.db.bulletin.messages) or {}
 end
 
+-- What the board shows: the notices still up (an expiry past now drops one), the pinned ones first,
+-- the rest in the order they were posted (#8, #10).
+function Bulletin:Shown()
+    local now = GetServerTime()
+    local pinned, rest = {}, {}
+    for _, m in ipairs(self:GetMessages()) do
+        if not (m.expires and now >= m.expires) then
+            if m.pinned then pinned[#pinned + 1] = m else rest[#rest + 1] = m end
+        end
+    end
+    for _, m in ipairs(rest) do pinned[#pinned + 1] = m end
+    return pinned
+end
+
 local function newId()
     return string.format("%X%04X", GetServerTime(), math.random(0, 0xFFFF))
 end
@@ -30,7 +45,8 @@ end
 ----------------------------------------------------------------------
 -- Officer mutations
 ----------------------------------------------------------------------
-function Bulletin:Post(text)
+-- `days` is how long the notice stays up; nil or false keeps it for ever (#10).
+function Bulletin:Post(text, days)
     if not GuildOS:IsOfficer() then
         GuildOS:Print(L["|cffFF4444Officers only.|r"])
         return
@@ -38,7 +54,10 @@ function Bulletin:Post(text)
     text = strtrim(text or "")
     if text == "" then return end
     local msgs = self:GetMessages()
-    table.insert(msgs, 1, { id = newId(), text = text, author = GuildOS.Compat.PlayerName(), ts = GetServerTime() })
+    local now = GetServerTime()
+    local msg = { id = newId(), text = text, author = GuildOS.Compat.PlayerName(), ts = now }
+    if tonumber(days) and days > 0 then msg.expires = now + days * 86400 end
+    table.insert(msgs, 1, msg)
     while #msgs > MAX do table.remove(msgs) end
     self:Broadcast()
     self:Refresh()
@@ -49,6 +68,35 @@ function Bulletin:Remove(id)
     local msgs = self:GetMessages()
     for i, m in ipairs(msgs) do
         if m.id == id then table.remove(msgs, i); break end
+    end
+    self:Broadcast()
+    self:Refresh()
+end
+
+-- Edits a notice's text. Its time and author stay; it is marked edited (#9).
+function Bulletin:Edit(id, text)
+    if not GuildOS:IsOfficer() then return end
+    text = strtrim(text or "")
+    if text == "" then return end
+    for _, m in ipairs(self:GetMessages()) do
+        if m.id == id then
+            m.text = text
+            m.edited = GetServerTime()
+            break
+        end
+    end
+    self:Broadcast()
+    self:Refresh()
+end
+
+-- Pins a notice to the top, or unpins it (#8).
+function Bulletin:Pin(id)
+    if not GuildOS:IsOfficer() then return end
+    for _, m in ipairs(self:GetMessages()) do
+        if m.id == id then
+            m.pinned = (not m.pinned) or nil
+            break
+        end
     end
     self:Broadcast()
     self:Refresh()
@@ -67,6 +115,7 @@ end
 function Bulletin:Broadcast()
     if not GuildOS:IsOfficer() or not GuildOS.SyncService then return end
     local rev = GuildOS.SyncService:NextRevision("bulletin", "board")
+    GuildOS.db.bulletin.syncedAt = GetServerTime()   -- when the board last changed here (#15)
     GuildOS.SyncService:Publish("bulletin", "snapshot", { messages = self:GetMessages() }, { rev = rev })
 end
 
@@ -89,6 +138,7 @@ function Bulletin:OnSync(env)
     if env.act == "snapshot" and env.data
         and GuildOS.SyncService:ShouldApply("bulletin", "board", env.rev) then
         GuildOS.db.bulletin.messages = env.data.messages or {}
+        GuildOS.db.bulletin.syncedAt = GetServerTime()
         GuildOS.SyncService:SetRevision("bulletin", "board", env.rev)
         self:Refresh()
     end
