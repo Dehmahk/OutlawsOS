@@ -18,6 +18,8 @@ local ACT_MAX = 4
 local REPAINT_EVERY = 15
 local SUGGEST_ROWS, SUGGEST_H = 6, 19
 local GOLD = { 0.85, 0.66, 0.31 }
+local PRICE_W, NEAR_CAP, STALE_ALPHA = 96, 5, 0.6 -- price column; amber this close to the cap; dimmed stale posts
+local startPriceEdit -- set by the panel: "Change price" on my own post opens the form on its price
 
 local function Me() return UnitName("player") end
 
@@ -35,6 +37,15 @@ local FILTERS = {
 -- the sort cycle: newest first, cheapest first (no price last), members online first
 local SORTS = { "new", "price", "online" }
 local SORT_LABEL = { new = "Sort: newest", price = "Sort: price", online = "Sort: online" }
+
+local function isFilter(key)
+    for _, f in ipairs(FILTERS) do if f.key == key then return true end end
+    return false
+end
+local function isSort(key)
+    for _, v in ipairs(SORTS) do if v == key then return true end end
+    return false
+end
 
 local function Matches(o, filter, me, mine)
     local hidden = Market.IsMuted(o.by) or Market.ItemHidden(o)
@@ -63,6 +74,7 @@ local function Actions(o, me, mine)
     local seek = Market.IsRequest(o)
     if o.by == me then
         if Market.Age(o) > Market.OLD_AFTER then add(L["Renew"], Market.Renew) end
+        add(L["Change price"], function(x) if startPriceEdit then startPriceEdit(x) end end)
         add(seek and L["Got it"] or L["Sold"], Market.Sold)
         add(L["Remove"], Market.Remove)
     else
@@ -152,12 +164,16 @@ local function Tooltip(tt, o)
     tt:AddLine(L["Right-click: mute or unmute the member"], 0.6, 0.6, 0.6)
 end
 
--- a row's two lines: the tag, the item or service, the price; then who, when, who wants it
+-- a row's two lines: the tag, the item or service, the quantity; then who, when, who wants it, and
+-- "old" once the post is past its week. The price is a column of its own: the third value.
 local function RowText(o, me, wants, mine, qty)
     local seek = Market.IsRequest(o)
     local tag = seek and ("|cffff9933" .. L["Looking for"] .. "|r") or ("|cff40c040" .. L["Offering"] .. "|r")
-    local title = tag .. "  " .. Market.Label(o) .. (o.pr and ("  |cffffd100" .. o.pr .. "|r") or "")
+    local stale = Market.Age(o) > Market.OLD_AFTER
+    local title = tag .. "  " .. Market.Label(o)
+        .. ((o.it and o.n and o.n > 1) and ("  |cffaaaaaa×" .. o.n .. "|r") or "")
         .. (o.it and "" or ("  |cff888888" .. L["Service"] .. "|r"))
+        .. (stale and ("  |cff888888" .. L["old"] .. "|r") or "")
     local meta = { L["by %s"]:format(Market.ColorName(o.by)), GuildOS:TimeAgo(o.c) }
     if #wants > 0 then
         local names = {}
@@ -172,26 +188,57 @@ local function RowText(o, me, wants, mine, qty)
     if have > 0 then meta[#meta + 1] = "|cff40ff40" .. L["You have %d of it"]:format(have) .. "|r"
     elseif not mine and Market.SeekForMe(o) then meta[#meta + 1] = "|cff40ff40" .. L["You can do this"] .. "|r" end
     if o.note then meta[#meta + 1] = "|cffffffff\"" .. o.note .. "\"|r" end
-    return title, table.concat(meta, "  ·  ")
+    local price = o.pr and ("|cffffd100" .. o.pr .. "|r") or ""
+    return title, table.concat(meta, "  ·  "), price
+end
+
+-- the one row a group of the same item gets: its name, how many posts, and who posted them
+local function GroupText(grp)
+    local first = grp.items[1].o
+    local posters, seen = {}, {}
+    for _, e in ipairs(grp.items) do
+        if not seen[e.o.by] then seen[e.o.by] = true; posters[#posters + 1] = e.o.by end
+    end
+    local names = {}
+    for j = 1, math.min(3, #posters) do names[j] = Market.ColorName(posters[j]) end
+    local tag = Market.IsRequest(first) and ("|cffff9933" .. L["Looking for"] .. "|r")
+        or ("|cff40c040" .. L["Offering"] .. "|r")
+    local title = tag .. "  " .. Market.Label(first) .. "  |cffaaaaaa" .. L["%d posts"]:format(#grp.items) .. "|r"
+    local meta = L["by %s"]:format(table.concat(names, ", ") .. (#posters > 3 and " …" or ""))
+    return title, meta
 end
 
 function GuildOS:CreateMarketPanel(parent)
-    parent.activeSub = "offer"
-    local filter, sortMode, search = "all", "new", ""
+    -- the view the tab was left in (sub-tab, filter, sort) is the view it comes back in
+    local saved = (GuildOS.db and GuildOS.db.marketView) or {}
+    local filter = isFilter(saved.filter) and saved.filter or "all"
+    local sortMode = isSort(saved.sort) and saved.sort or "new"
+    local search = ""
+    local expanded = {} -- item key -> true, for the groups opened by a click
+    local editing      -- my post whose price the form is changing, else nil
     local refresh
+    parent.activeSub = saved.sub == "seek" and "seek" or "offer"
+
+    local function saveView()
+        if GuildOS.db then GuildOS.db.marketView = { sub = parent.activeSub, filter = filter, sort = sortMode } end
+    end
 
     ------------------------------------------------------------------
-    -- Sub-tabs
+    -- Sub-tabs (their labels carry the live count, see refresh)
     ------------------------------------------------------------------
     local bar = CreateFrame("Frame", nil, parent)
     bar:SetPoint("TOPLEFT", 10, -8)
     bar:SetSize(400, TAB_H)
     UI:StyleSubTabBar(bar)
     local subTabs, subList = {}, {}
+    local tabNames = { offer = L["Offering"], seek = L["Looking for"] }
+    local tabShown = {}
 
     ------------------------------------------------------------------
     -- Line 1: the form. An item (dragged in, shift-clicked, typed, or picked from the suggestions) or
-    -- a service, how many, a price, a note. Posted under the sub-tab it is on.
+    -- a service, how many, a price, a note. Posted under the sub-tab it is on. The item takes about a
+    -- third of the line, the note what is left. Under the price: what it reads as. Under the form: why
+    -- a post was refused.
     ------------------------------------------------------------------
     local form = CreateFrame("Frame", nil, parent)
     form:SetPoint("TOPLEFT", bar, "BOTTOMLEFT", 0, -UI.GAP)
@@ -213,6 +260,41 @@ function GuildOS:CreateMarketPanel(parent)
     UI:SetButtonVariant(postBtn, "primary")
     postBtn:SetPoint("RIGHT", 0, 0)
     noteBox:SetPoint("RIGHT", postBtn, "LEFT", -6, 0)
+    form:SetScript("OnSizeChanged", function()
+        local w = form:GetWidth() or 0
+        if w > 0 then itemBox:SetWidth(math.max(200, math.floor(w * 0.36))) end
+    end)
+
+    local priceHint = UI:CreateText(form, "", 10, C.textDim.r, C.textDim.g, C.textDim.b)
+    priceHint:SetPoint("TOPLEFT", priceBox, "BOTTOMLEFT", 6, -3)
+    local formMsg = UI:CreateText(form, "", 11, C.warn.r, C.warn.g, C.warn.b)
+    formMsg:SetPoint("TOPLEFT", form, "BOTTOMLEFT", 0, -3)
+    formMsg:SetPoint("RIGHT", priceBox, "LEFT", -10, 0)
+    formMsg:SetHeight(26)
+    formMsg:SetJustifyH("LEFT")
+    formMsg:SetJustifyV("TOP")
+    formMsg:SetWordWrap(true)
+
+    local function say(msg) formMsg:SetText(msg or "") end
+
+    local function readPrice()
+        local t = strtrim(priceBox:GetText() or "")
+        if t == "" then priceHint:SetText("") return end
+        local cu = Market.ParsePrice(t)
+        if cu then
+            priceHint:SetText(L["Reads as %s"]:format(Market.FormatPrice(cu)))
+            priceHint:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+        else
+            priceHint:SetText(L["Not a price"])
+            priceHint:SetTextColor(C.warn.r, C.warn.g, C.warn.b)
+        end
+    end
+    priceBox:HookScript("OnTextChanged", function(_, userInput)
+        readPrice()
+        if userInput then say("") end
+    end)
+    qtyBox:HookScript("OnTextChanged", function(_, userInput) if userInput then say("") end end)
+    noteBox:HookScript("OnTextChanged", function(_, userInput) if userInput then say("") end end)
 
     local picked -- { id, text }: the item taken (dropped, shift-clicked, picked), while the field shows it
 
@@ -275,11 +357,14 @@ function GuildOS:CreateMarketPanel(parent)
         end
         local list = Market.Suggest(text, SUGGEST_ROWS)
         if #list == 0 then dd:Hide() return end
+        local dw = itemBox:GetWidth() or 240
+        dd:SetWidth(dw)
         for i, b in ipairs(ddRows) do
             local s = list[i]
             if s then
                 local tail = (s.crafters and s.crafters > 0) and ("  |cff40ff40" .. L["%d can make it"]:format(s.crafters) .. "|r") or ""
                 b.label:SetText(s.name .. tail)
+                b:SetWidth(dw - 12)
                 b:SetScript("OnClick", function() pick(s) end)
                 b:Show()
             else
@@ -292,7 +377,7 @@ function GuildOS:CreateMarketPanel(parent)
 
     itemBox:HookScript("OnTextChanged", function(self, userInput)
         if self.quiet then return end
-        if userInput then picked = nil end
+        if userInput then picked = nil; say("") end
         suggest()
     end)
     itemBox:HookScript("OnEditFocusGained", suggest)
@@ -317,16 +402,42 @@ function GuildOS:CreateMarketPanel(parent)
         end)
     end
 
+    -- changing the price of one of my posts: the form takes that price, Save puts it on the post
+    local function endEdit()
+        editing = nil
+        postBtn.label:SetText(L["Post"])
+        priceBox:SetText("")
+        say("")
+    end
+    startPriceEdit = function(o)
+        if not o or o.by ~= Me() then return end
+        editing = o
+        postBtn.label:SetText(L["Save price"])
+        priceBox:SetText(o.pr or "")
+        priceBox:SetFocus()
+        say(L["Changing the price of %s. Enter saves, Escape cancels."]:format(Market.Label(o)))
+    end
+    priceBox:HookScript("OnEscapePressed", function() if editing then endEdit() end end)
+
     local function Post()
         dd:Hide()
-        local still = picked and itemBox:GetText() == picked.text
-        local o = Market.Create(itemBox:GetText(), qtyBox:GetText(), priceBox:GetText(), noteBox:GetText(),
-            still and picked.id or nil, parent.activeSub == "seek")
-        if o then
-            itemBox:SetText(""); priceBox:SetText(""); noteBox:SetText(""); qtyBox:SetText("1")
-            itemBox:ClearFocus(); priceBox:ClearFocus(); noteBox:ClearFocus(); qtyBox:ClearFocus()
-            picked = nil
+        if editing then
+            local o, why = Market.SetPrice(editing, priceBox:GetText())
+            if not o then say(why) return end
+            endEdit()
+            priceBox:ClearFocus()
+            return
         end
+        local still = picked and itemBox:GetText() == picked.text
+        local o, why = Market.Create(itemBox:GetText(), qtyBox:GetText(), priceBox:GetText(), noteBox:GetText(),
+            still and picked.id or nil, parent.activeSub == "seek")
+        if not o then say(why) return end
+        -- the item stays in the form for the next post; the quantity goes back to one, price and note clear
+        qtyBox:SetText("1")
+        priceBox:SetText("")
+        noteBox:SetText("")
+        itemBox:ClearFocus(); priceBox:ClearFocus(); noteBox:ClearFocus(); qtyBox:ClearFocus()
+        say("")
     end
     postBtn:SetScript("OnClick", Post)
     qtyBox:SetScript("OnEnterPressed", Post)
@@ -339,53 +450,78 @@ function GuildOS:CreateMarketPanel(parent)
     noteBox:SetScript("OnTabPressed", function() itemBox:SetFocus() end)
 
     ------------------------------------------------------------------
-    -- Line 2: filters, the sort cycle
+    -- Line 2: filters (a hidden one leaves no gap), the sort cycle
     ------------------------------------------------------------------
     local filterRow = CreateFrame("Frame", nil, parent)
-    filterRow:SetPoint("TOPLEFT", form, "BOTTOMLEFT", 0, -UI.GAP)
-    filterRow:SetPoint("TOPRIGHT", form, "BOTTOMRIGHT", 0, -UI.GAP)
+    filterRow:SetPoint("TOPLEFT", formMsg, "BOTTOMLEFT", 0, -UI.GAP)
+    filterRow:SetPoint("RIGHT", form, "RIGHT", 0, 0)
     filterRow:SetHeight(BTN_H)
 
     local filterBtns = {}
     local function mineLabel()
         return L["Mine"] .. "  " .. Market.MineCount() .. "/" .. Market.CAP
     end
+    local function mutedCount()
+        local p, n = Market.Prefs(), 0
+        for _ in pairs(p.muted or {}) do n = n + 1 end
+        for _ in pairs(p.hideItems or {}) do n = n + 1 end
+        return n
+    end
+    -- the buttons that show take their places in turn, so a hidden one leaves no gap
+    local function layoutFilters()
+        local x = 0
+        for _, f in ipairs(FILTERS) do
+            local row = filterBtns[f.key]
+            if row and (not row.requests or parent.activeSub == "seek") then
+                row.btn:ClearAllPoints()
+                row.btn:SetPoint("LEFT", x, 0)
+                x = x + row.btn:GetWidth() + 4
+            end
+        end
+    end
     local function paintFilters()
+        -- my count goes amber five posts before the cap and red at it
+        local over = Market.MineCount()
+        local capCol = (over >= Market.CAP and C.danger) or (over >= Market.CAP - NEAR_CAP and C.warn) or nil
         for key, f in pairs(filterBtns) do
             local on = key == filter
-            local col = on and C.gold or C.text
+            local col = (key == "mine" and capCol) or (on and C.gold) or C.text
             f.btn.baseLabelColor = { col.r, col.g, col.b }
             f.btn.label:SetTextColor(col.r, col.g, col.b)
             f.btn:SetShown(not f.requests or parent.activeSub == "seek")
         end
         if filterBtns.mine then filterBtns.mine.btn.label:SetText(mineLabel()) end
+        if filterBtns.muted then
+            local n = mutedCount()
+            filterBtns.muted.btn.label:SetText(L["Muted"] .. (n > 0 and ("  " .. n) or ""))
+        end
+        layoutFilters()
     end
 
-    local x = 0
     for _, f in ipairs(FILTERS) do
         local b = UI:CreateButton(filterRow, L[f.label], 74, BTN_H)
-        b:SetPoint("LEFT", x, 0)
         b:SetScript("OnClick", function()
             filter = f.key
             paintFilters()
+            saveView()
             GuildOS:SafeCall(refresh)
         end)
         filterBtns[f.key] = { btn = b, requests = f.requests }
-        x = x + b:GetWidth() + 4
     end
 
-    local sortBtn = UI:CreateButton(filterRow, L[SORT_LABEL.new], 120, BTN_H)
+    local sortBtn = UI:CreateButton(filterRow, L[SORT_LABEL[sortMode]], 120, BTN_H)
     sortBtn:SetPoint("RIGHT", 0, 0)
     sortBtn:SetScript("OnClick", function()
         local i = 1
         for k, v in ipairs(SORTS) do if v == sortMode then i = k end end
         sortMode = SORTS[i % #SORTS + 1]
         sortBtn.label:SetText(L[SORT_LABEL[sortMode]])
+        saveView()
         GuildOS:SafeCall(refresh)
     end)
 
     ------------------------------------------------------------------
-    -- Line 3: search, and the two switches (notify, popup)
+    -- Line 3: search (with a clear button), and the two switches (notify, popup)
     ------------------------------------------------------------------
     local searchRow = CreateFrame("Frame", nil, parent)
     searchRow:SetPoint("TOPLEFT", filterRow, "BOTTOMLEFT", 0, -UI.GAP)
@@ -394,11 +530,23 @@ function GuildOS:CreateMarketPanel(parent)
 
     local searchBox = UI:CreateInput(searchRow, 240, FIELD_H, { max = 60, placeholder = L["Search: name, note or who"] })
     searchBox:SetPoint("LEFT", 0, 0)
-    searchBox:HookScript("OnTextChanged", function(self, userInput)
-        if not userInput then return end
-        search = strtrim(self:GetText() or ""):lower()
+    local clearX = UI:CreateButton(searchRow, "x", 18, 18)
+    clearX:SetPoint("RIGHT", searchBox, "RIGHT", -3, 0)
+    clearX:Hide()
+    -- every change to the search goes through the box, the variable, the × and the list together
+    local function setSearch(text)
+        searchBox:SetText(text or "")
+        search = strtrim(text or ""):lower()
+        clearX:SetShown(search ~= "")
         GuildOS:SafeCall(refresh)
+    end
+    searchBox:HookScript("OnTextChanged", function(self, userInput)
+        search = strtrim(self:GetText() or ""):lower()
+        clearX:SetShown(search ~= "")
+        if userInput then GuildOS:SafeCall(refresh) end
     end)
+    searchBox:HookScript("OnEscapePressed", function() setSearch("") end)
+    clearX:SetScript("OnClick", function() setSearch(""); searchBox:ClearFocus() end)
 
     local function Check(label, tip, anchor)
         local c = UI:CreateCheckbox(searchRow, label, 18)
@@ -409,6 +557,9 @@ function GuildOS:CreateMarketPanel(parent)
     end
     local notifyCheck = Check(L["Notify me"], L["Say it in chat when someone posts here, and play a sound."])
     local popupCheck = Check(L["Popup"], L["Show a small popup for a new post. Closes by itself."], notifyCheck)
+    -- under the switches: which sub-tab they apply to
+    local scopeCap = UI:CreateText(searchRow, "", 10, C.textDim.r, C.textDim.g, C.textDim.b)
+    scopeCap:SetPoint("TOPLEFT", notifyCheck, "BOTTOMLEFT", 0, -2)
 
     -- the notify switch is for the sub-tab on screen: offers and requests have one each
     local function notifyKey() return parent.activeSub == "seek" and "notifyRequests" or "notifyOffers" end
@@ -419,18 +570,36 @@ function GuildOS:CreateMarketPanel(parent)
         local p = Market.Prefs()
         notifyCheck.checkbox:SetChecked(p[notifyKey()] ~= false)
         popupCheck.checkbox:SetChecked(p.popup ~= false)
+        scopeCap:SetText(parent.activeSub == "seek" and L["Applies to Looking for"] or L["Applies to Offering"])
     end
+
+    -- one line above the list: what the right-click does
+    local hint = UI:CreateText(parent, L["Right-click a post to mute its poster. Click a group to open it."], 10,
+        C.textDim.r, C.textDim.g, C.textDim.b)
+    hint:SetPoint("TOPLEFT", searchRow, "BOTTOMLEFT", 0, -(UI.GAP + 14))
 
     ------------------------------------------------------------------
     -- The list
     ------------------------------------------------------------------
     local scroll, content = UI:CreateScrollFrame(parent, "GuildOSMarketScroll")
-    scroll:SetPoint("TOPLEFT", searchRow, "BOTTOMLEFT", 0, -UI.GAP)
+    scroll:SetPoint("TOPLEFT", hint, "BOTTOMLEFT", 0, -UI.GAP)
     scroll:SetPoint("BOTTOMRIGHT", -(10 + UI.GAP - UI.SCROLL_GUTTER), 8)
     UI:BindScrollChildWidth(scroll, content)
 
-    local empty = UI:CreateText(content, L["Nothing here yet."], 11, C.textDim.r, C.textDim.g, C.textDim.b)
+    local empty = UI:CreateText(content, "", 11, C.textDim.r, C.textDim.g, C.textDim.b)
     empty:SetPoint("TOPLEFT", 8, -8)
+    local emptyBtn = UI:CreateButton(content, "", 120, BTN_H)
+    emptyBtn:SetPoint("TOPLEFT", empty, "BOTTOMLEFT", 0, -6)
+    emptyBtn:Hide()
+    emptyBtn:SetScript("OnClick", function()
+        if search ~= "" then setSearch("")
+        else
+            filter = "all"
+            paintFilters()
+            saveView()
+            GuildOS:SafeCall(refresh)
+        end
+    end)
 
     local rows = {}
     local function RightClick(o)
@@ -450,12 +619,25 @@ function GuildOS:CreateMarketPanel(parent)
         local bg = (i % 2 == 0) and C.row2 or C.row1
         row:SetBackdropColor(bg.r, bg.g, bg.b, bg.a or 1)
         row:EnableMouse(true)
-        row:RegisterForClicks("RightButtonUp")
-        row:SetScript("OnClick", function(self) if self.offer then RightClick(self.offer) end end)
+        row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        row:SetScript("OnClick", function(self, button)
+            if self.group and button == "LeftButton" then
+                local k = self.group.key
+                expanded[k] = (not expanded[k]) or nil
+                GuildOS:SafeCall(refresh)
+            elseif self.offer and button == "RightButton" then
+                RightClick(self.offer)
+            end
+        end)
         row:SetScript("OnEnter", function(self)
-            if not self.offer then return end
+            if not (self.group or self.offer) then return end
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            Tooltip(GameTooltip, self.offer)
+            if self.group then
+                GameTooltip:AddLine(Market.Label(self.group.items[1].o), 1, 1, 1)
+                GameTooltip:AddLine(L["Several posts of this. Click to show them one by one."], 0.7, 0.7, 0.7, true)
+            else
+                Tooltip(GameTooltip, self.offer)
+            end
             GameTooltip:Show()
         end)
         row:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -470,13 +652,19 @@ function GuildOS:CreateMarketPanel(parent)
             row.btns[k] = b
             prev = b
         end
+        -- the price column sits just left of the action buttons, right-aligned
+        row.price = UI:CreateText(row, "", 11, GOLD[1], GOLD[2], GOLD[3])
+        row.price:SetJustifyH("RIGHT")
+        row.price:SetWordWrap(false)
+        row.price:SetWidth(PRICE_W)
+        row.price:SetPoint("RIGHT", row.btns[ACT_MAX], "LEFT", -8, 0)
 
         local function text(size, y, col)
             local fs = UI:CreateText(row, "", size, col.r, col.g, col.b)
             fs:SetJustifyH("LEFT")
             fs:SetWordWrap(false)
             fs:SetPoint("TOPLEFT", row.icon, "TOPRIGHT", 6, y)
-            fs:SetPoint("RIGHT", row, "RIGHT", -(ACT_MAX * (BTN_W + 4) + 12), 0)
+            fs:SetPoint("RIGHT", row, "RIGHT", -(ACT_MAX * (BTN_W + 4) + 12 + PRICE_W), 0)
             return fs
         end
         row.title = text(11, 0, C.text)
@@ -493,21 +681,44 @@ function GuildOS:CreateMarketPanel(parent)
         btn:Show()
     end
 
+    -- the tab labels: "Offering  4", "Looking for  2" (live posts, not counting muted members or hidden items)
+    local function paintTabCounts(live)
+        local changed = false
+        for key, name in pairs(tabNames) do
+            local text = name .. "  " .. live[key]
+            if tabShown[key] ~= text then
+                tabShown[key] = text
+                subTabs[key].label:SetText(text)
+                subTabs[key]:SetWidth(math.max(TAB_MIN_W, math.ceil(subTabs[key].label:GetStringWidth()) + TAB_PAD))
+                changed = true
+            end
+        end
+        if changed then UI:FlowBar(bar, subList, { gap = 4, rowGap = 4, rowH = TAB_H }) end
+    end
+
     refresh = function()
         if not parent:IsVisible() then return end
         paintChecks()
         paintFilters()
         local seekMode = parent.activeSub == "seek"
         local g, me = Market.G(), Me()
-        local list = {}
+        local list, live = {}, { offer = 0, seek = 0 }
         for _, o in pairs(g and g.offers or {}) do
-            if Market.Live(o) and Market.IsRequest(o) == seekMode then
-                local wants, mine, qty = Market.WantsOf(o)
-                if Matches(o, filter, me, mine) and Searched(o, search) then
-                    list[#list + 1] = { o = o, w = wants, mine = mine, qty = qty }
+            if Market.Live(o) then
+                local req = Market.IsRequest(o)
+                if not Market.IsMuted(o.by) and not Market.ItemHidden(o) then
+                    local k = req and "seek" or "offer"
+                    live[k] = live[k] + 1
+                end
+                if req == seekMode then
+                    local wants, mine, qty = Market.WantsOf(o)
+                    if Matches(o, filter, me, mine) and Searched(o, search) then
+                        list[#list + 1] = { o = o, w = wants, mine = mine, qty = qty }
+                    end
                 end
             end
         end
+        paintTabCounts(live)
         table.sort(list, function(a, b)
             if sortMode == "price" then
                 local pa, pb = a.o.prc, b.o.prc
@@ -520,20 +731,75 @@ function GuildOS:CreateMarketPanel(parent)
             return (a.o.c or 0) > (b.o.c or 0)
         end)
 
-        for i, e in ipairs(list) do
+        -- the same item posted by several members is one row with a count; a click opens it
+        local groups, order, rowsOut = {}, {}, {}
+        for _, e in ipairs(list) do
+            local k = Market.ItemKey(e.o)
+            if not groups[k] then
+                groups[k] = { key = k, items = {} }
+                order[#order + 1] = groups[k]
+            end
+            table.insert(groups[k].items, e)
+        end
+        for _, grp in ipairs(order) do
+            if #grp.items == 1 then
+                rowsOut[#rowsOut + 1] = { e = grp.items[1] }
+            else
+                rowsOut[#rowsOut + 1] = { group = grp }
+                if expanded[grp.key] then
+                    for _, e in ipairs(grp.items) do rowsOut[#rowsOut + 1] = { e = e, child = true } end
+                end
+            end
+        end
+
+        for i, r in ipairs(rowsOut) do
             local row = GetRow(i)
-            row.offer = e.o
-            row.icon.icon:SetTexture(Market.Icon(e.o))
-            local title, meta = RowText(e.o, me, e.w, e.mine, e.qty)
-            row.title:SetText(title)
-            row.meta:SetText(meta)
-            local acts = Actions(e.o, me, e.mine)
-            for k, b in ipairs(row.btns) do FillButton(b, acts[k], e.o) end
+            row.offer, row.group = nil, nil
+            row.icon:ClearAllPoints()
+            row.icon:SetPoint("LEFT", r.child and 22 or 4, 0)
+            if r.group then
+                local title, meta = GroupText(r.group)
+                row.group = r.group
+                row.icon.icon:SetTexture(Market.Icon(r.group.items[1].o))
+                row.title:SetText((expanded[r.group.key] and "-  " or "+  ") .. title)
+                row.meta:SetText(meta)
+                row.price:SetText("")
+                for _, b in ipairs(row.btns) do FillButton(b, nil) end
+                row:SetAlpha(1)
+            else
+                local e = r.e
+                row.offer = e.o
+                row.icon.icon:SetTexture(Market.Icon(e.o))
+                local title, meta, price = RowText(e.o, me, e.w, e.mine, e.qty)
+                row.title:SetText(title)
+                row.meta:SetText(meta)
+                row.price:SetText(price)
+                local acts = Actions(e.o, me, e.mine)
+                for k, b in ipairs(row.btns) do FillButton(b, acts[k], e.o) end
+                row:SetAlpha(Market.Age(e.o) > Market.OLD_AFTER and STALE_ALPHA or 1)
+            end
             row:Show()
         end
-        for i = #list + 1, #rows do rows[i]:Hide(); rows[i].offer = nil end
-        empty:SetShown(#list == 0)
-        content:SetHeight(math.max(1, #list * ROW_H))
+        for i = #rowsOut + 1, #rows do rows[i]:Hide(); rows[i].offer = nil; rows[i].group = nil end
+
+        local n = #rowsOut
+        empty:SetShown(n == 0)
+        emptyBtn:SetShown(n == 0 and (search ~= "" or filter ~= "all"))
+        if n == 0 then
+            local msg
+            if filter == "muted" then
+                msg = L["Nothing is muted. Right-click a post to mute its poster, or use Mute this item on a popup."]
+            elseif search ~= "" or filter ~= "all" then
+                msg = L["Nothing matches this filter or search."]
+            elseif seekMode then
+                msg = L["No requests right now. Ask the guild for something you need."]
+            else
+                msg = L["No offers yet. Put up something you can sell, or a service you do."]
+            end
+            empty:SetText(msg)
+            emptyBtn.label:SetText(search ~= "" and L["Clear search"] or L["Show all"])
+        end
+        content:SetHeight(math.max(1, n * ROW_H))
     end
     Market.uiRefresh = refresh
 
@@ -547,11 +813,12 @@ function GuildOS:CreateMarketPanel(parent)
         paintFilters()
         dd:Hide()
         scroll:SetVerticalScroll(0)
+        saveView()
         GuildOS:SafeCall(refresh)
     end
     parent.SelectSub = selectSub
 
-    for _, t in ipairs({ { key = "offer", label = L["Offering"] }, { key = "seek", label = L["Looking for"] } }) do
+    for _, t in ipairs({ { key = "offer", label = tabNames.offer }, { key = "seek", label = tabNames.seek } }) do
         local btn = UI:CreateTab(bar, t.label, TAB_MIN_W, true)
         btn:SetWidth(math.max(TAB_MIN_W, math.ceil(btn.label:GetStringWidth()) + TAB_PAD))
         btn:SetScript("OnClick", function() selectSub(t.key) end)
@@ -585,12 +852,12 @@ function GuildOS:CreateMarketPanel(parent)
         GuildOS:SafeCall(refresh)
     end)
 
-    selectSub("offer")
+    selectSub(parent.activeSub)
 end
 
 ----------------------------------------------------------------------
 -- Popups. For a new post: "Show" opens the tab, the middle button takes it ("Want it" / "I have it"),
--- "Hide item" stops the popups for this item, "Popup off" switches them all off. For an answer to my
+-- "Mute this item" stops the popups for this item, "Popup off" switches them all off. For an answer to my
 -- post ("someone wants it"): the middle button is "Sold" or "Got it". Draggable; closes by itself
 -- unless the mouse is on it. Nothing pops up in combat: the newest one waits until the fight is over.
 ----------------------------------------------------------------------
@@ -666,7 +933,7 @@ local function buildPopup()
         if kind == "want" then Market.Sold(cur) else Market.Want(cur) end
     end)
 
-    f.hide = UI:CreateButton(f, L["Hide item"], 90, 20)
+    f.hide = UI:CreateButton(f, L["Mute this item"], 110, 20)
     f.hide:SetScript("OnClick", function()
         local o = current
         f:Hide()

@@ -408,13 +408,12 @@ local function Stamp(rec)
 end
 
 -- text: an item link, an item name or a service; pickedIt: an item picked from the field;
--- seek: a request ("Looking for") instead of an offer
+-- seek: a request ("Looking for") instead of an offer. Returns the post, or nil and why it was refused.
 function Market.Create(text, n, price, note, pickedIt, seek)
   local g, me = Market.G(), Me()
-  if not g then GuildOS:Print(L["Join a guild first."]) return end
+  if not g then return nil, L["Join a guild first."] end
   if Market.MineCount() >= CAP then
-    GuildOS:Print(L["You have %d posts up, the most one member can have. Remove one first."]:format(CAP))
-    return
+    return nil, L["You have %d posts up, the most one member can have. Remove one first."]:format(CAP)
   end
   text = strtrim(text or "")
   local it = pickedIt or tonumber(text:match("item:(%d+)"))
@@ -426,7 +425,11 @@ function Market.Create(text, n, price, note, pickedIt, seek)
     if it then name = GuildOS.Compat.GetItemInfo(it) or text end
   end
   name = Clean(name or text):sub(1, 100)
-  if name == "" then GuildOS:Print(L["Write what you offer or want first."]) return end
+  if name == "" then return nil, L["Write what you offer or want first."] end
+  local cu = Market.ParsePrice(price)
+  if strtrim(price or "") ~= "" and not cu then
+    return nil, L["Not a price. Write it like 5g 20s 3c, or leave it empty."]
+  end
 
   -- the same thing already up from me: say so, and post it anyway
   local lname = name:lower()
@@ -444,7 +447,7 @@ function Market.Create(text, n, price, note, pickedIt, seek)
     id = ("%s:%d:%d"):format(me, t, math.random(1000, 9999)) .. (seek and ":s" or ""),
     by = me, it = it, txt = name,
     n = it and math.max(1, math.min(1000, math.floor(tonumber(n) or 1))) or 1,
-    pr = field(price, 30), prc = Market.ParsePrice(price), note = field(note, 150),
+    pr = field(price, 30), prc = cu, note = field(note, 150),
     st = "open", c = t, u = t, rev = 1, ed = me,
   }
   if seek and it and Market.Crafters(it) then
@@ -461,7 +464,7 @@ local warned = {} -- offer id -> true once its "ends soon" line was printed
 -- my own change to my post; the post goes out again with the new revision
 local function EditMine(o, changes)
   if o.by ~= Me() then return end
-  for k, v in pairs(changes) do o[k] = v end
+  for k, v in pairs(changes) do if v == false then o[k] = nil else o[k] = v end end -- false clears a field
   o.mod = nil -- my own change, not an officer's take-down
   warned[o.id] = nil
   Stamp(o)
@@ -473,6 +476,17 @@ function Market.Sold(o) EditMine(o, { st = "sold" }) end
 function Market.Remove(o) EditMine(o, { st = "gone" }) end
 -- still wanted: puts it up for another week
 function Market.Renew(o) EditMine(o, {}) end
+
+-- a new price for my post, in place: "" clears it; text that does not read as a price is refused
+function Market.SetPrice(o, text)
+  if not o or o.by ~= Me() then return nil, L["That is not your post."] end
+  text = strtrim(text or "")
+  local cu = Market.ParsePrice(text)
+  if text ~= "" and not cu then return nil, L["Not a price. Write it like 5g 20s 3c, or leave it empty."] end
+  local shown = Clean(text):sub(1, 30)
+  EditMine(o, { pr = shown ~= "" and shown or false, prc = cu or false })
+  return o
+end
 
 -- an officer takes a post down that breaks the guild's rules; the owner's copy says so
 function Market.Moderate(o)
