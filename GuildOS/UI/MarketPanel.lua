@@ -247,7 +247,7 @@ function GuildOS:CreateMarketPanel(parent)
 
     local itemBox = UI:CreateInput(form, 240, FIELD_H, { max = 100, placeholder = L["Item, link or service (drop an item here)"] })
     itemBox:SetPoint("LEFT", 0, 0)
-    local qtyBox = UI:CreateInput(form, 40, FIELD_H, { numeric = true, max = 4 })
+    local qtyBox = UI:CreateInput(form, 40, FIELD_H, { numeric = true, max = 4, justify = "CENTER" })
     qtyBox:SetPoint("LEFT", itemBox, "RIGHT", 4, 0)
     qtyBox:SetText("1")
     UI:AddTooltip(qtyBox, L["Quantity"], { L["How many of the item you put up."] })
@@ -827,7 +827,11 @@ function GuildOS:CreateMarketPanel(parent)
     end
     UI:FlowBar(bar, subList, { gap = 4, rowGap = 4, rowH = TAB_H })
 
-    parent:SetScript("OnShow", function() selectSub(parent.activeSub or "offer") end)
+    parent:SetScript("OnShow", function()
+        -- a quantity is always a number: an empty box shows one again when the tab is opened
+        if qtyBox:GetText() == "" then qtyBox:SetText("1") end
+        selectSub(parent.activeSub or "offer")
+    end)
     local since = 0
     parent:SetScript("OnUpdate", function(_, elapsed)
         since = since + elapsed
