@@ -1542,10 +1542,16 @@ end
 -- Guild chat feed (issues #124, #126), kept by Modules/GuildChat.lua. Laid out
 -- like the alliance feed: one card per run of lines from one speaker, newest at
 -- the bottom, a box underneath, and a tab per channel of the guild. Guild > Chat
--- and the Now cards both build it.
+-- builds the full page; the Now card builds the compact one (no search row).
 ----------------------------------------------------------------------
 local CLASS_TEX = "Interface\\WorldStateFrame\\Icons-Classes"
-local feeds = 0   -- each feed's scroll frame needs its own global name
+local feeds = 0               -- each feed's scroll frame needs its own global name
+local SEND_MAX = 240          -- the bytes Send keeps (GuildChat:Send)
+local CHAT_GROUP_WINDOW = 120 -- a speaker's run breaks into a new card after two quiet minutes (#3)
+local CHAT_MAX_W = 760        -- the widest a line of text runs (#2)
+local CHAT_SIZES = { small = 10, normal = 11, large = 13 }
+local CHAT_SIZE_NEXT = { small = "normal", normal = "large", large = "small" }
+local SENT_MAX = 20           -- the lines the Up arrow can bring back (#10)
 
 -- A channel is { id, name, kind }; nil, and the Guild tab, mean /g.
 local function idOf(stream)
@@ -1558,15 +1564,76 @@ local function streamLabel(stream)
     return stream.name or "?"
 end
 
+-- The key a channel's read mark goes by (#15, #16).
+local function keyFor(stream)
+    if not stream or stream.kind == "guild" then return "guild" end
+    if stream.kind == "officer" then return "officer" end
+    return "club:" .. tostring(stream.id)
+end
+
+-- The Mentions switch a channel alerts by, or nil where Mentions does not alert (#20).
+local function alertKeyFor(stream)
+    if not stream or stream.kind == "guild" then return "guild" end
+    if stream.kind == "officer" then return "officer" end
+    return nil
+end
+
+-- The player's own first name in gold wherever it appears in a line (#19). A line with a link in it
+-- is left as it is, so the link keeps its colour codes.
+local function markName(line, first)
+    if first == "" or line:find("|H", 1, true) then return line end
+    local low, needle = line:lower(), first:lower()
+    local out, pos = {}, 1
+    while true do
+        local s, e = low:find(needle, pos, true)
+        if not s then break end
+        out[#out + 1] = line:sub(pos, s - 1)
+        out[#out + 1] = "|cffe6b84a" .. line:sub(s, e) .. "|r"
+        pos = e + 1
+    end
+    out[#out + 1] = line:sub(pos)
+    return table.concat(out)
+end
+
+-- What a speaker's icon says on hover: level, rank and zone from the roster (#7).
+local function memberTip(frame, name)
+    if not GameTooltip or not name then return end
+    local soft = C.textSoft
+    GameTooltip:SetOwner(frame, "ANCHOR_TOP")
+    GameTooltip:AddLine(name, C.text.r, C.text.g, C.text.b)
+    local m = GuildOS.db and GuildOS.db.members and GuildOS.db.members[GuildOS:LocalMemberKey(name)]
+    if type(m) == "table" then
+        if m.level then GameTooltip:AddLine(string.format(L["Level %d"], m.level), soft.r, soft.g, soft.b) end
+        local GM = GuildOS.GuildManager
+        local rank = (GM and GM.GetRankName and m.rankIndex) and GM:GetRankName(m.rankIndex)
+        if rank then GameTooltip:AddLine(string.format(L["Rank: %s"], rank), soft.r, soft.g, soft.b) end
+        if m.zone and m.zone ~= "" then GameTooltip:AddLine(string.format(L["Zone: %s"], m.zone), soft.r, soft.g, soft.b) end
+    else
+        GameTooltip:AddLine(L["Not on the roster."], soft.r, soft.g, soft.b)
+    end
+    GameTooltip:Show()
+end
+
 -- `top`: room over the feed. The Guild tab leaves GAP under its sub-tab bar, as on every sub-tab
--- (#371); a Now card gives none.
+-- (#371); a Now card gives none, and has no search row.
 function GuildOS:CreateGuildChatFeed(panel, top)
     local GC = GuildOS.GuildChat
+    local full = top ~= nil
     local current   -- the channel open; nil is /g
     top = top or 0
     feeds = feeds + 1
+    local soft, dim = C.textSoft, C.textDim
+    local refresh   -- set below; the tabs, the search and the buttons repaint through it
+    local search = ""
+    local dividerAt = 0   -- the read mark the channel open had when it was last left: where new lines start (#16)
+    local seen = {}       -- per channel: when its lines were last read on this page (#15, #16)
+    local sent, histAt = {}, 0
+    local pinBottom = true
+    local scrolling = false   -- a move to the bottom is queued for the next frame
+    local waiting = false     -- a look after a chat lockdown is queued
+    local row = full and (TAB_H + 4) or 0
 
-    -- The channel tabs, shown only when there is more than /g to choose from.
+    -- The channel tabs, left; on the full page, the search box and the alert switch, right.
     local bar = CreateFrame("Frame", nil, panel)
     bar:SetPoint("TOPLEFT", 0, -top)
     bar:SetSize(400, TAB_H)
@@ -1574,10 +1641,44 @@ function GuildOS:CreateGuildChatFeed(panel, top)
     bar:Hide()
     local tabs = {}
 
+    local searchBox, muteBtn
+    if full then
+        searchBox = UI:CreateInput(panel, 170, FIELD_H, { placeholder = L["Search this chat"] })
+        searchBox:SetPoint("TOPRIGHT", 0, -(top + math.floor((TAB_H - FIELD_H) / 2)))
+        searchBox:SetMaxLetters(60)
+        searchBox:HookScript("OnTextChanged", function(self, userInput)
+            if not userInput then return end
+            search = strtrim(self:GetText() or ""):lower()
+            refresh()
+        end)
+        muteBtn = UI:CreateButton(panel, "", 66, FIELD_H)
+        muteBtn:SetPoint("TOPRIGHT", searchBox, "TOPLEFT", -6, 0)
+    end
+
+    local function paintMute()
+        if not muteBtn then return end
+        local key, cfg = alertKeyFor(current), GuildOS.db.mentions
+        muteBtn:SetShown(key ~= nil and cfg ~= nil)
+        if key and cfg then
+            muteBtn.label:SetText(cfg[key] ~= false and L["Alerts on"] or L["Alerts off"])
+        end
+    end
+    if muteBtn then
+        tipOn(muteBtn, L["Mention alerts for this channel. Click to switch them on or off."])
+        muteBtn:SetScript("OnClick", function()
+            local cfg, key = GuildOS.db.mentions, alertKeyFor(current)
+            if not cfg or not key then return end
+            cfg[key] = (cfg[key] == false)   -- on when it was off, off when it was on
+            paintMute()
+        end)
+    end
+
     local holder = CreateFrame("Frame", nil, panel)
     local function anchorHolder(belowTabs)
         holder:ClearAllPoints()
-        if belowTabs then
+        if full then
+            holder:SetPoint("TOPLEFT", 0, -(top + row))
+        elseif belowTabs then
             holder:SetPoint("TOPLEFT", bar, "BOTTOMLEFT", 0, -4)
         else
             holder:SetPoint("TOPLEFT", 0, -top)
@@ -1588,22 +1689,58 @@ function GuildOS:CreateGuildChatFeed(panel, top)
     local scroll, content = UI:CreateScrollFrame(holder, "GuildOSGuildChatScroll" .. feeds)
     scroll:SetAllPoints()
 
+    -- The line to say where a message goes, then the box, then the counter, the text size and Send.
+    local targetFS = UI:CreateText(panel, "", 11, soft.r, soft.g, soft.b)
+    targetFS:SetPoint("BOTTOMLEFT", 0, 4 + math.floor((FIELD_H - 12) / 2))
     local input = UI:CreateInput(panel, 100, FIELD_H)
-    input:SetPoint("BOTTOMLEFT", 0, 4)
-    input:SetPoint("BOTTOMRIGHT", -70, 4)
-    input:SetMaxBytes(241)   -- what Send keeps (240 bytes), plus the terminator
+    input:SetPoint("BOTTOMLEFT", 92, 4)
+    input:SetPoint("BOTTOMRIGHT", -118, 4)
+    input:SetMaxBytes(SEND_MAX + 1)   -- what Send keeps (240 bytes), plus the terminator
+    input:SetTextInsets(6, 58, 0, 0)
+    local counter = UI:CreateText(input, "", 10, soft.r, soft.g, soft.b)
+    counter:SetPoint("RIGHT", input, "RIGHT", -6, 0)
+    local function paintCounter()
+        local n = #(input:GetText() or "")
+        counter:SetText(string.format("%d/%d", n, SEND_MAX))
+        local col = n > SEND_MAX - 40 and C.warn or soft
+        counter:SetTextColor(col.r, col.g, col.b)
+    end
+    input:HookScript("OnTextChanged", function(self, userInput)
+        if userInput then histAt = 0 end
+        paintCounter()
+    end)
+    paintCounter()
+
     local sendBtn = UI:CreateButton(panel, L["Send"], 62, FIELD_H)
     sendBtn:SetPoint("BOTTOMRIGHT", 0, 4)
+    local sizeKey = GuildOS:GetSetting("guildChatSize")
+    if not CHAT_SIZES[sizeKey] then sizeKey = "normal" end
+    local sizeBtn = UI:CreateButton(panel, "Aa", 40, FIELD_H)
+    sizeBtn:SetPoint("BOTTOMRIGHT", -70, 4)
+    tipOn(sizeBtn, L["Change the size of the chat text."])
+    sizeBtn:SetScript("OnClick", function()
+        sizeKey = CHAT_SIZE_NEXT[sizeKey] or "normal"
+        GuildOS:SetSetting("guildChatSize", sizeKey)
+        refresh()
+    end)
 
-    local empty = UI:CreateText(content, L["No guild chat yet."], 12, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+    local empty = UI:CreateText(content, L["No guild chat yet."], 12, soft.r, soft.g, soft.b)
     empty:SetPoint("TOPLEFT", 0, -4)
 
-    local refresh   -- declared for the tab clicks
-    -- The newest line is shown on opening and on changing channel; after that the feed follows
-    -- new lines only for a reader already at the bottom, never pulling one who scrolled up.
-    local pinBottom = true
-    local scrolling = false   -- a move to the bottom is queued for the next frame
-    local waiting = false     -- a look after a chat lockdown is queued
+    -- The "Latest" button: shown while the reader is up the feed, and it goes back to the bottom (#14).
+    local jump = UI:CreateButton(panel, L["Latest"], 70, 20)
+    jump:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -18, 8)
+    jump:SetFrameLevel((holder:GetFrameLevel() or 1) + 10)
+    jump:Hide()
+    local function updateJump()
+        local atBottom = scroll:GetVerticalScroll() >= scroll:GetVerticalScrollRange() - 4
+        jump:SetShown(not atBottom and not GC:Locked() and (content:GetHeight() or 0) > holder:GetHeight())
+    end
+    jump:SetScript("OnClick", function()
+        scroll:SetVerticalScroll(scroll:GetVerticalScrollRange())
+        updateJump()
+    end)
+    scroll:HookScript("OnVerticalScroll", updateJump)
 
     -- Another channel: the server stops being told about the old one, and is told about this one.
     local function open(stream)
@@ -1613,8 +1750,27 @@ function GuildOS:CreateGuildChatFeed(panel, top)
         GC:Watch(false, current)
         current = idOf(stream) and stream or nil
         GC:Watch(true, current)
+        dividerAt = seen[keyFor(current)] or 0
         pinBottom = true
         refresh()
+    end
+
+    -- A channel's unread lines: those newer than the last time its lines were read here (#15).
+    -- A channel first seen starts with none unread.
+    local function unreadOf(stream)
+        local k = keyFor(stream)
+        if seen[k] == nil then
+            seen[k] = GetServerTime()
+            return 0
+        end
+        local entries = GC:Entries(stream)
+        if not entries then return 0 end
+        local n = 0
+        for i = #entries, 1, -1 do
+            if (tonumber(entries[i].t) or 0) <= seen[k] then break end
+            n = n + 1
+        end
+        return n
     end
 
     local function layoutTabs()
@@ -1646,44 +1802,106 @@ function GuildOS:CreateGuildChatFeed(panel, top)
                 tabs[i] = t
             end
             t.stream = s
-            t.label:SetText(streamLabel(s))
+            local unread = (keyFor(s) == keyFor(current)) and 0 or unreadOf(s)
+            local count = unread > 0 and string.format(" (%s)", unread > 99 and "99+" or tostring(unread)) or ""
+            t.label:SetText(streamLabel(s) .. count)
             t:SetWidth(math.max(TAB_MIN_W, math.ceil(t.label:GetStringWidth()) + TAB_PAD))
             t:SetActive(idOf(s) == idOf(current))
             t:Show()
             shown[#shown + 1] = t
         end
         for i = #list + 1, #tabs do tabs[i]:Hide() end
-        bar:SetWidth(math.max(TAB_MIN_W, panel:GetWidth() or 0))
+        bar:SetWidth(math.max(TAB_MIN_W, (panel:GetWidth() or 0) - (full and 250 or 0)))
         UI:FlowBar(bar, shown, { gap = 4, rowGap = 4, rowH = TAB_H })
     end
 
+    -- Where the box says the message goes (#11), or that chat is locked (#12).
+    local function paintTarget()
+        if GC:Locked() then
+            targetFS:SetText(L["Locked"])
+            targetFS:SetTextColor(C.warn.r, C.warn.g, C.warn.b)
+            return
+        end
+        targetFS:SetText(string.format(L["To %s"], streamLabel(current or { kind = "guild" })))
+        targetFS:SetTextColor(soft.r, soft.g, soft.b)
+    end
+
+    -- A send refused in a lockdown: the text stays in the box, and the line says so for a moment (#12).
+    local function flashLocked()
+        targetFS:SetText(L["Locked"])
+        targetFS:SetTextColor(C.warn.r, C.warn.g, C.warn.b)
+        GuildOS.Compat.After(3, paintTarget)
+    end
+
     -- Pooled: refresh runs on every line of chat, and WoW never frees a frame.
-    local blocks = {}
+    local blocks, dividers = {}, {}
+    local function getDivider(i)
+        if dividers[i] then return dividers[i] end
+        local fs = UI:CreateText(content, "", 10, dim.r, dim.g, dim.b)
+        local rule = content:CreateTexture(nil, "ARTWORK")
+        rule:SetColorTexture(C.line.r, C.line.g, C.line.b, 1)
+        rule:SetHeight(1)
+        dividers[i] = { fs = fs, rule = rule }
+        return dividers[i]
+    end
+
     local function getBlock(i)
         if blocks[i] then return blocks[i] end
+        local b = {}
         local card = CreateFrame("Frame", nil, content, "BackdropTemplate")
         card:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = GuildOS.UI:Edge(card) })
         -- A link in the line opens as it does in the chat frame.
         card:EnableMouse(true)
         card:SetHyperlinksEnabled(true)
         card:SetScript("OnHyperlinkClick", function(_, link, text, button) SetItemRef(link, text, button) end)
+        -- Right-click a card to copy its lines (#13).
+        card:SetScript("OnMouseUp", function(_, button)
+            if button == "RightButton" and b.copy then showCopy(b.copy) end
+        end)
         local icon = card:CreateTexture(nil, "ARTWORK")
         icon:SetSize(20, 20)
         icon:SetPoint("TOPLEFT", 8, -6)
         icon:SetTexture(CLASS_TEX)
+        local iconHit = CreateFrame("Frame", nil, card)
+        iconHit:SetSize(20, 20)
+        iconHit:SetPoint("TOPLEFT", 8, -6)
+        iconHit:EnableMouse(true)
+        iconHit:SetScript("OnEnter", function(self) memberTip(self, b.name) end)
+        iconHit:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
         local nameFS = UI:CreateText(card, "", 11, C.text.r, C.text.g, C.text.b)
         nameFS:SetPoint("TOPLEFT", 36, -7)
-        local timeFS = UI:CreateText(card, "", 9, C.textDim.r, C.textDim.g, C.textDim.b)
-        timeFS:SetPoint("TOPRIGHT", -8, -8)
+        -- A click on the name (#13, #18): left whispers, right shows only that player's lines, Ctrl invites.
+        local nameHit = CreateFrame("Button", nil, card)
+        nameHit:SetPoint("TOPLEFT", 36, -6)
+        nameHit:SetHeight(14)
+        nameHit:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        nameHit:SetScript("OnClick", function(_, button)
+            if not b.name then return end
+            if button == "RightButton" then
+                if full and searchBox then
+                    search = b.name:lower()
+                    searchBox:SetText(b.name)
+                    refresh()
+                end
+            elseif IsControlKeyDown() then
+                local invite = (C_PartyInfo and C_PartyInfo.InviteUnit) or InviteUnit
+                if invite then invite(b.name) end
+            elseif ChatFrame_SendTell then
+                ChatFrame_SendTell(b.name)
+            end
+        end)
         local bodyFS = UI:CreateText(card, "", 11, C.text.r, C.text.g, C.text.b)
         bodyFS:SetPoint("TOPLEFT", 36, -22)
         bodyFS:SetJustifyH("LEFT")
         bodyFS:SetWordWrap(true)
-        blocks[i] = { card = card, icon = icon, nameFS = nameFS, timeFS = timeFS, bodyFS = bodyFS }
-        return blocks[i]
+        b.card, b.icon, b.nameFS, b.nameHit, b.bodyFS = card, icon, nameFS, nameHit, bodyFS
+        blocks[i] = b
+        return b
     end
 
     refresh = function()
+        paintTarget()
+        paintMute()
         -- In a chat lockdown the server's lines and channels arrive secret: keep what is drawn,
         -- and look again every 2 seconds while on screen, since no event says the lockdown lifted.
         if GC:Locked() then
@@ -1694,6 +1912,7 @@ function GuildOS:CreateGuildChatFeed(panel, top)
                     if panel:IsVisible() then refresh() end
                 end)
             end
+            updateJump()
             return
         end
         local follow = pinBottom or scrolling or scroll:GetVerticalScroll() >= scroll:GetVerticalScrollRange() - 4
@@ -1701,79 +1920,182 @@ function GuildOS:CreateGuildChatFeed(panel, top)
         layoutTabs()
         -- Born 0 wide (CreateScrollFrame sizes it before layout), so re-set on every draw.
         content:SetWidth(math.max(holder:GetWidth() - 12, 1))
-        local log = GC:Entries(current)
+        if panel:IsVisible() then seen[keyFor(current)] = GetServerTime() end
+
+        local raw = GC:Entries(current) or {}
         local classOf = {}
-        for _, e in ipairs(log) do classOf[e.n] = e.c or classOf[e.n] end
-        local groups = GuildOS.AllianceChat.GroupLog(log, GuildOS.AllianceChat.GROUP_WINDOW)
+        for _, e in ipairs(raw) do classOf[e.n] = e.c or classOf[e.n] end
+        local log = raw
+        if search ~= "" then
+            log = {}
+            for _, e in ipairs(raw) do
+                if (e.n or ""):lower():find(search, 1, true) or (e.m or ""):lower():find(search, 1, true) then
+                    log[#log + 1] = e
+                end
+            end
+        end
+        local groups = GuildOS.AllianceChat.GroupLog(log, CHAT_GROUP_WINDOW)
+
+        -- The list in draw order: a day's line where the day changes (#4), and the new-lines line
+        -- before the first line newer than the last read (#16).
+        local items, prevDay, olderSeen, newDone = {}, nil, false, false
+        for _, g in ipairs(groups) do
+            local t = tonumber(g.t) or 0
+            local day = t > 0 and date("%Y%m%d", t) or nil
+            if day and prevDay and day ~= prevDay then
+                items[#items + 1] = { text = GuildOS:LocalDate("%a %d %b", t) }
+            end
+            if day then prevDay = day end
+            if dividerAt > 0 and not newDone then
+                if t <= dividerAt then
+                    olderSeen = true
+                elseif olderSeen then
+                    items[#items + 1] = { text = L["New since you last looked"], gold = true }
+                    newDone = true
+                end
+            end
+            items[#items + 1] = { group = g }
+        end
+
         local today = date("%Y%m%d", GetServerTime())
         local width = math.max(content:GetWidth() - 12, 200)
-        local y = 0
-        for i, g in ipairs(groups) do
-            local b = getBlock(i)
-            local class = classOf[g.name]
-            local coords = CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[class]
-            if coords then
-                b.icon:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
-                b.icon:Show()
+        local myFirst = (GuildOS.Compat.PlayerName() or ""):match("^([^%-]+)") or ""
+        local sizeFont = CHAT_SIZES[sizeKey]
+        local y, bi, di = 0, 0, 0
+        for _, it in ipairs(items) do
+            if it.text then
+                di = di + 1
+                local d = getDivider(di)
+                local col = it.gold and C.gold or dim
+                d.fs:SetText(it.text)
+                d.fs:SetTextColor(col.r, col.g, col.b)
+                d.fs:SetPoint("TOPLEFT", 8, -(y + 1))
+                d.rule:SetPoint("TOPLEFT", 0, -(y + 16))
+                d.rule:SetPoint("TOPRIGHT", 0, -(y + 16))
+                d.fs:Show()
+                d.rule:Show()
+                y = y + 20
             else
-                b.icon:Hide()
+                bi = bi + 1
+                local g = it.group
+                local b = getBlock(bi)
+                if b.size ~= sizeKey then
+                    GuildOS:ApplyFont(b.bodyFS, sizeFont)
+                    b.size = sizeKey
+                end
+                b.name = g.name
+                b.copy = table.concat(g.lines, "\n")
+                local class = classOf[g.name]
+                local coords = CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[class]
+                if coords then
+                    b.icon:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
+                    b.icon:Show()
+                else
+                    b.icon:Hide()
+                end
+                -- A line from an allied guild (issue #344) says which one, in its colour.
+                local who = g.name or "?"
+                if g.guild and GuildOS.Alliance then
+                    who = "|cff" .. GuildOS.Alliance.GuildColorHex(g.guild) .. "[" .. g.guild .. "]|r " .. who
+                end
+                -- The time sits on the name line (#1): the clock today, the day and clock before it.
+                -- A line from another day says which day, since the log outlives the session.
+                local t = tonumber(g.t)
+                local stamp = t and GuildOS:LocalDate(date("%Y%m%d", t) == today and "%H:%M" or "%a %H:%M", t) or ""
+                b.nameFS:SetText(stamp ~= "" and (who .. "  " .. rgbHex(dim) .. stamp .. "|r") or who)
+                b.nameFS:SetTextColor(GuildOS:GetClassColor(class))
+                b.nameHit:SetWidth(math.max(24, math.min(b.nameFS:GetStringWidth() or 24, width - 60)))
+                local lines = {}
+                for k, ln in ipairs(g.lines) do lines[k] = markName(ln, myFirst) end
+                local bodyW = math.min(width - 44, CHAT_MAX_W)
+                b.bodyFS:SetWidth(bodyW)
+                b.bodyFS:SetText(table.concat(lines, "\n"))
+                local h = math.max(34, (b.bodyFS:GetStringHeight() or 12) + 28)
+                -- My own lines carry a gold wash (#6).
+                local mine = g.name ~= nil and g.name == myFirst
+                if mine then
+                    b.card:SetBackdropColor(C.gold.r, C.gold.g, C.gold.b, 0.10)
+                else
+                    b.card:SetBackdropColor(C.bg2.r, C.bg2.g, C.bg2.b, 0.55)
+                end
+                b.card:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.35)
+                b.card:SetPoint("TOPLEFT", 0, -y)
+                b.card:SetSize(width, h)
+                b.card:Show()
+                y = y + h + 3
             end
-            -- A line from an allied guild (issue #344) says which one, in its colour.
-            local who = g.name or "?"
-            if g.guild and GuildOS.Alliance then
-                who = "|cff" .. GuildOS.Alliance.GuildColorHex(g.guild) .. "[" .. g.guild .. "]|r " .. who
-            end
-            b.nameFS:SetText(who)
-            b.nameFS:SetTextColor(GuildOS:GetClassColor(class))
-            -- The log outlives the session: a line from another day says which day.
-            local t = tonumber(g.t)
-            b.timeFS:SetText(t and GuildOS:LocalDate(date("%Y%m%d", t) == today and "%H:%M" or "%a %H:%M", t) or "")
-            b.bodyFS:SetWidth(width - 44)
-            b.bodyFS:SetText(table.concat(g.lines, "\n"))
-            local h = math.max(34, (b.bodyFS:GetStringHeight() or 12) + 28)
-            b.card:SetBackdropColor(C.bg2.r, C.bg2.g, C.bg2.b, 0.55)
-            b.card:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.35)
-            b.card:SetPoint("TOPLEFT", 0, -y)
-            b.card:SetSize(width, h)
-            b.card:Show()
-            y = y + h + 3
         end
-        for i = #groups + 1, #blocks do blocks[i].card:Hide() end
-        empty:SetShown(#groups == 0)
-        if #groups == 0 then y = 20 end
+        for i = bi + 1, #blocks do blocks[i].card:Hide() end
+        for i = di + 1, #dividers do dividers[i].fs:Hide(); dividers[i].rule:Hide() end
+        empty:SetText(search ~= "" and L["Nothing matches your search."] or L["No guild chat yet."])
+        empty:SetShown(#items == 0)
+        if #items == 0 then y = 20 end
         content:SetHeight(math.max(y, 1))
         -- A frame later: the scroll range follows the new height only after it lands.
-        if not follow then return end
-        local target = math.max(0, y - holder:GetHeight())
-        scrolling = true
-        GuildOS.Compat.After(0, function()
-            scrolling = false
-            if panel:IsVisible() then scroll:SetVerticalScroll(target) end
-        end)
+        if follow then
+            local target = math.max(0, y - holder:GetHeight())
+            scrolling = true
+            GuildOS.Compat.After(0, function()
+                scrolling = false
+                if panel:IsVisible() then scroll:SetVerticalScroll(target) end
+                updateJump()
+            end)
+        else
+            GuildOS.Compat.After(0, updateJump)
+        end
     end
 
     -- Enter and the click are the player's own key press, which chat needs on Forever.
     local function doSend()
-        local ok, why = GC:Send(input:GetText(), current)
+        local text = input:GetText() or ""
+        local ok, why = GC:Send(text, current)
         if ok then
+            local clean = strtrim(text)
+            if clean ~= "" then
+                sent[#sent + 1] = clean
+                if #sent > SENT_MAX then table.remove(sent, 1) end
+            end
+            histAt = 0
             input:SetText("")
+            input:SetFocus()   -- the box keeps focus, so the next line can be typed straight away (#9)
         elseif why == "locked" then
-            GuildOS:Print(L["Chat is locked right now: your message is still in the box."])
+            flashLocked()
         end
     end
     sendBtn:SetScript("OnClick", doSend)
     input:SetScript("OnEnterPressed", doSend)
+    -- The Up and Down arrows walk back through what was sent (#10).
+    input:HookScript("OnKeyDown", function(self, key)
+        if #sent == 0 then return end
+        if key == "UP" then
+            histAt = math.min(histAt + 1, #sent)
+        elseif key == "DOWN" then
+            histAt = math.max(histAt - 1, 0)
+        else
+            return
+        end
+        local text = histAt > 0 and sent[#sent - histAt + 1] or ""
+        self:SetText(text)
+        self:SetCursorPosition(#text)
+    end)
 
     GC:OnRefresh(function()
         if panel:IsVisible() then refresh() end
     end)
-    -- The server is told a channel is being read only while the feed is on screen.
-    panel:HookScript("OnShow", function() pinBottom = true; GC:Watch(true, current) end)
+    -- The server is told a channel is being read only while the feed is on screen. Its new-lines line
+    -- is where the channel was left, so it is taken before the page marks it read again.
+    panel:HookScript("OnShow", function()
+        pinBottom = true
+        dividerAt = seen[keyFor(current)] or 0
+        GC:Watch(true, current)
+    end)
     panel:HookScript("OnHide", function() GC:Watch(false, current) end)
     -- The cards are as wide as the view: a resized window lays them out again, once a frame.
     UI:MakeResponsive(holder, function()
         if panel:IsVisible() then refresh() end
     end)
+    paintTarget()
+    paintMute()
     return refresh
 end
 
