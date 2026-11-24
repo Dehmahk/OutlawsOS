@@ -295,7 +295,7 @@ function GuildOS:BuildLootAccounts(panel)
 
     local empty = UI:CreateText(standChild, "", 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
     empty:SetPoint("TOPLEFT", 4, -4)
-    local logEmpty = UI:CreateText(logChild, L["No history."], 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+    local logEmpty = UI:CreateText(logChild, L["Nothing recorded yet."], 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
     logEmpty:SetPoint("TOPLEFT", 4, -4)
 
     local drawSettings   -- below
@@ -413,7 +413,7 @@ function GuildOS:BuildLootAccounts(panel)
             row.cells.rank:SetTextColor(C.label.r, C.label.g, C.label.b)
         end
         for i = #list + 1, #standRows do standRows[i]:Hide() end
-        empty:SetText(account and L["Nobody on this account yet."] or L["No points recorded yet."])
+        empty:SetText(account and L["Nobody on this account yet. Put a member on it to see them here."] or L["Nothing recorded yet. Points appear once a raid or an officer records them."])
         empty:SetShown(#list == 0)
         standChild:SetHeight(math.max(1, #list * ROW_H))
 
