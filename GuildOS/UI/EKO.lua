@@ -1351,11 +1351,11 @@ end
 -- Dungeon runs since `since`: { at, name, bosses, who = { short names } }, newest first. Each member
 -- logs their own clear (runId = instance id : their own entry time), so one group is the clears of
 -- the same instance (or dungeon) finished within 10 minutes of each other.
-function EKO:Runs(since)
+function EKO:Runs(since, keep)
     local out = {}
     local list = {}
     for _, e in pairs(entries()) do
-        if type(e) == "table" and e.type == "dungeon.clear" and (e.at or 0) >= (since or 0) and e.data then list[#list + 1] = e end
+        if type(e) == "table" and e.type == "dungeon.clear" and (e.at or 0) >= (since or 0) and e.data and (not keep or keep(e)) then list[#list + 1] = e end
     end
     table.sort(list, function(a, b) return (a.at or 0) < (b.at or 0) end)
     for _, e in ipairs(list) do
@@ -2348,14 +2348,16 @@ end
 
 function EKO:Raffle()
     local r = shared("raffle")
-    if type(r) ~= "table" then r = { text = self.RAFFLE_SEED or "", winners = {} } end
+    if type(r) ~= "table" then r = { winners = {} } end
+    -- Entries are counted from this week's clears. A list an officer pasted counts only for the week it was set.
+    local text = (r.week == self:WeekStart() and r.text) or self:CountedRaffleText()
     -- A raffle saved with only the older three places (or none) takes the current places.
     local prizes = r.prizes
     if type(prizes) ~= "table" or #prizes < 4 then
         prizes = {}
         for i, v in ipairs(self.RAFFLE_PRIZES) do prizes[i] = v end
     end
-    return { text = r.text or self.RAFFLE_SEED or "", prizes = prizes, winners = r.winners or {}, drawnAt = r.drawnAt }
+    return { text = text, prizes = prizes, winners = r.winners or {}, drawnAt = r.drawnAt, week = r.week }
 end
 
 local pendingRoll
@@ -2408,7 +2410,7 @@ rollEv:SetScript("OnEvent", function(_, _, msg)
     local place = #winners + 1
     local prize = (r.prizes or EKO.RAFFLE_PRIZES)[place] or 0
     winners[place] = { name = pick.name, roll = roll, prize = prize }
-    EKO:SetShared("raffle", { text = r.text, prizes = r.prizes, winners = winners, drawnAt = now() })
+    EKO:SetShared("raffle", { text = r.text, prizes = r.prizes, winners = winners, drawnAt = now(), week = r.week })
     GuildOS:Print(string.format("%s%s place: %s|r (rolled %d, %d entr%s) wins %s!", GOLDC, PLACE_WORD[place] or (place .. "th"), pick.name, roll, pick.n, pick.n == 1 and "y" or "ies", prizeText(prize)))
     playSound("LEVELUPSOUND", 888)
 end)
@@ -2849,7 +2851,7 @@ function EKO:BuildRaffleSub(panel)
                 x = x + w + 6
                 return b
             end
-            hb("Reset", 60, function() EKO:SetShared("raffle", { text = r.text, prizes = r.prizes, winners = {} }) end)
+            hb("Reset", 60, function() EKO:SetShared("raffle", { text = r.text, prizes = r.prizes, winners = {}, week = r.week }) end)
             hb("Announce", 80, function()
                 local a = EKO:RaffleAnnouncement()
                 if a then ChatFrame_OpenChat("/g " .. a) else GuildOS:Print("Draw a winner first.") end
@@ -2860,12 +2862,12 @@ function EKO:BuildRaffleSub(panel)
                     table.concat(r.prizes, "\n"), function(t)
                         local p = {}
                         for n in t:gmatch("%d+%.?%d*") do p[#p + 1] = tonumber(n) end
-                        if #p > 0 then EKO:SetShared("raffle", { text = r.text, prizes = p, winners = r.winners or {} }) end
+                        if #p > 0 then EKO:SetShared("raffle", { text = r.text, prizes = p, winners = r.winners or {}, week = r.week }) end
                     end)
             end)
             hb("Set entries", 90, function()
-                EKO:TextPopup("Raffle entries", "One Outlaw per line with their entries, e.g.  Ryzen Moros 4  (copy them from the Bounty Board sheet's Leaderboard).",
-                    r.text or "", function(t) EKO:SetShared("raffle", { text = t, prizes = r.prizes, winners = {} }) end)
+                EKO:TextPopup("Raffle entries", "Entries are counted from this week's clears. Set a list here only to override them for this week, one Outlaw per line, e.g.  Ryzen Moros 4. Clear the box to go back to the counted entries.",
+                    r.text or "", function(t) EKO:SetShared("raffle", { text = t, prizes = r.prizes, winners = {}, week = (t ~= "" and EKO:WeekStart()) or nil }) end)
             end)
         end
         y = y + 26
@@ -3259,40 +3261,24 @@ EKO.extraSlash = function(cmd, rest)
     return false
 end
 
--- Verified Bounty Board clears from the tracker sheet (screenshots checked). Victoria's client sends
--- them to the other officers; this table refreshes when clears are logged.
-EKO.BOUNTY_SEED = { rev = 1795310000, week = 1794805200, clears = {
-        { n = 1, d = "Scarlet Monastery", tier = "High", who = { "Myth Inyoah", "Zorin Vii", "Essanance Serilia" } },
-        { n = 2, d = "Scarlet Monastery", tier = "High", who = { "Myth Inyoah", "Zorin Vii", "Essanance Serilia" } },
-        { n = 3, d = "Deadmines", tier = "Low", who = { "Kinnix Kx", "Kre Shock", "Painn Fullmoon", "Camilla Sharpblade", "Colbaz Darkwisper" } },
-        { n = 4, d = "Deadmines", tier = "Low", who = { "Casper Strong", "Tiyyon Hood", "Selley Wrenchgleam", "Wiki Cat", "Xtraheat Slayer" } },
-        { n = 5, d = "Excavation Site", tier = "Mid", who = { "Raistlin Danuz", "Wookery Danuz", "Marksman Klep" } },
-        { n = 6, d = "Shadowfang Keep", tier = "Mid", who = { "Moriaknight Fundin", "Vyvanse Placebo", "Katherissa Stagheart" } },
-        { n = 7, d = "Excavation Site", tier = "Mid", who = { "Genevieve Hunt", "Tigglethorpe Wigglebumm", "Lightning Stryke" } },
-        { n = 8, d = "Excavation Site", tier = "Mid", who = { "Oliver Pockets", "Reasonable Moose", "Im Boogie" } },
-        { n = 9, d = "Hall of Thanes", tier = "Low", who = { "Melchizedek Ruach", "Muy Chingon", "Ninna Vix" } },
-        { n = 10, d = "Hall of Thanes", tier = "Low", who = { "Exadus Arrowstorm", "Ninna Vix", "Draven Ironbeard", "Control Frq", "Ryzen Moros" } },
-        { n = 11, d = "Deadmines", tier = "Low", who = { "Exadus Arrowstorm", "Feralynn Direheart", "Draven Ironbeard", "Ryzen Moros" } },
-        { n = 12, d = "Excavation Site", tier = "Mid", who = { "Genevieve Hunt", "Wizzly Crusher", "Katherissa Stagheart", "Wiki Cat" } },
-        { n = 13, d = "Deadmines", tier = "Low", who = { "Kimbere Pemberton", "Brens Ulthak", "Tyroc Bold" } },
-        { n = 14, d = "Deadmines", tier = "Low", who = { "Eladion Swiftblade", "Donut Glitterblast", "Artisan Lightbeard", "Dalas Nolanworth", "Object Oriented" } },
-        { n = 15, d = "Excavation Site", tier = "Mid", who = { "Kinnix Kx", "Moriaknight Fundin", "Two Heretics", "Katherissa Stagheart" } },
-        { n = 16, d = "Hall of Thanes", tier = "Low", who = { "Bigdaddy Longbeard", "Kharl Ennobel", "Bom Thehealer" } },
-        { n = 17, d = "Excavation Site", tier = "Mid", who = { "Asaano Luneia", "Syraan Nightwhisper", "Beren Damgalad", "Genevieve Hunt", "Hingle Mckringel" } },
-        { n = 18, d = "Deadmines", tier = "Low", who = { "Custos Veritas", "Garzhvog Ilphukiir", "Riddock Shackleford", "Triss Azathanai", "Muy Chingon" } },
-        { n = 19, d = "Deadmines", tier = "Low", who = { "Ryzen Moros", "Healz Dawnbreaker", "Donut Glitterblast" } },
-        { n = 20, d = "Hall of Thanes", tier = "Low", who = { "Ryzen Moros", "Healz Dawnbreaker", "Tangy Pomelo", "Bassard Shyborn" } },
-} }
+-- Bounty Board clears this week, from the journal. Each OutlawOS client logs its own clear, and the journal
+-- syncs every member's clears to the guild, so every client counts the same list. A clear counts when the
+-- dungeon was on this week's board and three or more Outlaws were in the party, as the sheet's rules say.
+function EKO:WeekBountyRuns()
+    return self:Runs(self:WeekStart(), function(e)
+        return e.data.onBoard and (e.data.outlaws or 0) >= 3
+    end)
+end
 
--- This week's raffle entries from the tracker (one per Outlaw per clear), until an officer sets them.
-EKO.RAFFLE_SEED = "Ryzen Moros 4\nGenevieve Hunt 3\nKatherissa Stagheart 3\nDonut Glitterblast 2\nDraven Ironbeard 2\nEssanance Serilia 2\nExadus Arrowstorm 2\nHealz Dawnbreaker 2\nKinnix Kx 2\nMoriaknight Fundin 2\nMuy Chingon 2\nMyth Inyoah 2\nNinna Vix 2\nWiki Cat 2\nZorin Vii 2\nArtisan Lightbeard 1\nAsaano Luneia 1\nBassard Shyborn 1\nBeren Damgalad 1\nBigdaddy Longbeard 1\nBom Thehealer 1\nBrens Ulthak 1\nCamilla Sharpblade 1\nCasper Strong 1\nColbaz Darkwisper 1\nControl Frq 1\nCustos Veritas 1\nDalas Nolanworth 1\nEladion Swiftblade 1\nFeralynn Direheart 1\nGarzhvog Ilphukiir 1\nHingle Mckringel 1\nIm Boogie 1\nKharl Ennobel 1\nKimbere Pemberton 1\nKre Shock 1\nLightning Stryke 1\nMarksman Klep 1\nMelchizedek Ruach 1\nObject Oriented 1\nOliver Pockets 1\nPainn Fullmoon 1\nRaistlin Danuz 1\nReasonable Moose 1\nRiddock Shackleford 1\nSelley Wrenchgleam 1\nSyraan Nightwhisper 1\nTangy Pomelo 1\nTigglethorpe Wigglebumm 1\nTiyyon Hood 1\nTriss Azathanai 1\nTwo Heretics 1\nTyroc Bold 1\nVyvanse Placebo 1\nWizzly Crusher 1\nWookery Danuz 1\nXtraheat Slayer 1"
-
+-- This week's clears, in the shape BountyClaims reads: { d = dungeon, tier, who = { names } }.
 function EKO:VerifiedClears()
-    local db = self:DB()
-    local rec = db and db.shared and db.shared.bountyclears
-    local data = (rec and type(rec.data) == "table" and (rec.data.rev or 0) >= self.BOUNTY_SEED.rev) and rec.data or self.BOUNTY_SEED
-    if data.week ~= self:WeekStart() then return {} end
-    return data.clears or {}
+    local tierOf = {}
+    for _, bnt in ipairs(self:ParseBounties((self:Bounties() or {}).text or "")) do tierOf[nameKey(bnt.name)] = bnt.tier end
+    local out = {}
+    for _, r in ipairs(self:WeekBountyRuns()) do
+        out[#out + 1] = { d = r.name, tier = tierOf[nameKey(r.name)], who = r.who }
+    end
+    return out
 end
 
 -- The verified clears of one bounty (names match either way round: "The Deadmines" / "Deadmines").
@@ -3306,20 +3292,36 @@ function EKO:BountyClaims(bountyName)
     return out
 end
 
-local bvEv = CreateFrame("Frame")
-bvEv:RegisterEvent("PLAYER_LOGIN")
-bvEv:SetScript("OnEvent", function()
-    C_Timer.After(40, function()
-        GuildOS:SafeCall(function()
-            if not GuildOS:IsOfficer() or short(meName()) ~= "Vyctoria Windwhisper" then return end
-            local db = EKO:DB()
-            local rec = db.shared and db.shared.bountyclears
-            if not (rec and type(rec.data) == "table" and (rec.data.rev or 0) >= EKO.BOUNTY_SEED.rev) then
-                EKO:SetShared("bountyclears", EKO.BOUNTY_SEED)
+-- Each Outlaw's clears this week: one raffle entry a clear, and bounty points (1 a clear, 2 with a full party of 5).
+function EKO:WeekTickets()
+    local byName, seen = {}, {}
+    local weekStart = self:WeekStart()
+    for _, e in ipairs(GuildOS.db and GuildOS.db.journal and GuildOS.db.journal.entries or {}) do
+        local d = e.data
+        if e.type == "dungeon.clear" and type(d) == "table" and d.onBoard and (d.outlaws or 0) >= 3
+            and (e.at or 0) >= weekStart and e.id and not seen[e.id] then
+            seen[e.id] = true
+            local s = short(e.subjectKey)
+            if s then
+                local t = byName[s] or { n = 0, pts = 0 }
+                byName[s] = t
+                t.n = t.n + 1
+                t.pts = t.pts + ((d.outlaws >= 5) and 2 or 1)
             end
-        end)
-    end)
-end)
+        end
+    end
+    return byName
+end
+
+-- The raffle entries counted from this week's clears, one "Name n" line each, most entries first.
+function EKO:CountedRaffleText()
+    local list = {}
+    for name, t in pairs(self:WeekTickets()) do list[#list + 1] = { name = name, n = t.n } end
+    table.sort(list, function(x, y) if x.n ~= y.n then return x.n > y.n end return x.name < y.name end)
+    local lines = {}
+    for _, e in ipairs(list) do lines[#lines + 1] = e.name .. " " .. e.n end
+    return table.concat(lines, "\n")
+end
 
 ----------------------------------------------------------------------
 -- Who has OutlawOS: every client with the patch says hello at login and answers a check (domain

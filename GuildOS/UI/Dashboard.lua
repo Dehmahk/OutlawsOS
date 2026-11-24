@@ -630,19 +630,9 @@ function GuildOS:CreateDashboardPanel(panel)
             end
         end
 
-        -- Your points: a clear of a dungeon on this week's Bounty Board, with three or more guild members in
-        -- the party; five or more is two points. Each client logs its own clear and the journal carries them,
-        -- so this reads the journal. Tickets: the raffle list.
-        local pts, clears = 0, 0
-        local weekStart = EKO:WeekStart()
-        for _, e in ipairs(GuildOS.db.journal and GuildOS.db.journal.entries or {}) do
-            local d = e.data
-            if e.type == "dungeon.clear" and type(d) == "table" and d.onBoard and (d.outlaws or 0) >= 3
-                and (e.at or 0) >= weekStart and (e.subjectKey or ""):match("^([^-]+)") == me then
-                clears = clears + 1
-                pts = pts + ((d.outlaws >= 5) and 2 or 1)
-            end
-        end
+        -- Your points: this week's clears of Bounty Board dungeons (see EKO:WeekTickets). Tickets: the raffle list.
+        local mine = EKO:WeekTickets()[me] or { n = 0, pts = 0 }
+        local pts, clears = mine.pts, mine.n
         local tickets = 0
         for _, e in ipairs((EKO:ParseRaffle(EKO:Raffle().text))) do
             if e.name == me then tickets = e.n end
