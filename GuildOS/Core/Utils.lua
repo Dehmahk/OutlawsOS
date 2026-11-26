@@ -62,6 +62,51 @@ end
 ----------------------------------------------------------------------
 -- Alt / Main linking (account-wide attunement propagation)
 ----------------------------------------------------------------------
+-- Officers stamp each link they change with the time, so a copy that missed the change cannot
+-- undo it (MergeAltLinks). A member's own edits are not stamped: an officer stamps the real
+-- change when it applies the member's claim.
+function GuildOS:StampAltLink(key)
+    if not self:IsOfficer() then return end
+    self.db.altStamps = self.db.altStamps or {}
+    self.db.altStamps[key] = GetServerTime()
+end
+
+-- Every write that changes several links at once goes through here. An officer stamps each
+-- link that changed; a member's edit is stored as it is.
+function GuildOS:SetAltLinks(newLinks)
+    self.db.altLinks = self.db.altLinks or {}
+    local old = self.db.altLinks
+    if self:IsOfficer() then
+        for k in pairs(old) do
+            if newLinks[k] ~= old[k] then self:StampAltLink(k) end
+        end
+        for k in pairs(newLinks) do
+            if newLinks[k] ~= old[k] then self:StampAltLink(k) end
+        end
+    end
+    self.db.altLinks = newLinks
+end
+
+-- Pure: fold an officer's snapshot into our copy. The snapshot gives, for each link it knows,
+-- when that link last changed; a removal keeps its time with no main. For each link the newer
+-- time wins, so a stale copy that simply lacks a link cannot remove it, and cannot bring back a
+-- link that was removed later. Returns the merged links and times, and how many links changed.
+function GuildOS:MergeAltLinks(links, stamps, inLinks, inStamps)
+    local outL, outS, changed = {}, {}, 0
+    for k, v in pairs(links or {}) do outL[k] = v end
+    for k, v in pairs(stamps or {}) do outS[k] = v end
+    for k, t in pairs(inStamps or {}) do
+        local have = outS[k]
+        if have == nil or t > have then
+            local main = (inLinks or {})[k]
+            if outL[k] ~= main then changed = changed + 1 end
+            outL[k] = main
+            outS[k] = t
+        end
+    end
+    return outL, outS, changed
+end
+
 function GuildOS:LinkAlt(altKey, mainKey)
     if not self:IsOfficer() then return false end
     if not altKey or not mainKey or altKey == mainKey then return false end
@@ -72,6 +117,7 @@ function GuildOS:LinkAlt(altKey, mainKey)
         return false
     end
     self.db.altLinks[altKey] = mainKey
+    self:StampAltLink(altKey)
     if self.CommSystem then
         self.CommSystem:BroadcastAltLinks()
     end
@@ -82,6 +128,7 @@ function GuildOS:UnlinkAlt(altKey)
     if not self:IsOfficer() then return false end
     self.db.altLinks = self.db.altLinks or {}
     self.db.altLinks[altKey] = nil
+    self:StampAltLink(altKey)
     if self.CommSystem then
         self.CommSystem:BroadcastAltLinks()
     end
@@ -137,7 +184,7 @@ function GuildOS:SetMain(newMainKey)
     local group = self:GetLinkedChars(newMainKey)
     if #group < 2 then return false end                 -- nothing to re-main
     if self.db.altLinks[newMainKey] == nil then return false end  -- already main
-    self.db.altLinks = self:_RepointGroup(self.db.altLinks, group, newMainKey)
+    self:SetAltLinks(self:_RepointGroup(self.db.altLinks, group, newMainKey))
     if self.CommSystem then
         self.CommSystem:BroadcastAltLinks()
     end
@@ -547,6 +594,11 @@ function GuildOS:LocalizeStoredMemberTables()
                 if la ~= lm then links[la] = lm end
             end
             db.altLinks = links
+            if type(db.altStamps) == "table" then
+                local stamps = {}
+                for k, t in pairs(db.altStamps) do stamps[self:LocalMemberKey(k)] = t end
+                db.altStamps = stamps
+            end
         end,
         function() points(db.points) end,
         function()

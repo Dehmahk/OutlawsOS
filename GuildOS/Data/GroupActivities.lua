@@ -21,6 +21,13 @@ local function item(id, name, map, min, max, art, size)
     return { id = id, name = name, map = map, min = min, max = max, art = art and (ART .. art) or nil, size = size or 5 }
 end
 
+-- A wing of a dungeon with several: its card on the Groups tab is the dungeon's, which opens to show each
+-- wing (A.wings). The wing stays its own activity, with its own range, for the groups formed for it.
+local function wing(key, it)
+    it.wing = key
+    return it
+end
+
 local function section(cat, title, items, isNew)
     local s = { cat = cat, title = title, items = items, isNew = isNew or nil }
     for _, it in ipairs(items) do
@@ -35,20 +42,20 @@ end
 local CLASSIC_LOW = {
     item("ragefire-chasm", "Ragefire Chasm", 389, 13, 18, "RagefireChasm"),
     item("wailing-caverns", "Wailing Caverns", 43, 17, 24, "WailingCaverns"),
-    item("deadmines", "The Deadmines", 36, 17, 26, "Deadmines"),
+    item("deadmines", "The Deadmines", 36, 18, 23, "Deadmines"),
     item("shadowfang-keep", "Shadowfang Keep", 33, 22, 30, "ShadowfangKeep"),
     item("blackfathom-deeps", "Blackfathom Deeps", 48, 24, 32, "BlackfathomDeeps"),
     item("stockade", "The Stockade", 34, 24, 32, "StormwindStockades"),
     item("gnomeregan", "Gnomeregan", 90, 29, 38, "Gnomeregan"),
     item("razorfen-kraul", "Razorfen Kraul", 47, 29, 38, "RazorfenKraul"),
-    item("scarlet-graveyard", "Scarlet Monastery: Graveyard", 189, 30, 38, "ScarletMonastery"),
-    item("scarlet-library", "Scarlet Monastery: Library", 189, 33, 41, "ScarletMonastery"),
-    item("scarlet-armory", "Scarlet Monastery: Armory", 189, 36, 44, "ScarletMonastery"),
-    item("scarlet-cathedral", "Scarlet Monastery: Cathedral", 189, 38, 46, "ScarletMonastery"),
+    wing("scarlet-monastery", item("scarlet-graveyard", "Scarlet Monastery: Graveyard", 189, 30, 38, "ScarletMonastery")),
+    wing("scarlet-monastery", item("scarlet-library", "Scarlet Monastery: Library", 189, 33, 41, "ScarletMonastery")),
+    wing("scarlet-monastery", item("scarlet-armory", "Scarlet Monastery: Armory", 189, 36, 44, "ScarletMonastery")),
+    wing("scarlet-monastery", item("scarlet-cathedral", "Scarlet Monastery: Cathedral", 189, 38, 46, "ScarletMonastery")),
     item("razorfen-downs", "Razorfen Downs", 129, 37, 46, "RazorfenDowns"),
 }
 local CLASSIC_HIGH = {
-    item("uldaman", "Uldaman", 70, 41, 51, "Uldaman"),
+    item("uldaman", "Uldaman", 70, 42, 52, "Uldaman"),
     item("zulfarrak", "Zul'Farrak", 209, 44, 54, "ZulFarrak"),
     item("maraudon", "Maraudon", 349, 46, 55, "Maraudon"),
     item("sunken-temple", "Sunken Temple", 109, 50, 56, "SunkenTemple"),
@@ -57,6 +64,11 @@ local CLASSIC_HIGH = {
     item("dire-maul", "Dire Maul", 429, 56, 60, "DireMaul"),
     item("stratholme", "Stratholme", 329, 58, 60, "Stratholme"),
     item("scholomance", "Scholomance", 289, 58, 60, "Scholomance"),
+}
+
+-- The dungeons with wings: the name on the card, and the wings in the order they are shown.
+A.wings = {
+    ["scarlet-monastery"] = { name = "Scarlet Monastery", ids = { "scarlet-graveyard", "scarlet-library", "scarlet-armory", "scarlet-cathedral" } },
 }
 
 local function levels(title, items)
@@ -150,6 +162,37 @@ section("other", L["Battlegrounds and more"], {
     item("battlegrounds", L["Battlegrounds"], nil, nil, nil, nil, 10),
     item("other", L["Something else"]),
 })
+
+-- A wing's own name, after its dungeon's: "Library" of "Scarlet Monastery: Library".
+function A:WingLabel(it)
+    return (it.name or ""):match(": (.+)$") or it.name
+end
+
+-- The level range a guild line names for a Forever dungeon: the Bounty Board's Dungeons tab. The catalogue
+-- above keeps no range for these, and giving them one would change the Groups tab's level tiles, so this
+-- table is read by the guild lines alone. A new dungeon not listed here is named without a range.
+local FOREVER_LINE_LEVELS = {
+    ["hall-of-thanes"] = { 13, 18 },
+    ["ruins-of-lordaeron"] = { 15, 23 },
+    ["excavation-site-wetlands"] = { 23, 33 },
+    ["city-of-dalaran"] = { 28, 33 },
+    ["drowned-city"] = { 35, 42 },
+    ["kroldok-stronghold"] = { 40, 45 },
+    ["alcaz-prison"] = { 48, 53 },
+    ["blackmaw-hold"] = { 55, 60 },
+    ["shapers-terrace"] = { 58, 60 },
+}
+
+-- An activity's level range for a guild line: its own from the catalogue, else the table above. nil when
+-- it has neither, so the line names no range.
+function A:LineLevels(id)
+    local it = self.byId[id]
+    if not it then return nil end
+    if it.min then return it.min, it.max or it.min end
+    local r = FOREVER_LINE_LEVELS[id]
+    if r then return r[1], r[2] end
+    return nil
+end
 
 -- The sections of one category, in the order they are shown.
 function A:Sections(cat)

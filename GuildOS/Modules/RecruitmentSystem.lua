@@ -127,10 +127,19 @@ function Recruitment:HasChannel(list, name)
     return false
 end
 
+-- A change saved in the Recruiting tab is this officer's newest ad. It is stamped now, so a copy from
+-- the guild that is older than the save cannot overwrite it on the next login (ApplyIncoming keeps it).
+function Recruitment:MarkEdited()
+    local r = GuildOS.db and GuildOS.db.recruitment
+    if not r then return end
+    r.updatedAt = math.max(time(), (r.updatedAt or 0) + 1)
+end
+
 function Recruitment:AddChannel(list, name)
     name = strtrim(tostring(name or ""))
     if name == "" or self:HasChannel(list, name) then return false end
     list[#list + 1] = name
+    self:MarkEdited()
     return true
 end
 
@@ -143,6 +152,7 @@ function Recruitment:RemoveChannel(list, name)
             removed = true
         end
     end
+    if removed then self:MarkEdited() end
     return removed
 end
 
@@ -474,6 +484,7 @@ end
 -- Toggle recruitment
 ----------------------------------------------------------------------
 function Recruitment:Toggle()
+    self:MarkEdited()
     if GuildOS.db.recruitment.enabled then
         self:StopAutoRecruit()
     else
@@ -693,9 +704,12 @@ function Recruitment:ApplyIncoming(info, sender, channel)
     -- re-send carry the latest edit, not an older copy of its own db.
     if GuildOS:CanRecruit() then
         local g, r = GuildOS.db.guildRecruitment, GuildOS.db.recruitment
-        r.enabled, r.discord, r.message = g.enabled, g.discord, g.message
-        r.channels, r.interval, r.postMaxRank = g.channels, g.interval, g.maxRank or nil
-        r.updatedAt, r.updatedBy = g.updatedAt, g.updatedBy
+        -- A change saved here after the copy that came in is newer: keep it, as the copy lost.
+        if not (r.updatedAt and r.updatedAt > incomingAt) then
+            r.enabled, r.discord, r.message = g.enabled, g.discord, g.message
+            r.channels, r.interval, r.postMaxRank = g.channels, g.interval, g.maxRank or nil
+            r.updatedAt, r.updatedBy = g.updatedAt, g.updatedBy
+        end
     end
     if GuildOS.recruitmentPanelRefresh then GuildOS.recruitmentPanelRefresh() end
     self:SyncMemberParticipation()
@@ -1213,6 +1227,7 @@ function Recruitment:HandleCommand(args)
             GuildOS:Print(problem)
         elseif newMsg and newMsg ~= "" then
             GuildOS.db.recruitment.message = newMsg
+            Recruitment:MarkEdited()
             GuildOS:Print(L["Recruitment message set to: |cffFFFFFF"] .. newMsg .. "|r")
         else
             GuildOS:Print(L["Current message: |cffFFFFFF"] .. (GuildOS.db.recruitment.message or L["(empty)"]) .. "|r")
@@ -1221,6 +1236,7 @@ function Recruitment:HandleCommand(args)
         local secs = tonumber(args[2])
         if secs and secs >= 60 then
             GuildOS.db.recruitment.interval = secs
+            Recruitment:MarkEdited()
             GuildOS:Print(string.format(L["Recruitment interval set to |cffFFFFFF%ds|r."], secs))
             -- Restart if active. StartAutoRecruit replaces the ticker itself: going through
             -- StopAutoRecruit would switch the guild's recruitment off (enabled = false, a

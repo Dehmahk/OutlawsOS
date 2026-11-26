@@ -499,8 +499,8 @@ PAGES.profile = function(F)
     F:Row(picker, { h = 24, gap = 10 })
     F:Note(L["Roles you're willing to play. Your guild's Raiders list picks this up automatically, so no officer has to set it."], { gap = 6 })
 
-    F:Section(L["My Char"])
-    F:Action(L["Open My Char"], L["Your main and offspec. The guild sees them on your roster tooltip."], function()
+    F:Section(L["My Toon"])
+    F:Action(L["Open My Toon"], L["Your main and offspec. The guild sees them on your roster tooltip."], function()
         GuildOS.UI:OpenWindow("mychar")
     end)
 
@@ -1602,6 +1602,18 @@ PAGES.data = function(F, isOfficer)
         { L["Export Data"], function() if GuildOS.ShowExportChooser then GuildOS:ShowExportChooser() end end, w = 140 },
     })
     F:Note(L["Export/import all Guild OS data for this guild"], { gap = 6 })
+
+    -- The owner's preview of the guildless screen: the choice window as a guildless character sees it.
+    if GuildOS.GuildlessStart and GuildOS.GuildlessStart:IsPreviewer() then
+        F:Section(L["Guildless screen"])
+        F:Action(L["Preview the guildless screen"], L["Shows the choice screen as a guildless character sees it. Nothing is saved or sent."], function() GuildOS.GuildlessStart:Preview() end)
+    end
+
+    -- The owner's sync button: every client refreshes who is online and sends its member data (CommSystem).
+    if GuildOS.CommSystem and GuildOS.CommSystem:IsSyncOwner() then
+        F:Section(L["Sync"])
+        F:Action(L["Sync everyone now"], L["Every Guild OS client refreshes who is online and sends its member data. Only you see this button."], function() GuildOS.CommSystem:SyncEveryone() end)
+    end
 
     -- What /gos scan, errors, selftest, probe, probe chat and style preview do (#142).
     F:Section(L["Diagnostics"])

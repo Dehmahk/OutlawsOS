@@ -95,6 +95,8 @@ local function eventColor(e)
 end
 
 local editor   -- lazily-built singleton
+-- Set while the Alliance Events tab opens a new event, so its share box starts ticked.
+local allyEditorDefault = false
 
 -- The cycle buttons' rows. An event's value that is not one of them (one set from another client)
 -- joins the row as "Custom", so it reads true and survives a save.
@@ -678,7 +680,7 @@ local function buildEditor()
         repBtn:SetShown(not editing)
         laterCb:SetShown(f.inSeries)
         laterCb.checkbox:SetChecked(false)
-        shareCb.checkbox:SetChecked((event and event.shareAlliance) and true or false)
+        shareCb.checkbox:SetChecked(((event and event.shareAlliance) or (not event and allyEditorDefault)) and true or false)
 
         dateBox:SetText(string.format("%04d-%02d-%02d", y, m, d))
         refreshRep()
@@ -705,6 +707,16 @@ end
 local function openEditor(dk, event, asCopy)
     if not editor then editor = buildEditor() end
     editor:Open(dk, event, asCopy)
+end
+
+-- The alliance Events tab's Create: this same calendar editor for a new event today, with the share box
+-- already ticked, so the event goes to the alliance.
+function GuildOS.OpenAllianceEventEditor()
+    local t = date("*t", GetServerTime())
+    allyEditorDefault = true
+    local ok, err = pcall(openEditor, t.year * 10000 + t.month * 100 + t.day, nil)
+    allyEditorDefault = false
+    if not ok then error(err, 0) end
 end
 
 
@@ -772,13 +784,24 @@ function GuildOS:CreateCalendarSub(panel)
         local cell = CreateFrame("Button", nil, f, "BackdropTemplate")
         cell:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = GuildOS.UI:Edge(cell) })
         cell.dayFS = cell:CreateFontString(nil, "OVERLAY")
-        GuildOS:ApplyFont(cell.dayFS, 11)
+        GuildOS:ApplyFont(cell.dayFS, 12)
         cell.dayFS:SetPoint("TOPLEFT", 4, -3)
         cell.evtFS = cell:CreateFontString(nil, "OVERLAY")
-        GuildOS:ApplyFont(cell.evtFS, 9)
+        GuildOS:ApplyFont(cell.evtFS, 10)
         cell.evtFS:SetPoint("BOTTOMLEFT", 3, 3)
         cell.evtFS:SetPoint("BOTTOMRIGHT", -3, 3)
         cell.evtFS:SetJustifyH("LEFT"); cell.evtFS:SetWordWrap(false)
+        cell.evt2FS = cell:CreateFontString(nil, "OVERLAY")
+        GuildOS:ApplyFont(cell.evt2FS, 10)
+        cell.evt2FS:SetPoint("BOTTOMLEFT", 3, 17)
+        cell.evt2FS:SetPoint("BOTTOMRIGHT", -3, 17)
+        cell.evt2FS:SetJustifyH("LEFT"); cell.evt2FS:SetWordWrap(false)
+        -- A bar down the left edge in the colour of the day's first event (polish: the grid reads at a glance).
+        cell.accent = cell:CreateTexture(nil, "OVERLAY")
+        cell.accent:SetWidth(3)
+        cell.accent:SetPoint("TOPLEFT", 0, 0)
+        cell.accent:SetPoint("BOTTOMLEFT", 0, 0)
+        cell.accent:Hide()
         cell:SetScript("OnClick", function(self2)
             if self2.dkey then f.selectedKey = self2.dkey; f.Render() end
         end)
@@ -804,6 +827,9 @@ function GuildOS:CreateCalendarSub(panel)
     holder:SetPoint("TOPLEFT", detailLabel, "BOTTOMLEFT", 0, -12)
     holder:SetPoint("BOTTOMRIGHT", 0, 0)
     f.holder = holder
+    local holderBg = holder:CreateTexture(nil, "BACKGROUND")
+    holderBg:SetAllPoints()
+    holderBg:SetColorTexture(C.well.r, C.well.g, C.well.b, 0.35)
     local scrollFrame, scrollChild = UI:CreateScrollFrame(holder, "GuildOSCalendarScroll")
     scrollFrame:SetAllPoints()   -- fill the holder; without this the scroll viewport is 0x0 and clips all content
     -- The child keeps the list's width, less the bar's gutter; the rows hang from both its top corners.
@@ -816,7 +842,18 @@ function GuildOS:CreateCalendarSub(panel)
     function f.Render()
         local W = f:GetWidth()
         if not W or W < 120 then W = 1000 end
-        local cellW = math.floor((W - GRID_X - GAP) / COLS)
+        -- Wide enough, the day list sits beside the grid in a column of its own, and the grid takes the
+        -- panel's height; narrow, the list goes under the grid as before.
+        local H = f:GetHeight() or 0
+        local side = W >= 780
+        local gridW = side and math.floor(W * 0.6) or W
+        local rightW = W - gridW - GAP * 2
+        local cellW = math.floor((gridW - GRID_X - GAP) / COLS)
+        local cellH = CELL_H
+        if side and H > 300 then
+            cellH = math.max(CELL_H, math.min(64, math.floor((H + GRID_Y - GAP) / ROWS)))
+        end
+        f.detailW = side and rightW or W
 
         monthLabel:SetText(GuildOS:LocalDate(L["%b %Y"], noon(f.viewYear, f.viewMonth, 1)))
 
@@ -844,30 +881,49 @@ function GuildOS:CreateCalendarSub(panel)
             local row = math.floor((idx - 1) / COLS)
             local cell = f.cells[idx]
             cell:ClearAllPoints()
-            cell:SetPoint("TOPLEFT", GRID_X + col * cellW, GRID_Y - row * CELL_H)
-            cell:SetSize(cellW - 2, CELL_H - 2)
+            cell:SetPoint("TOPLEFT", GRID_X + col * cellW, GRID_Y - row * cellH)
+            cell:SetSize(cellW - 2, cellH - 2)
 
             local dayNum = idx - lead
             -- Flat cells with a 1px line; the selected day and today take a 1px gold border and no
             -- gold fill, the selected one on the selected-row surface (#371).
             if dayNum < 1 or dayNum > dim then
-                cell.dayFS:SetText(""); cell.evtFS:SetText(""); cell.dkey = nil
+                cell.dayFS:SetText(""); cell.evtFS:SetText(""); cell.evt2FS:SetText(""); cell.dkey = nil; cell.accent:Hide()
                 cell:SetBackdropColor(C.well.r, C.well.g, C.well.b, 0)
                 cell:SetBackdropBorderColor(C.line.r, C.line.g, C.line.b, 0.4)
             else
                 local k = dayKey(f.viewYear, f.viewMonth, dayNum)
                 cell.dkey = k
-                cell.dayFS:SetText(dayNum); cell.dayFS:SetTextColor(C.text.r, C.text.g, C.text.b)
+                cell.dayFS:SetText(dayNum)
+                local dc = (k == todayKey) and C.gold or C.text
+                cell.dayFS:SetTextColor(dc.r, dc.g, dc.b)
                 local evs = byDay[k]
                 if evs then
                     table.sort(evs, function(a, b) return a.when < b.when end)
-                    local line = date("%H:%M ", evs[1].when) .. (evs[1].title or "")
-                    if #evs > 1 then line = "+" .. #evs .. " " .. line end
-                    cell.evtFS:SetText(line)
+                    local function line(e) return date("%H:%M ", e.when) .. (e.title or "") end
                     local kc = eventColor(evs[1])
-                    cell.evtFS:SetTextColor(kc.r, kc.g, kc.b)
+                    if #evs == 1 then
+                        cell.evt2FS:SetText("")
+                        cell.evtFS:SetText(line(evs[1]))
+                        cell.evtFS:SetTextColor(kc.r, kc.g, kc.b)
+                    else
+                        -- Two lines, the first on top; a third event is counted, not listed.
+                        cell.evt2FS:SetText(line(evs[1]))
+                        cell.evt2FS:SetTextColor(kc.r, kc.g, kc.b)
+                        if #evs > 2 then
+                            cell.evtFS:SetText("+" .. (#evs - 1) .. " more")
+                            cell.evtFS:SetTextColor(C.textSoft.r, C.textSoft.g, C.textSoft.b)
+                        else
+                            local k2 = eventColor(evs[2])
+                            cell.evtFS:SetText(line(evs[2]))
+                            cell.evtFS:SetTextColor(k2.r, k2.g, k2.b)
+                        end
+                    end
+                    cell.accent:SetColorTexture(kc.r, kc.g, kc.b, 1)
+                    cell.accent:Show()
                 else
-                    cell.evtFS:SetText("")
+                    cell.evt2FS:SetText(""); cell.evtFS:SetText("")
+                    cell.accent:Hide()
                 end
                 local fill = (k == f.selectedKey) and C.popup or C.well
                 local edge = (k == f.selectedKey or k == todayKey) and C.gold or C.line
@@ -876,6 +932,15 @@ function GuildOS:CreateCalendarSub(panel)
             end
         end
 
+        -- The day list: beside the grid as a panel, or under the grid as a quiet well.
+        detailLabel:ClearAllPoints()
+        if side then
+            detailLabel:SetPoint("TOPLEFT", GRID_X + gridW + GAP * 2, NAV_Y)
+            holderBg:SetColorTexture(C.popup.r, C.popup.g, C.popup.b, 0.9)
+        else
+            detailLabel:SetPoint("TOPLEFT", GRID_X, GRID_Y - ROWS * cellH - 20)
+            holderBg:SetColorTexture(C.well.r, C.well.g, C.well.b, 0.35)
+        end
         f.RenderDetail(byDay)
     end
 
@@ -939,10 +1004,23 @@ function GuildOS:CreateCalendarSub(panel)
             local shareMark = e.shareAlliance and "  [A]" or ""
             local inSeries = type(e.series) == "table"
             local repMark = inSeries and ("  " .. tint(L["(repeats)"], soft)) or ""
-            local head = UI:CreateText(child, date("%H:%M ", e.when) .. tag .. (e.title or "") .. "  "
+            if yy > 0 then
+                -- A rule in the event's colour between two events, so each reads as its own block.
+                local ec = eventColor(e)
+                local rule = child:CreateTexture(nil, "ARTWORK")
+                rule:SetColorTexture(ec.r, ec.g, ec.b, 0.45)
+                rule:SetHeight(1)
+                rule:SetPoint("TOPLEFT", 0, -(yy + 2))
+                rule:SetPoint("TOPRIGHT", 0, -(yy + 2))
+                yy = yy + 10
+            end
+            local head = UI:CreateText(child, tint(date("%H:%M ", e.when), C.gold) .. tag .. (e.title or "") .. "  "
                 .. tint("(" .. (e.size or DEFAULT_SIZE) .. ")", soft) .. shareMark .. repMark,
                 12, C.text.r, C.text.g, C.text.b)
             head:SetPoint("TOPLEFT", 0, -yy)
+            -- Room for the action buttons at the right: a long title wraps before it reaches them.
+            head:SetWidth(math.max(160, (f.detailW or 600) - 270))
+            head:SetWordWrap(true)
             if CAL():MayManage(e) then
                 local ev = e
                 local delBtn = UI:CreateButton(child, L["Delete"], 58, 18)
@@ -961,7 +1039,7 @@ function GuildOS:CreateCalendarSub(panel)
                     endBtn:SetScript("OnClick", function() confirmEndSeries(ev) end)
                 end
             end
-            yy = yy + 20
+            yy = yy + math.max(20, (head:GetStringHeight() or 14) + 6)
 
             local compFS = UI:CreateText(child, string.format(L["Tanks %d, Heals %d, DPS %d  (%d going, %d tentative)"],
                 comp.roles.TANK, comp.roles.HEALER, comp.roles.DPS, comp.yes, comp.tentative),
@@ -1184,6 +1262,13 @@ function GuildOS:CreateCalendarSub(panel)
         f.viewYear, f.viewMonth, f.selectedKey = d.year, d.month, dayKey(d.year, d.month, d.day)
         f.Render()
     end
+
+    -- The grid and the day list re-lay out when the window changes size.
+    f:SetScript("OnSizeChanged", function(_, w, h)
+        if f._sizeW and math.abs(w - f._sizeW) < 4 and math.abs(h - f._sizeH) < 4 then return end
+        f._sizeW, f._sizeH = w, h
+        if f:IsVisible() and f.Render then f.Render() end
+    end)
 
     -- Live-refresh while visible as synced events/RSVPs arrive.
     if GuildOS.Calendar then

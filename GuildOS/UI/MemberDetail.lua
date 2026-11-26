@@ -1085,14 +1085,16 @@ function PopulateDetail(frame, data)
             if altName == "" then return end
             local realm = data.realm or GetRealmName()
             local altKey = GuildOS:GetPlayerKey(altName, realm)
-            -- playerKey is treated as the main; altKey as the alt.
+            -- The alt joins the group's main. The viewed character may itself be an alt, and an
+            -- alt cannot take alts (LinkAlt refuses), so link to its main instead.
             -- Officers apply directly; members route through the self-claim
             -- (applied locally + broadcast for an officer to replay).
+            local mainKey = (GuildOS.db and GuildOS.db.altLinks or {})[playerKey] or playerKey
             local applied
             if GuildOS:IsOfficer() then
-                applied = GuildOS:LinkAlt(altKey, playerKey)
+                applied = GuildOS:LinkAlt(altKey, mainKey)
             else
-                GuildOS.AltAutoDetect:LinkOwnAlts(playerKey, { altKey })
+                GuildOS.AltAutoDetect:LinkOwnAlts(mainKey, { altKey })
                 applied = true
             end
             if applied then

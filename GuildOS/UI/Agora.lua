@@ -431,6 +431,17 @@ function GuildOS:CreateNowPanel(panel, win)
 
     local raid, tabW, width, height = nil, 0, 0, 0
 
+    -- OutlawOS update (EKO): above the next raid while a guildmate checks in with a newer version.
+    local updVersion, updNotes
+    local updTitle = UI:CreateSectionTitle(column, "OutlawOS update")
+    local updText = newText(column, nil, "memberName", C.text)
+    local updBtn = UI:SetButtonVariant(UI:CreateButton(column, "View changelog", 40, 26), "ghost")
+    updBtn:SetWidth(math.ceil(updBtn.label:GetStringWidth() or 0) + 8)
+    updBtn:SetScript("OnClick", function()
+        if GuildOS.EKO then GuildOS.EKO:ShowGazettePopup(updNotes, "OutlawOS " .. tostring(updVersion) .. " changelog") end
+    end)
+    updTitle:Hide(); updText:Hide(); updBtn:Hide()
+
     -- Next raid: its name, when and who is going, the countdown, the way to the calendar.
     local raidTitle = UI:CreateSectionTitle(column, L["Next raid"], true)
     raidTitle:SetPoint("TOPLEFT", 0, 0)
@@ -482,7 +493,21 @@ function GuildOS:CreateNowPanel(panel, win)
         local colW = side and math.floor((width - 2 * g) / 3) or width
         column:SetWidth(colW)
 
-        local y = lineH(raidTitle, 14) + LINE_GAP
+        local y = 0
+        local showUpd = updVersion ~= nil
+        updTitle:SetShown(showUpd); updText:SetShown(showUpd); updBtn:SetShown(showUpd)
+        if showUpd then
+            place(updTitle, y)
+            y = y + lineH(updTitle, 14) + TITLE_GAP
+            local mine = GuildOS.EKO and GuildOS.EKO.PATCH_VERSION or "?"
+            updText:SetText(string.format("OutlawOS %s is out. You have %s.", tostring(updVersion), tostring(mine)))
+            place(updText, y, true)
+            y = y + lineH(updText, 12) + LINE_GAP
+            place(updBtn, y)
+            y = y + updBtn:GetHeight() + SECTION_GAP + RULE_GAP
+        end
+        place(raidTitle, y)
+        y = y + lineH(raidTitle, 14) + LINE_GAP
         raidName:SetShown(raid ~= nil)
         if raid then
             local comp = GuildOS.Calendar:GetComposition(raid)
@@ -618,6 +643,9 @@ function GuildOS:CreateNowPanel(panel, win)
         local t = GuildOS.Perf:Start()
         GuildOS:SafeCall(function()
             raid = Agora:NextRaid()
+            local nv, nn = nil, nil
+            if GuildOS.EKO and GuildOS.EKO.NewerRelease then nv, nn = GuildOS.EKO:NewerRelease() end
+            updVersion, updNotes = nv, nn
             loading = Agora:RosterLoading()
             needs = loading and {} or Agora:NeedsMe()
             feed = Agora:Activity(MAX_FEED)

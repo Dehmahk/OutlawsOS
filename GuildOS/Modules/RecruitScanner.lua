@@ -648,6 +648,60 @@ function RecruitScanner:BuildInto(container)
         return copy
     end
 
+    -- Row widgets are pooled: built the first time a row is needed, then reused by every
+    -- refresh. A WoW frame can't be freed, so building new ones on each refresh piled up
+    -- regions under the scroll child until child:GetRegions() overflowed the Lua stack.
+    local resultRows, inboxRows = {}, {}
+    local statics = {}
+    local function staticText(key, text, size, color)
+        if not statics[key] then
+            statics[key] = UI:CreateText(f.child, text, size, color.r, color.g, color.b)
+        end
+        return statics[key]
+    end
+    local function setRowShown(row, shown)
+        for _, w in ipairs(row.widgets) do
+            if shown then w:Show() else w:Hide() end
+        end
+    end
+    local function resultRow(i)
+        local row = resultRows[i]
+        if row then return row end
+        local child = f.child
+        row = {}
+        row.sel = UI:CreateCheckbox(child, "", 16)
+        row.nameFS = UI:CreateText(child, "", 11, C.text.r, C.text.g, C.text.b)
+        row.nameFS:SetWidth(200)
+        row.nameFS:SetJustifyH("LEFT")
+        row.lvlFS = UI:CreateText(child, "", 11, C.textDim.r, C.textDim.g, C.textDim.b)
+        row.lvlFS:SetWidth(40)
+        row.classFS = UI:CreateText(child, "", 11, C.textDim.r, C.textDim.g, C.textDim.b)
+        row.classFS:SetWidth(110)
+        row.classFS:SetJustifyH("LEFT")
+        row.zoneFS = UI:CreateText(child, "", 10, C.silver.r, C.silver.g, C.silver.b)
+        row.zoneFS:SetWidth(300)
+        row.zoneFS:SetJustifyH("LEFT")
+        row.widgets = { row.sel, row.nameFS, row.lvlFS, row.classFS, row.zoneFS }
+        resultRows[i] = row
+        return row
+    end
+    local function inboxRow(i)
+        local row = inboxRows[i]
+        if row then return row end
+        local child = f.child
+        row = {}
+        row.nameFS = UI:CreateText(child, "", 11, C.text.r, C.text.g, C.text.b)
+        row.nameFS:SetWidth(88)
+        row.nameFS:SetJustifyH("LEFT")
+        row.msgFS = UI:CreateText(child, "", 10, C.text.r, C.text.g, C.text.b)
+        row.msgFS:SetJustifyH("LEFT")
+        row.msgFS:SetWordWrap(false)
+        row.tsFS = UI:CreateText(child, "", 9, C.silver.r, C.silver.g, C.silver.b)
+        row.widgets = { row.nameFS, row.msgFS, row.tsFS }
+        inboxRows[i] = row
+        return row
+    end
+
     refresh = function()
         if not f:IsShown() or not f.isOfficer then return end
 
@@ -668,6 +722,11 @@ function RecruitScanner:BuildInto(container)
                 .. string.format(L["%d hidden by filters"], hidden))
         else
             f.foundText:SetText(string.format(L["%d found"], #results))
+        end
+        if #results == 0 then
+            f.foundText:SetTextColor(C.danger.r, C.danger.g, C.danger.b)
+        else
+            f.foundText:SetTextColor(C.textSoft.r, C.textSoft.g, C.textSoft.b)
         end
         -- EKO patch: the sort arrow sits on the column it sorts by.
         local ARROW = { [1] = " " .. L["asc"], [-1] = " " .. L["desc"] }
@@ -705,19 +764,22 @@ function RecruitScanner:BuildInto(container)
             f.selectAllCb.checkbox:Disable()
         end
 
-        -- Reset ALL row state before repaint (regions and any child frames).
+        -- Paint from the pooled widgets: hide what the last paint showed, then reuse them.
+        -- Nothing is built here, so refreshes never pile up regions under the scroll child.
         local child = f.child
-        for _, c in pairs({ child:GetChildren() }) do c:Hide() end
-        for _, r in pairs({ child:GetRegions() }) do r:Hide() end
+        for _, row in ipairs(resultRows) do setRowShown(row, false) end
+        for _, row in ipairs(inboxRows) do setRowShown(row, false) end
+        for _, fs in pairs(statics) do fs:Hide() end
 
         local y = 0
         if isResults then
-            for _, cand in ipairs(results) do
-                local sel = UI:CreateCheckbox(child, "", 16)
-                sel:SetPoint("TOPLEFT", 4, -y)
+            for i, cand in ipairs(results) do
+                local row = resultRow(i)
                 local who = RecruitScanner:Addr(cand)   -- realm and all on retail (#184)
-                sel.checkbox:SetChecked(self._selected[who] and true or false)
-                sel.checkbox.onChanged = function(_, checked)
+                row.sel:ClearAllPoints()
+                row.sel:SetPoint("TOPLEFT", 4, -y)
+                row.sel.checkbox:SetChecked(self._selected[who] and true or false)
+                row.sel.checkbox.onChanged = function(_, checked)
                     if checked then self._selected[who] = true
                     else self._selected[who] = nil end
                     GuildOS:SafeCall(refresh) -- live-updates "N selected" + Whisper count
@@ -730,67 +792,69 @@ function RecruitScanner:BuildInto(container)
                 -- (e.g. a row element vs. the whole scroll child) — explicit
                 -- -y on every column sidesteps that entirely. Offsets mirror
                 -- the column header row above (HDR + this offset).
-                local nameFS = UI:CreateText(child, who or "?", 11, C.text.r, C.text.g, C.text.b)
-                nameFS:SetPoint("TOPLEFT", 30, -y)
-                nameFS:SetWidth(200)
-                nameFS:SetJustifyH("LEFT")
-
-                local lvlFS = UI:CreateText(child, tostring(cand.level or "?"), 11, C.textDim.r, C.textDim.g, C.textDim.b)
-                lvlFS:SetPoint("TOPLEFT", 240, -y)
-                lvlFS:SetWidth(40)
+                row.nameFS:ClearAllPoints()
+                row.nameFS:SetPoint("TOPLEFT", 30, -y)
+                row.nameFS:SetText(who or "?")
+                row.lvlFS:ClearAllPoints()
+                row.lvlFS:SetPoint("TOPLEFT", 240, -y)
+                row.lvlFS:SetText(tostring(cand.level or "?"))
 
                 local classLabel = LOCALIZED_CLASS_NAMES_MALE[cand.class] or cand.class or "?"
                 local cc = RAID_CLASS_COLORS[cand.class]
-                local classFS = UI:CreateText(child, classLabel, 11,
-                    cc and cc.r or C.textDim.r, cc and cc.g or C.textDim.g, cc and cc.b or C.textDim.b)
-                classFS:SetPoint("TOPLEFT", 290, -y)
-                classFS:SetWidth(110)
-                classFS:SetJustifyH("LEFT")
+                row.classFS:ClearAllPoints()
+                row.classFS:SetPoint("TOPLEFT", 290, -y)
+                row.classFS:SetText(classLabel)
+                row.classFS:SetTextColor(cc and cc.r or C.textDim.r, cc and cc.g or C.textDim.g, cc and cc.b or C.textDim.b)
 
-                local zoneFS = UI:CreateText(child, cand.zone or "", 10, C.silver.r, C.silver.g, C.silver.b)
-                zoneFS:SetPoint("TOPLEFT", 410, -y)
-                zoneFS:SetWidth(300)
-                zoneFS:SetJustifyH("LEFT")
+                row.zoneFS:ClearAllPoints()
+                row.zoneFS:SetPoint("TOPLEFT", 410, -y)
+                row.zoneFS:SetText(cand.zone or "")
 
+                setRowShown(row, true)
                 y = y + ROW_HEIGHT
             end
             if #results == 0 then
-                local empty = UI:CreateText(child, L["No candidates."], 11, C.silver.r, C.silver.g, C.silver.b)
+                local empty = staticText("emptyResults", L["No candidates."], 11, C.silver)
+                empty:ClearAllPoints()
                 empty:SetPoint("TOPLEFT", 4, -4)
+                empty:Show()
                 y = 20
             end
         else -- inbox
             local inbox = RecruitScanner:GetInbox()
             -- EKO patch: say what this list is, how long it keeps replies, and what Clear does.
             local days = math.floor((RecruitScanner.INBOX_KEEP_SEC or 14 * 86400) / 86400)
-            local intro = UI:CreateText(child, string.format(L["Replies to your whispers, kept for %d days. Clear empties this list."], days),
-                10, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+            local intro = staticText("intro", "", 10, C.textSoft)
+            intro:SetText(string.format(L["Replies to your whispers, kept for %d days. Clear empties this list."], days))
+            intro:ClearAllPoints()
             intro:SetPoint("TOPLEFT", 4, -y)
             intro:SetPoint("TOPRIGHT", child, "TOPRIGHT", -4, -y)
             intro:SetJustifyH("LEFT")
+            intro:Show()
             y = y + math.max(14, intro:GetStringHeight() or 14) + 10
-            for _, entry in ipairs(inbox) do
+            for i, entry in ipairs(inbox) do
+                local row = inboxRow(i)
                 -- A name in the text colour: gold is the selection's (#371).
-                local nameFS = UI:CreateText(child, entry.name or "?", 11, C.text.r, C.text.g, C.text.b)
-                nameFS:SetPoint("TOPLEFT", 4, -y)
-                nameFS:SetWidth(88)
-                nameFS:SetJustifyH("LEFT")
+                row.nameFS:ClearAllPoints()
+                row.nameFS:SetPoint("TOPLEFT", 4, -y)
+                row.nameFS:SetText(entry.name or "?")
+                row.msgFS:ClearAllPoints()
+                row.msgFS:SetPoint("TOPLEFT", 98, -y)
+                row.msgFS:SetPoint("TOPRIGHT", child, "TOPRIGHT", -54, -y)
+                row.msgFS:SetText(entry.msg or "")
+                row.tsFS:ClearAllPoints()
+                row.tsFS:SetPoint("TOPRIGHT", child, "TOPRIGHT", -4, -y)
+                row.tsFS:SetText(date("%a %H:%M", entry.ts or 0))
 
-                local msgFS = UI:CreateText(child, entry.msg or "", 10, C.text.r, C.text.g, C.text.b)
-                msgFS:SetPoint("TOPLEFT", 98, -y)
-                msgFS:SetPoint("TOPRIGHT", child, "TOPRIGHT", -54, -y)
-                msgFS:SetJustifyH("LEFT")
-                msgFS:SetWordWrap(false)
-
-                local tsFS = UI:CreateText(child, date("%a %H:%M", entry.ts or 0), 9, C.silver.r, C.silver.g, C.silver.b)
-                tsFS:SetPoint("TOPRIGHT", child, "TOPRIGHT", -4, -y)
-
-                local rowH = math.max(nameFS:GetStringHeight() or 14, msgFS:GetStringHeight() or 14)
+                setRowShown(row, true)
+                local rowH = math.max(row.nameFS:GetStringHeight() or 14, row.msgFS:GetStringHeight() or 14)
                 y = y + rowH + 6
             end
             if #inbox == 0 then
-                local empty = UI:CreateText(child, L["No replies yet."], 11, C.silver.r, C.silver.g, C.silver.b)
+                local empty = staticText("emptyInbox", L["No replies yet."], 11, C.silver)
+                empty:ClearAllPoints()
                 empty:SetPoint("TOPLEFT", 4, -y)
+                empty:Show()
                 y = y + 20
             end
         end

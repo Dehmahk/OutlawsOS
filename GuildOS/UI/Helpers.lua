@@ -169,6 +169,30 @@ function Helpers:StylePopup(frame, opts)
     return frame
 end
 
+-- Create a floating popup on the shared dialog chrome: an opaque surface with a
+-- border, StylePopup's elevation, the DIALOG strata and a left-drag to move. The
+-- Wishlist Council and the announcement popup both build on it, so they look alike.
+function Helpers:CreateDialogFrame(name, width, height)
+    local f = CreateFrame("Frame", name, UIParent, "BackdropTemplate")
+    f:SetSize(width, height)
+    f:SetPoint("CENTER")
+    f:SetBackdrop({
+        bgFile   = WHITE,
+        edgeFile = WHITE,
+        edgeSize = self:Edge(f),
+    })
+    f:SetBackdropColor(0.058, 0.058, 0.075, 0.98)
+    f:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, C.border.a)
+    self:StylePopup(f)
+    f:SetFrameStrata("DIALOG")
+    f:SetMovable(true)
+    f:EnableMouse(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+    return f
+end
+
 -- Create a gold rule: 2px by default (under an active tab); pass 1 for a
 -- metric chip or an active sub-tab.
 function Helpers:CreateAccentLine(parent, thickness)

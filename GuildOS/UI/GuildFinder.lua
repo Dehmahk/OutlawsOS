@@ -113,6 +113,47 @@ local function OpenMenu(button, spec, pick)
     return true
 end
 
+-- Who a guild is looking for, as the card and the form say it: your own class marked, "Any class" when nothing is named.
+local function lookingFor(ad)
+    local me = select(2, UnitClass("player"))
+    local parts = {}
+    for _, role in ipairs(ad.r or {}) do parts[#parts + 1] = ROLE_NAME[role] or role end
+    for _, class in ipairs(ad.c or {}) do
+        local name = (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[class]) or class
+        if GuildOS.ClassColors and GuildOS.ClassColors[class] then
+            local r, g, b = GuildOS:GetClassColor(class)
+            name = string.format("|cff%02x%02x%02x%s|r", r * 255, g * 255, b * 255, name)
+        end
+        if class == me then name = name .. " " .. L["(you!)"] end
+        parts[#parts + 1] = name
+    end
+    if #parts == 0 then return L["Any class"] end
+    return table.concat(parts, ", ")
+end
+
+-- The rows a guild's card and its join form show about the guild, in order. A row with nothing to say is left out,
+-- never shown empty. Each row is { label, value }.
+local function fitLines(ad)
+    local lines = {}
+    local nights = GF():Schedule(ad)
+    if nights then lines[#lines + 1] = { L["Nights"], nights } end
+    -- A guild that did not say its pace reads "Not stated", as in the mock's third card.
+    local pace = { ad.pc and PACE_NAME[ad.pc] or L["Not stated"] }
+    for _, tok in ipairs(ad.fo or {}) do pace[#pace + 1] = FOCUS_NAME[tok] end
+    lines[#lines + 1] = { L["Pace"], table.concat(pace, " \194\183 ") }
+    if ad.l then
+        local names = {}
+        for _, code in ipairs(ad.l) do names[#names + 1] = LANG_NAME[code] end
+        lines[#lines + 1] = { L["Language"], table.concat(names, ", ") }
+    end
+    lines[#lines + 1] = { L["Looking for"], lookingFor(ad) }
+    local loot = {}
+    if ad.lo then loot[#loot + 1] = LOOT_NAME[ad.lo] end
+    if ad.t then loot[#loot + 1] = TRIAL_NAME[ad.t] end
+    if #loot > 0 then lines[#lines + 1] = { L["Loot"], table.concat(loot, " \194\183 ") } end
+    return lines
+end
+
 local function BuildFinder()
     local f = CreateFrame("Frame", "GuildOSGuildFinder", UIParent, "BackdropTemplate")
     f:SetSize(WIDTH, HEIGHT)
@@ -324,23 +365,6 @@ local function BuildFinder()
         row.value:SetTextColor(r or C.text.r, g or C.text.g, b or C.text.b)
     end
 
-    local function LookingFor(ad)
-        local me = select(2, UnitClass("player"))
-        local parts = {}
-        for _, role in ipairs(ad.r or {}) do parts[#parts + 1] = ROLE_NAME[role] or role end
-        for _, class in ipairs(ad.c or {}) do
-            local name = (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[class]) or class
-            if GuildOS.ClassColors and GuildOS.ClassColors[class] then
-                local r, g, b = GuildOS:GetClassColor(class)
-                name = string.format("|cff%02x%02x%02x%s|r", r * 255, g * 255, b * 255, name)
-            end
-            if class == me then name = name .. " " .. L["(you!)"] end
-            parts[#parts + 1] = name
-        end
-        if #parts == 0 then return L["Any class"] end
-        return table.concat(parts, ", ")
-    end
-
     local function DrawCard(ad)
         local tint = FACTION_TINT[ad.f] or { 0.25, 0.25, 0.28 }
         shield:SetBackdropColor(tint[1], tint[2], tint[3], 1)
@@ -359,24 +383,7 @@ local function BuildFinder()
         end
         pitch:SetText(ad.p and ("\226\128\156" .. ad.p .. "\226\128\157") or "")
 
-        -- A row with nothing to say is left out, never shown empty.
-        local lines = {}
-        local nights = GF():Schedule(ad)
-        if nights then lines[#lines + 1] = { L["Nights"], nights } end
-        -- A guild that did not say its pace reads "Not stated", as in the mock's third card.
-        local pace = { ad.pc and PACE_NAME[ad.pc] or L["Not stated"] }
-        for _, tok in ipairs(ad.fo or {}) do pace[#pace + 1] = FOCUS_NAME[tok] end
-        lines[#lines + 1] = { L["Pace"], table.concat(pace, " \194\183 ") }
-        if ad.l then
-            local names = {}
-            for _, code in ipairs(ad.l) do names[#names + 1] = LANG_NAME[code] end
-            lines[#lines + 1] = { L["Language"], table.concat(names, ", ") }
-        end
-        lines[#lines + 1] = { L["Looking for"], LookingFor(ad) }
-        local loot = {}
-        if ad.lo then loot[#loot + 1] = LOOT_NAME[ad.lo] end
-        if ad.t then loot[#loot + 1] = TRIAL_NAME[ad.t] end
-        if #loot > 0 then lines[#lines + 1] = { L["Loot"], table.concat(loot, " \194\183 ") } end
+        local lines = fitLines(ad)
 
         -- The pitch can take two lines: the rows start under whatever it used.
         local top = -78 - math.max(14, pitch:GetStringHeight() or 14) - 12
@@ -462,10 +469,10 @@ local function BuildFinder()
 end
 
 ----------------------------------------------------------------------
--- The request (the mock's tab 2): the card becomes a form with an optional note, and once sent it says
--- where the request got to. It never says "delivered" without an answer (Modules/JoinRequests.lua).
-----------------------------------------------------------------------
-local FORM_W, FORM_H = 420, 270
+-- The request (the mock's tab 2): the card becomes a form. It shows the guild's fit, asks three short questions,
+-- shows what the officers will see, and only then sends. Once sent it says where the request got to, and lets the
+-- player ask again or take it back. It never says "delivered" without an answer (Modules/JoinRequests.lua).
+local FORM_W, FORM_H = 420, 448
 local TONE = { ok = { 0.49, 0.85, 0.56 }, wait = { 0.72, 0.64, 0.48 }, warn = { 0.91, 0.60, 0.35 } }
 local REFUSAL = {
     ["too-many"] = L["You already have 3 open requests."],
@@ -475,12 +482,13 @@ local REFUSAL = {
 }
 -- How long the game's invite window can still be on the screen.
 local INVITE_WINDOW = 120
+local FIT_TOP, FIT_PITCH, FIT_ROWS = -126, 16, 5
 
 local function JR() return GuildOS.JoinRequests end
 
 -- The tone, title and line under it for a request that was sent.
 local function StateOf(e)
-    local state, by, at = JR():Status(e.id)
+    local state, by, at, reason, again = JR():Status(e.id)
     by = (by and by ~= "") and by or nil
     if state == "officer" then
         return "ok", by and string.format(L["Delivered to %s"], by) or L["Delivered to an officer"],
@@ -494,10 +502,14 @@ local function StateOf(e)
         return "ok", string.format(L["Invite from %s"], e.guild),
             fresh and L["Accept in the game window that just opened."] or L["The invite window has closed. Ask an officer to invite you again."]
     elseif state == "declined" then
+        -- A reason the guild gave stands in for the generic line; a reapply date and the other guilds follow it.
         local others = math.max(0, #GF():All() - 1)
-        return "wait", L["The guild thanked you, but is not opening spots right now"],
-            others == 1 and L["There is 1 other guild to look at."]
-            or others > 1 and string.format(L["There are %d other guilds to look at."], others) or ""
+        local key = reason and JR().REASONS[reason]
+        local lines = {}
+        if again then lines[#lines + 1] = string.format(L["You can ask again from %s."], date("%d %b %Y", again)) end
+        if others == 1 then lines[#lines + 1] = L["There is 1 other guild to look at."]
+        elseif others > 1 then lines[#lines + 1] = string.format(L["There are %d other guilds to look at."], others) end
+        return "wait", key and L[key] or L["The guild thanked you, but is not opening spots right now"], table.concat(lines, " ")
     end
     -- Nobody answered. Where this session cannot whisper, "as soon as someone shows up" cannot happen
     -- here: the queue is the companion's. A card with no slug has no road to the companion at all (the
@@ -510,6 +522,43 @@ local function StateOf(e)
     return "warn", L["Saved here"], e.slug
         and L["Nobody from the guild is online nearby. We deliver as soon as someone shows up. With the companion, the request goes to Discord when you leave the game."]
         or L["Nobody from the guild is online nearby. We deliver as soon as someone shows up."]
+end
+
+-- How long the request has waited, and when it expires: the first line of a request that is open.
+local function waitingText(e)
+    local n = GetServerTime()
+    local days = math.floor((n - (e.at or 0)) / 86400)
+    local when = days == 1 and L["1 day"] or days >= 2 and string.format(L["%d days"], days) or L["under a day"]
+    local line = string.format(L["Waiting for %s."], when)
+    local left = (e.at or 0) + JR().EXPIRE_SECONDS - n
+    if left > 0 then
+        local ahead = math.floor(left / 86400)
+        if ahead < 1 then line = line .. " " .. L["Expires today."]
+        elseif ahead == 1 then line = line .. " " .. L["Expires in 1 day."]
+        else line = line .. " " .. string.format(L["Expires in %d days."], ahead) end
+    end
+    return line
+end
+
+-- The line under "Ask again": how long until it may go, or that it may go now.
+local function askText(wait)
+    if wait > 0 then
+        return string.format(L["You can ask again in %d min. The guild is asked on its own every five minutes."], math.ceil(wait / 60))
+    end
+    return L["Ask again sends it now. The guild is also asked on its own every five minutes."]
+end
+
+-- What the officers will see of the request: the player as the form says it, and the answers as they will be sent.
+local function reviewText(me, packed)
+    local cls = me.class and ((LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[me.class]) or me.class) or "-"
+    return table.concat({
+        L["Officers will see:"],
+        string.format(L["%s: %s"], L["Name"], me.character or "-"),
+        string.format(L["%s: %s"], L["Class"], cls),
+        string.format(L["%s: %s"], L["Level"], me.level and tostring(me.level) or "-"),
+        string.format(L["%s: %s"], L["Role"], me.role and ROLE_NAME[me.role] or "-"),
+        string.format(L["%s: %s"], L["Answers"], packed or L["none"]),
+    }, "\n")
 end
 
 local function BuildJoinForm()
@@ -544,32 +593,62 @@ local function BuildJoinForm()
     local gworld = UI:CreateText(f, "", 10, C.label.r, C.label.g, C.label.b)
     gworld:SetPoint("TOPLEFT", gname, "BOTTOMLEFT", 0, -4)
 
-    -- The form: who it goes to, the note, the buttons.
+    -- Editing: who it goes to, the guild's fit, the three questions and the count of open requests.
     local who = UI:CreateText(f, "", 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
     who:SetPoint("TOPLEFT", 14, -94)
     who:SetWidth(FORM_W - 28); who:SetJustifyH("LEFT"); who:SetWordWrap(true)
-    local noteLabel = UI:CreateHeaderText(f, L["Message (optional)"], 10)
-    noteLabel:SetPoint("TOPLEFT", 14, -134)
-    local box = CreateFrame("EditBox", nil, f, "BackdropTemplate")
-    box:SetSize(FORM_W - 28, 24)
-    box:SetPoint("TOPLEFT", 14, -152)
-    box:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = GuildOS.UI:Edge(box) })
-    box:SetBackdropColor(0.050, 0.050, 0.066, 1.0)
-    box:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.4)
-    GuildOS:ApplyFont(box, 11)
-    box:SetTextInsets(6, 6, 0, 0)
-    box:SetAutoFocus(false)
-    box:SetMaxLetters(120)
-    box:SetScript("OnEscapePressed", function(s) s:ClearFocus() end)
-    box:SetScript("OnEnterPressed", function(s) s:ClearFocus() end)
-    local problem = UI:CreateText(f, "", 10, C.danger.r, C.danger.g, C.danger.b)
-    problem:SetPoint("TOPLEFT", 14, -182)
-    problem:SetWidth(FORM_W - 28); problem:SetJustifyH("LEFT")
-    local send = UI:CreateButton(f, L["Send request"], 130, 26)
-    send:SetPoint("BOTTOMLEFT", 14, 14)
-    UI:SetButtonVariant(send, "primary")
 
-    -- What happened to it.
+    local fit = {}
+    for i = 1, FIT_ROWS do
+        local label = UI:CreateText(f, "", 10, C.label.r, C.label.g, C.label.b)
+        label:SetPoint("TOPLEFT", 14, FIT_TOP - (i - 1) * FIT_PITCH)
+        label:SetWidth(84); label:SetJustifyH("LEFT")
+        local value = UI:CreateText(f, "", 11, C.text.r, C.text.g, C.text.b)
+        value:SetPoint("LEFT", label, "RIGHT", 4, 0)
+        value:SetWidth(FORM_W - 110); value:SetJustifyH("LEFT")
+        fit[i] = { label = label, value = value }
+    end
+
+    local prompts = {}
+    local y = -216
+    for i, p in ipairs(JR().PROMPTS) do
+        local head = UI:CreateHeaderText(f, L[p.question], 10)
+        head:SetPoint("TOPLEFT", 14, y)
+        local counter = UI:CreateText(f, "", 10, C.label.r, C.label.g, C.label.b)
+        counter:SetPoint("TOPRIGHT", -14, y)
+        counter:SetText("0/" .. p.max)
+        local box = UI:CreateInput(f, FORM_W - 28, 22, { max = p.max, placeholder = L[p.example] })
+        box:SetPoint("TOPLEFT", 14, y - 16)
+        local entry = { key = p.key, head = head, counter = counter, box = box }
+        -- HookScript: the input keeps its own script for the placeholder.
+        box:HookScript("OnTextChanged", function(self)
+            local t = self:GetText() or ""
+            counter:SetText(string.format("%d/%d", strlenutf8 and strlenutf8(t) or #t, p.max))
+        end)
+        prompts[i] = entry
+        y = y - 46
+    end
+
+    local count = UI:CreateText(f, "", 10, C.label.r, C.label.g, C.label.b)
+    count:SetPoint("BOTTOMLEFT", 14, 46)
+
+    -- Reviewing: what the officers will see, in place of the questions.
+    local review = UI:CreateText(f, "", 11, C.text.r, C.text.g, C.text.b)
+    review:SetPoint("TOPLEFT", 14, -94)
+    review:SetWidth(FORM_W - 28); review:SetJustifyH("LEFT"); review:SetWordWrap(true)
+
+    -- A line for the player: an error (danger) or a note (soft). Above the buttons, in every state.
+    local problem = UI:CreateText(f, "", 10, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+    problem:SetPoint("BOTTOMLEFT", 14, 64)
+    problem:SetWidth(FORM_W - 28); problem:SetJustifyH("LEFT"); problem:SetWordWrap(true)
+    local function say(msg, bad)
+        problem:SetText(msg or "")
+        local c = bad and C.danger or C.textSoft
+        problem:SetTextColor(c.r, c.g, c.b)
+    end
+    f.ClearProblem = function() say("") end
+
+    -- Sent: what happened to it, and how long it has waited.
     local dot = f:CreateTexture(nil, "ARTWORK")
     dot:SetTexture("Interface\\Buttons\\WHITE8x8")
     dot:SetSize(10, 10)
@@ -580,10 +659,76 @@ local function BuildJoinForm()
     local stateText = UI:CreateText(f, "", 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
     stateText:SetPoint("TOPLEFT", stateTitle, "BOTTOMLEFT", 0, -6)
     stateText:SetWidth(FORM_W - 50); stateText:SetJustifyH("LEFT"); stateText:SetWordWrap(true)
+    local waitText = UI:CreateText(f, "", 10, C.label.r, C.label.g, C.label.b)
+    waitText:SetPoint("TOPLEFT", stateText, "BOTTOMLEFT", 0, -10)
+    waitText:SetWidth(FORM_W - 50); waitText:SetJustifyH("LEFT"); waitText:SetWordWrap(true)
 
+    -- The buttons: their labels and places follow the mode (Refresh).
+    local send = UI:CreateButton(f, L["Review"], 130, 26)
+    UI:SetButtonVariant(send, "primary")
     local back = UI:CreateButton(f, L["Back"], 90, 26)
-    back:SetPoint("LEFT", send, "RIGHT", 8, 0)
-    back:SetScript("OnClick", function() f:Hide() end)
+    local askAgain = UI:CreateButton(f, L["Ask again"], 110, 26)
+    local withdraw = UI:CreateButton(f, L["Withdraw request"], 130, 26)
+    UI:SetButtonVariant(withdraw, "ghost")
+
+    -- The answers as typed, in the order the questions are asked.
+    local function answers()
+        local a = {}
+        for _, entry in ipairs(prompts) do a[entry.key] = entry.box:GetText() or "" end
+        return a
+    end
+
+    send:SetScript("OnClick", function()
+        local ad = f.ad
+        if not ad then return end
+        if f.mode ~= "review" then
+            if JR():OpenMine() >= JR().MAX_OPEN then say(REFUSAL["too-many"], true); return end
+            f.packed = JR():PackNote(answers())
+            f.mode = "review"
+            say("")
+            f.Refresh()
+            return
+        end
+        if GuildOS.GuildlessStart and GuildOS.GuildlessStart.previewing then
+            say(L["Preview: nothing was sent."], true)
+            return
+        end
+        local e, why = JR():Send(ad, f.packed)
+        if e then
+            for _, entry in ipairs(prompts) do entry.box:SetText("") end
+            f.packed = nil
+            f.mode = "edit"
+            say("")
+        else
+            say(REFUSAL[why] or REFUSAL["no-ad"], true)
+        end
+        f.Refresh()
+    end)
+
+    back:SetScript("OnClick", function()
+        if f.mode == "review" then
+            f.mode = "edit"
+            say("")
+            f.Refresh()
+            return
+        end
+        f:Hide()
+    end)
+
+    askAgain:SetScript("OnClick", function()
+        local e = f.ad and JR():Latest(f.ad)
+        if not e then return end
+        local sent = JR():AskAgain(e.id)
+        if sent == 0 then say(L["Nothing can be sent from the game this session."], true)
+        elseif sent then say(L["Asked again just now."]) end
+        f.Refresh()
+    end)
+
+    withdraw:SetScript("OnClick", function()
+        local e = f.ad and JR():Latest(f.ad)
+        if e and JR():Withdraw(e.id) then say(L["Withdrawn. You can send a new request whenever you like."]) end
+        f.Refresh()
+    end)
 
     function f.Refresh()
         local ad = f.ad
@@ -595,16 +740,30 @@ local function BuildJoinForm()
         gworld:SetText(ad.w and worldName(ad.w) or "")
 
         local e = JR():Latest(ad)
-        local sent = e ~= nil and e.status ~= "expired"
-        who:SetShown(not sent); noteLabel:SetShown(not sent); box:SetShown(not sent)
-        problem:SetShown(not sent); send:SetShown(not sent)
-        dot:SetShown(sent); stateTitle:SetShown(sent); stateText:SetShown(sent)
-        if sent then
-            local tone, head, line = StateOf(e)
-            dot:SetVertexColor(TONE[tone][1], TONE[tone][2], TONE[tone][3], 1)
-            stateTitle:SetText(head)
-            stateText:SetText(line)
-        else
+        local open = e ~= nil and e.status == "open"
+        local closed = e ~= nil and (e.status == "invited" or e.status == "declined")
+        local sent = open or closed
+        local mode = sent and "sent" or (f.mode == "review" and "review" or "edit")
+        f.mode = mode
+        local editing, reviewing = mode == "edit", mode == "review"
+
+        who:SetShown(editing)
+        count:SetShown(editing)
+        for _, entry in ipairs(prompts) do
+            entry.head:SetShown(editing); entry.counter:SetShown(editing); entry.box:SetShown(editing)
+        end
+        review:SetShown(reviewing)
+        dot:SetShown(sent); stateTitle:SetShown(sent); stateText:SetShown(sent); waitText:SetShown(sent)
+        send:SetShown(not sent)
+        askAgain:SetShown(open); withdraw:SetShown(open)
+
+        local lines = editing and fitLines(ad) or {}
+        for i, row in ipairs(fit) do
+            local line = lines[i]
+            if line then row.label:SetText(line[1]); row.value:SetText(line[2]) end
+            row.label:SetShown(line ~= nil); row.value:SetShown(line ~= nil)
+        end
+        if editing then
             local me = JR():Me()
             local parts = {}
             if me.class then
@@ -616,17 +775,34 @@ local function BuildJoinForm()
             if me.role then parts[#parts + 1] = ROLE_NAME[me.role] end
             local detail = #parts > 0 and (", " .. table.concat(parts, ", ")) or ""
             who:SetText(string.format(L["Goes to the officers: %s"], me.character .. detail))
+            count:SetText(string.format(L["%d of %d open requests"], JR():OpenMine(), JR().MAX_OPEN))
+        end
+        if reviewing then review:SetText(reviewText(JR():Me(), f.packed)) end
+
+        if sent then
+            local tone, head, line = StateOf(e)
+            dot:SetVertexColor(TONE[tone][1], TONE[tone][2], TONE[tone][3], 1)
+            stateTitle:SetText(head)
+            stateText:SetText(line)
+            local wait = open and (JR():AskWait(e) or 0) or 0
+            askAgain:SetEnabled(open and wait <= 0)
+            waitText:SetText(open and (waitingText(e) .. "\n" .. askText(wait)) or "")
+        end
+
+        send.label:SetText(reviewing and L["Send request"] or L["Review"])
+        back.label:SetText(reviewing and L["Edit"] or L["Back"])
+        back:ClearAllPoints(); send:ClearAllPoints(); askAgain:ClearAllPoints(); withdraw:ClearAllPoints()
+        if open then
+            askAgain:SetPoint("BOTTOMLEFT", 14, 14)
+            withdraw:SetPoint("LEFT", askAgain, "RIGHT", 8, 0)
+            back:SetPoint("BOTTOMRIGHT", -14, 14)
+        elseif closed then
+            back:SetPoint("BOTTOMRIGHT", -14, 14)
+        else
+            send:SetPoint("BOTTOMLEFT", 14, 14)
+            back:SetPoint("LEFT", send, "RIGHT", 8, 0)
         end
     end
-
-    send:SetScript("OnClick", function()
-        local ad = f.ad
-        if not ad then return end
-        local e, why = JR():Send(ad, box:GetText())
-        problem:SetText(e and "" or (REFUSAL[why] or REFUSAL["no-ad"]))
-        if e then box:SetText("") end
-        f.Refresh()
-    end)
 
     JR():Listen(function()
         if f:IsShown() then f.Refresh() end
@@ -640,6 +816,9 @@ function GuildOS:ShowJoinForm(ad)
     local f = self.joinForm or BuildJoinForm()
     self.joinForm = f
     f.ad = ad
+    f.mode = "edit"
+    f.packed = nil
+    f.ClearProblem()
     f.Refresh()
     f:Show(); f:Raise()
 end

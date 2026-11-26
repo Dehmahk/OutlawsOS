@@ -41,6 +41,7 @@ SyncService.OFFICER_DOMAINS = {
     recruit  = true,   -- applicant tracker: stage, claim, notes and checklist of a join request (officers only)
     allyboard = true,  -- alliance bulletin posts this guild authored (ambassadors)
     allyhide  = true,  -- chat lines an ambassador pulled from the alliance feed
+    allypin   = true,  -- the alliance chat's pinned notice (ambassadors)
     guildcfg  = true,  -- the guild's officer threshold (issue #81), on retail its loot system (#185), its trials (#249)
     founding  = true,  -- WoW: Forever's founding and an officer's suggested date (issue #208)
     allylink  = true,  -- the alliance code an officer saved (issue #348); ask/have are member relays
@@ -59,6 +60,7 @@ SyncService.GUILD_ONLY_DOMAINS = {
     gbankreq       = true,   -- a member's request for an item; officers close it (#380)
     craftorder     = true,   -- a member's craft order and its crafter's answers (#389)
     recruitinfo    = true,   -- the recruit info text; the sender's rank is checked by RecruitInfo
+    matriarch      = true,   -- the Guild Master's login banner; the sender's rank is checked by EKO
 }
 
 -- Actions any guild member may perform inside an officer domain, over GUILD. Keyed by domain:
@@ -257,6 +259,24 @@ local function sayRankDrop(sender)
     GuildOS:Print(string.format("|cffFFD700%s|r made a calendar event this client did not take: their rank is above the event limit it holds (%d). An officer should log in to refresh it.", tostring(sender), GuildOS:EventMaxRank()))
 end
 
+
+-- A calendar write on an event shared to the alliance, from an ambassador of the sender's guild, or an
+-- answer to an alliance slot request from one. Only that much passes the guild gate for a member; the
+-- Calendar checks each write again when it arrives.
+function SyncService.AllianceEventFrom(env, sender)
+    local ally, cal = GuildOS.Alliance, GuildOS.Calendar
+    if not ally or not cal then return false end
+    if env.act == "allyRsvp" or env.act == "allyDecline" then
+        local pact, mine = ally:Get(), ally:MyGuildName()
+        return pact ~= nil and mine ~= nil and ally.IsAmbassador(pact, mine, sender)
+    end
+    local d = env.data
+    if type(d) ~= "table" then return false end
+    local existing = d.id and cal:GetEvents()[d.id] or nil
+    local incoming = type(d.event) == "table" and d.event or nil
+    return cal.AllianceWrite(existing, incoming, sender)
+end
+
 function SyncService:Validate(env, sender, channel)
     if type(env) ~= "table" then return false end
     if not env.v or not env.id or not env.dom or not env.act then return false end
@@ -267,7 +287,8 @@ function SyncService:Validate(env, sender, channel)
         local member = self.MEMBER_ACTIONS[env.dom]
         local ranked = self.RANKED_ACTIONS[env.dom]
         if not (member and member[env.act]) and not GuildOS:IsOfficerByName(sender)
-            and not (ranked and ranked[env.act] and GuildOS:MayCreateEventsByName(sender)) then
+            and not (ranked and ranked[env.act] and GuildOS:MayCreateEventsByName(sender))
+            and not (env.dom == "event" and SyncService.AllianceEventFrom(env, sender)) then
             if env.dom == "event" and ranked and ranked[env.act] then sayRankDrop(sender) end
             return false
         end

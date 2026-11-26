@@ -286,6 +286,11 @@ function LFGBoard:_BuildEntry(p, now)
     local role = self:_SanitizeRole(p and p.role)
     local roles = self:_SanitizeRoles(p and p.roles)
     if roles == "" then roles = LETTER_OF[role] or "" end
+    -- A level is a whole number from 1 up; a class is a short name, or none (#17).
+    local lvl = tonumber(p and p.lvl)
+    if lvl and (lvl ~= math.floor(lvl) or lvl < 1 or lvl > 99) then lvl = nil end
+    local cls = type(p and p.cls) == "string" and GuildOS:SanitizeUserText(p.cls, 20) or nil
+    if cls == "" then cls = nil end
     return {
         role = role,
         roles = roles,
@@ -293,6 +298,8 @@ function LFGBoard:_BuildEntry(p, now)
         note = GuildOS:SanitizeUserText(p and p.note, NOTE_MAX),
         ts = now - age,
         ttl = ttl,
+        lvl = lvl,
+        cls = cls,
     }, age
 end
 
@@ -358,6 +365,13 @@ end
 -- slash command never speaks in guild chat, where nobody who typed it agreed to be heard.
 -- `roles` and `acts` are the Groups tab's (issue #341): given roles decide `role`, the one a client
 -- before #341 reads.
+-- My level and class, sent with my listing so a leader can screen whoever asks (#17).
+local function myLevelClass()
+    local lvl = UnitLevel and UnitLevel("player") or nil
+    local cls = UnitClass and select(1, UnitClass("player")) or nil
+    return lvl, cls
+end
+
 function LFGBoard:SetAvailable(role, note, ttl, toGuild, roles, acts)
     note = GuildOS:SanitizeUserText(note, NOTE_MAX)
     ttl = self:_ClampTtl(ttl or GuildOS.db.lfgPrefs.lastTtl or DEFAULT_TTL)
@@ -369,14 +383,17 @@ function LFGBoard:SetAvailable(role, note, ttl, toGuild, roles, acts)
         roles = LETTER_OF[role] or ""
     end
     acts = self:_SanitizeActs(acts)
-    local entry = { role = role, roles = roles, acts = acts, note = note, ts = GetServerTime(), ttl = ttl }
+    local lvl, cls = myLevelClass()
+    local entry = { role = role, roles = roles, acts = acts, note = note, ts = GetServerTime(), ttl = ttl,
+        lvl = lvl, cls = cls }
     GuildOS.db.lfgBoard[myKey()] = entry
     local prefs = GuildOS.db.lfgPrefs
     prefs.lastRole, prefs.lastNote, prefs.lastTtl, prefs.roles = role, note, ttl, roles
     if toGuild then self:_SayInGuild(role, note, acts) end
     if GuildOS.CommSystem then
         GuildOS.CommSystem:SendMessage(GuildOS.CommSystem.MSG_TYPES.LFG,
-            LibSerialize:Serialize({ role = role, roles = roles, acts = acts, note = note, ttl = ttl }))
+            LibSerialize:Serialize({ role = role, roles = roles, acts = acts, note = note, ttl = ttl,
+                lvl = lvl, cls = cls }))
     end
     self:Refresh()
     return entry
@@ -483,16 +500,37 @@ function LFGBoard:ActivityName(id)
     local it = cat and cat.byId[id]
     if not it then return L["Another activity"] end
     local own = it.map and GuildOS.Compat.InstanceName(it.map)
+    -- A wing keeps its dungeon's name, which the game gives every wing alike: "Scarlet Monastery: Library".
+    if own and it.wing then return own .. ": " .. cat:WingLabel(it) end
     return own or it.name
 end
 
+-- An activity's name with its level range, for a guild line: "Krol'dok Stronghold levels 40-45". The range
+-- is left out where no client knows one (GuildOS.GroupActivities:LineLevels).
+function LFGBoard:ActivityLabel(id)
+    local name = self:ActivityName(id)
+    local lo, hi = GuildOS.GroupActivities:LineLevels(id)
+    if not lo then return name end
+    return string.format(L["%s levels %d-%d"], name, lo, hi)
+end
+
 -- The activities of a listing and its note, as one line: "Deadmines, Gnomeregan: until 23h".
-function LFGBoard:Describe(entry)
+function LFGBoard:Describe(entry, withLevels)
     local names = {}
-    for _, id in ipairs(entry.acts or {}) do names[#names + 1] = self:ActivityName(id) end
+    for _, id in ipairs(entry.acts or {}) do
+        names[#names + 1] = withLevels and self:ActivityLabel(id) or self:ActivityName(id)
+    end
     local what, note = table.concat(names, ", "), entry.note or ""
-    if what ~= "" and note ~= "" then return what .. ": " .. note end
-    return what ~= "" and what or note
+    local text
+    if what ~= "" and note ~= "" then text = what .. ": " .. note else text = what ~= "" and what or note end
+    -- Who posted, first, when the listing has their level and class (#17): a leader can screen them.
+    if entry.lvl then
+        local who = (entry.cls and string.format(L["Lvl %d %s"], entry.lvl, entry.cls))
+            or string.format(L["Lvl %d"], entry.lvl)
+        if text == "" then return who end
+        return who .. "  \194\183  " .. text
+    end
+    return text
 end
 
 -- The post in guild chat, which is what reaches somebody with the board closed, or with no addon
@@ -508,7 +546,7 @@ function LFGBoard:_SayInGuild(role, note, acts, line)
     if not IsInGuild() or now - (prefs[key] or 0) < GUILD_LINE_COOLDOWN then return false end
     if not line then
         line = role == "ANY" and L["[OutlawOS] LFG"] or string.format(L["[OutlawOS] LFG as %s"], roleDisplay(role))
-        local what = self:Describe({ acts = acts, note = note })
+        local what = self:Describe({ acts = acts, note = note }, true)
         if what ~= "" then line = line .. ": " .. what end
     end
     if not GuildOS.Compat.SendChatMessage(line, "GUILD") then return false end

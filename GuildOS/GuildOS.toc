@@ -2,7 +2,7 @@
 ## Title: |cffFFD700OutlawOS|r |cff888888Guild Manager|r
 ## Notes: Guild manager for WoW: Forever and Retail: roster, raid attendance, cores, recruitment and professions
 ## Author: Chehul (danielcosta42)
-## Version: 1.38.0
+## Version: 1.40.01
 ## SavedVariables: GuildOSDB
 ## DefaultState: enabled
 ## IconTexture: Interface\AddOns\GuildOS\Media\minimap-logo
@@ -67,6 +67,7 @@ Modules\Alliance.lua
 Modules\AllianceSync.lua
 Modules\AllianceChat.lua
 Modules\AllianceLink.lua
+Modules\AllianceObserver.lua
 Modules\GuildChat.lua
 Modules\RosterLog.lua
 Modules\BanList.lua
@@ -92,6 +93,7 @@ Modules\ProfDirectory.lua
 Modules\ChehulGossip.lua
 Modules\GuildFinder.lua
 Modules\RecruitBeacon.lua
+Modules\OnlineLeaders.lua
 Modules\JoinRequests.lua
 Modules\RecruitTracker.lua
 Modules\RecruitInfo.lua
@@ -147,6 +149,9 @@ Modules\NoteCommand.lua
 Modules\LevelQuery.lua
 Modules\LFGBoard.lua
 Data\GroupActivities.lua
+Data\DungeonGuide.lua
+Data\DropItemIds.lua
+Data\Changelog.lua
 Modules\Groups.lua
 Modules\Market.lua
 Modules\MarketItems.lua
@@ -171,6 +176,7 @@ UI\CraftOrdersPanel.lua
 UI\RecruitBeacon.lua
 UI\GuildFinder.lua
 UI\JoinRequests.lua
+UI\GuildlessStart.lua
 UI\CalendarPanel.lua
 UI\FeaturePanels.lua
 UI\SettingsPanel.lua
@@ -200,3 +206,4 @@ UI\MarketPanel.lua
 UI\RaidHUD.lua
 UI\Features.lua
 Modules\MySpecs.lua
+Modules\Announcements.lua

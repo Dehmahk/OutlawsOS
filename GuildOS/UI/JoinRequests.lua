@@ -1,7 +1,7 @@
 ----------------------------------------------------------------------
 -- Guild OS - Join requests, the guild's side (specs/071-o-recrutamento in guildos-web, the mock's tab 3)
 -- A discreet notice when somebody asks the guild to take them, and the "Join requests" list an officer
--- opens from it: Invite, Whisper, Decline. Every rule lives in Modules/JoinRequests.lua; this file draws
+-- opens from it: Approve, Whisper, Decline, Remove. Every rule lives in Modules/JoinRequests.lua; this file draws
 -- the rows and calls it (Rule 10). Nothing here opens by itself: the notice is a button, not the list.
 ----------------------------------------------------------------------
 local UI = GuildOS.UI
@@ -11,7 +11,8 @@ local L  = GuildOS.L
 local function JR() return GuildOS.JoinRequests end
 
 local WIDTH, HEIGHT = 640, 400
-local ROW_H, MAX_ROWS = 104, 50   -- 104: a two-line note, then a line of the officers' tools (#ops)
+local ROW_H, MAX_ROWS = 112, 50   -- a card: 104 tall with 8 between, a two-line note, then a line of the officers' tools (#ops)
+local CARD_GAP = 8
 local TOAST_SECONDS = 10
 
 local ROLE_NAME = { TANK = L["Tank"], HEALER = L["Healer"], DPS = L["DPS"] }
@@ -36,20 +37,54 @@ local function Detail(r, sep)
     return table.concat(parts, sep or " \194\183 ")
 end
 
+-- How long a request has waited, as the first words of its line: "4m ago" for a day or less, then "waiting 3 days".
+local function WaitedText(r)
+    local days = math.floor((GetServerTime() - (r.at or 0)) / 86400)
+    if days == 1 then return L["waiting 1 day"] end
+    if days >= 2 then return string.format(L["waiting %d days"], days) end
+    return GuildOS:TimeAgo(r.at)
+end
+
+-- "expires in 2 days", "expires today": for a request close to its fourteen days. Nil before that.
+local function ExpiryText(r)
+    local left = (r.at or 0) + JR().EXPIRE_SECONDS - GetServerTime()
+    if left > JR().EXPIRE_WARN then return nil end
+    local days = math.floor(left / 86400)
+    if days < 1 then return L["expires today"] end
+    if days == 1 then return L["expires in 1 day"] end
+    return string.format(L["expires in %d days"], days)
+end
+
+-- A decline's reason and the date it may be asked again from, for the officers who read it.
+local function declinedText(r)
+    local parts = {}
+    local key = r.reason and JR().REASONS[r.reason]
+    if key then parts[#parts + 1] = L[key] end
+    if r.again then parts[#parts + 1] = string.format(L["ask again from %s"], date("%d %b %Y", r.again)) end
+    return parts
+end
+
 -- "4m ago · online now", "1h ago · came from the site", "yesterday · delivered by Bruno Reis"...
 local function Meta(r)
-    local parts = { GuildOS:TimeAgo(r.at) }
+    local parts = { r.status == "open" and WaitedText(r) or GuildOS:TimeAgo(r.at) }
     if r.status == "invited" then
         parts[#parts + 1] = string.format(L["Invited by %s"], r.decidedBy or "?")
     elseif r.status == "declined" then
         parts[#parts + 1] = string.format(L["Declined by %s"], r.decidedBy or "?")
+        for _, p in ipairs(declinedText(r)) do parts[#parts + 1] = p end
     elseif r.status == "expired" then
         parts[#parts + 1] = L["expired"]
+    elseif r.status == "withdrawn" then
+        parts[#parts + 1] = L["withdrawn by the applicant"]
     elseif r.source == "site" then
         parts[#parts + 1] = L["came from the site"]
     else
         parts[#parts + 1] = (GetServerTime() - (r.seen or 0) < JR().ONLINE_SECONDS) and L["online now"] or L["offline"]
         if r.relayedBy then parts[#parts + 1] = string.format(L["delivered by %s"], r.relayedBy) end
+    end
+    if r.status == "open" then
+        local soon = ExpiryText(r)
+        if soon then parts[#parts + 1] = soon end
     end
     return table.concat(parts, " \194\183 ")
 end
@@ -75,6 +110,7 @@ local function myName() return GuildOS.Compat.PlayerName() or "" end
 local function stageOf(r, rec)
     if r.status == "invited" then return L["Invited"] end
     if r.status == "declined" then return L["Declined"] end
+    if r.status == "withdrawn" then return L["Withdrawn"] end
     return (rec and STAGE_NAME[rec.stage]) or L["New"]
 end
 
@@ -82,13 +118,14 @@ end
 local menu
 local function showMenu(anchor, items)
     menu = menu or CreateFrame("Frame", "GuildOSRecruitMenu", UIParent, "UIDropDownMenuTemplate")
-    UIDropDownMenu_Initialize(menu, function(_, level)
-        for _, it in ipairs(items) do
+    UIDropDownMenu_Initialize(menu, function(_, level, list)
+        for _, it in ipairs(list or items) do
             local info = UIDropDownMenu_CreateInfo()
             info.text = it.text
             info.checked = it.checked
             info.isNotRadio = true
             info.func = it.func
+            if it.menu then info.hasArrow, info.menuList, info.func = true, it.menu, nil end
             UIDropDownMenu_AddButton(info, level)
         end
     end, "MENU")
@@ -202,6 +239,29 @@ local function paintTools(row, r)
     end)
 end
 
+-- Decline: "Decline without a reason" as before, or a reason and then when the player may ask again (or no date).
+-- An alliance application keeps the plain decline, since its line carries no reason.
+local function declineItems(r)
+    local items = { { text = L["Decline without a reason"], func = function() JR():Decide(r.id, "declined") end } }
+    if r.kind == "alliance" then return items end
+    local dates = {
+        { text = L["No date"], days = nil },
+        { text = L["In a week"], days = 7 },
+        { text = L["In two weeks"], days = 14 },
+        { text = L["In a month"], days = 30 },
+    }
+    for _, token in ipairs(JR().REASON_ORDER) do
+        local sub = {}
+        for _, d in ipairs(dates) do
+            sub[#sub + 1] = { text = d.text, func = function()
+                JR():Decide(r.id, "declined", token, d.days and (GetServerTime() + d.days * 86400) or nil)
+            end }
+        end
+        items[#items + 1] = { text = L[JR().REASONS[token]], menu = sub }
+    end
+    return items
+end
+
 local function Build()
     local f = CreateFrame("Frame", "GuildOSJoinRequests", UIParent, "BackdropTemplate")
     f:SetSize(WIDTH, HEIGHT)
@@ -230,40 +290,57 @@ end
 
 -- EKO patch: the list itself, into any frame: the popup above and the Recruitment tab's own
 -- "Join requests" sub-tab. `count` is the "2 open" text to keep; the insets place the scroll area.
-function GuildOS:BuildJoinRequestsList(host, count, scrollName, top, left, right, bottom)
+function GuildOS:BuildJoinRequestsList(host, count, scrollName, top, left, right, bottom, which)
     local scroll, content = UI:CreateScrollFrame(host, scrollName)
     scroll:SetPoint("TOPLEFT", left or 0, -(top or 0))
     scroll:SetPoint("BOTTOMRIGHT", -(right or 0), bottom or 0)
     content:SetSize(WIDTH - 40, 1)
     if UI.BindScrollChildWidth then UI:BindScrollChildWidth(scroll, content) end
 
-    local empty = UI:CreateText(host, L["Nobody has asked to join yet."], 11, C.label.r, C.label.g, C.label.b)
+    local emptyText = which == "alliance" and L["No alliance applications yet."] or L["Nobody has asked to join yet."]
+    local empty = UI:CreateText(host, emptyText, 11, C.label.r, C.label.g, C.label.b)
     empty:SetPoint("TOP", 0, -((top or 0) + 80))
 
     local rows = {}
     local function Row(i)
         if rows[i] then return rows[i] end
-        local row = CreateFrame("Frame", nil, content)
-        row:SetHeight(ROW_H)
-        row:SetPoint("TOPLEFT", 0, -(i - 1) * ROW_H)
-        row:SetPoint("TOPRIGHT", 0, -(i - 1) * ROW_H)
+        local row = CreateFrame("Frame", nil, content, "BackdropTemplate")
+        -- Each request is a card. An alliance application gets a gold edge, a gold strip and a gold label; a
+        -- join request stays plain with a grey strip, so the two cannot be taken for each other.
+        row:SetHeight(ROW_H - CARD_GAP)
+        row:SetPoint("TOPLEFT", 0, -(i - 1) * ROW_H - CARD_GAP / 2)
+        row:SetPoint("TOPRIGHT", 0, -(i - 1) * ROW_H - CARD_GAP / 2)
+        row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = GuildOS.UI:Edge(row) })
+        row.accent = row:CreateTexture(nil, "ARTWORK")
+        row.accent:SetTexture("Interface\\Buttons\\WHITE8x8")
+        row.accent:SetPoint("TOPLEFT", 0, 0)
+        row.accent:SetPoint("BOTTOMLEFT", 0, 0)
+        row.accent:SetWidth(3)
+        row.badge = CreateFrame("Frame", nil, row, "BackdropTemplate")
+        row.badge:SetSize(136, 16)
+        row.badge:SetPoint("TOPRIGHT", -10, -10)
+        row.badge:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = GuildOS.UI:Edge(row.badge) })
+        row.badge.text = UI:CreateText(row.badge, "", 9)
+        row.badge.text:SetPoint("CENTER", 0, 0)
         row.name = UI:CreateText(row, "", 12)
-        row.name:SetPoint("TOPLEFT", 6, -8)
+        row.name:SetPoint("TOPLEFT", 10, -8)
         row.detail = UI:CreateText(row, "", 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
         row.detail:SetPoint("LEFT", row.name, "RIGHT", 8, 0)
         row.note = UI:CreateText(row, "", 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
         -- A note of up to NOTE_MAX characters wraps onto two lines, across the width the buttons leave.
-        row.note:SetPoint("TOPLEFT", 6, -26)
-        row.note:SetPoint("RIGHT", row, "RIGHT", -262, 0)
+        row.note:SetPoint("TOPLEFT", 10, -26)
+        row.note:SetPoint("RIGHT", row, "RIGHT", -328, 0)
         row.note:SetJustifyH("LEFT"); row.note:SetWordWrap(true)
         row.meta = UI:CreateText(row, "", 10, C.label.r, C.label.g, C.label.b)
-        row.meta:SetPoint("TOPLEFT", 6, -58)
-        row.meta:SetWidth(330); row.meta:SetJustifyH("LEFT"); row.meta:SetWordWrap(false)
+        row.meta:SetPoint("TOPLEFT", 10, -58)
+        row.meta:SetWidth(260); row.meta:SetJustifyH("LEFT"); row.meta:SetWordWrap(false)
+        -- Remove is the far right button on every row, and Decline sits left of it on an open one: Remove
+        -- takes the request off every officer's list, Decline tells the player.
         row.remove = UI:CreateButton(row, L["Remove"], 76, 24)
         row.remove:SetPoint("RIGHT", -6, 0)
         UI:SetButtonVariant(row.remove, "ghost")
         row.decline = UI:CreateButton(row, L["Decline"], 70, 24)
-        row.decline:SetPoint("RIGHT", -6, 0)
+        row.decline:SetPoint("RIGHT", row.remove, "LEFT", -6, 0)
         UI:SetButtonVariant(row.decline, "danger")
         row.whisper = UI:CreateButton(row, L["Whisper"], 76, 24)
         row.whisper:SetPoint("RIGHT", row.decline, "LEFT", -6, 0)
@@ -271,7 +348,7 @@ function GuildOS:BuildJoinRequestsList(host, count, scrollName, top, left, right
         row.invite:SetPoint("RIGHT", row.whisper, "LEFT", -6, 0)
         UI:SetButtonVariant(row.invite, "primary")
         row.stage = UI:CreateButton(row, "", 150, 22)
-        row.stage:SetPoint("TOPLEFT", 6, -80)
+        row.stage:SetPoint("TOPLEFT", 10, -80)
         row.claim = UI:CreateButton(row, "", 120, 22)
         row.claim:SetPoint("LEFT", row.stage, "RIGHT", 6, 0)
         row.notes = UI:CreateButton(row, "", 96, 22)
@@ -284,8 +361,8 @@ function GuildOS:BuildJoinRequestsList(host, count, scrollName, top, left, right
     end
 
     local function Refresh()
-        local list = JR():List()
-        local open = JR():OpenCount()
+        local list = JR():List(which)
+        local open = JR():OpenCount(which)
         count:SetText(GuildOS:JoinRequestsOpenText(open))
         empty:SetShown(#list == 0)
         for i, r in ipairs(list) do
@@ -301,24 +378,47 @@ function GuildOS:BuildJoinRequestsList(host, count, scrollName, top, left, right
             row.detail:SetText(Detail(r))
             row.note:SetText(r.note and ("\226\128\156" .. r.note .. "\226\128\157") or "")
             row.meta:SetText(Meta(r))
+            local soon = r.status == "open" and (r.at + JR().EXPIRE_SECONDS - GetServerTime()) <= JR().EXPIRE_WARN
+            local meta = soon and C.gold or C.label
+            row.meta:SetTextColor(meta.r, meta.g, meta.b)
+            local alliance = r.kind == "alliance"
+            local card = alliance and C.accentSoft or C.panel
+            local edge = alliance and C.accentDim or C.line
+            local strip = alliance and C.accent or C.lineHi
+            local pill = alliance and C.accent or C.well
+            row:SetBackdropColor(card.r, card.g, card.b, card.a or 1)
+            row:SetBackdropBorderColor(edge.r, edge.g, edge.b, edge.a or 1)
+            row.accent:SetVertexColor(strip.r, strip.g, strip.b, 1)
+            row.badge:SetBackdropColor(pill.r, pill.g, pill.b, pill.a or 1)
+            row.badge:SetBackdropBorderColor(strip.r, strip.g, strip.b, 1)
+            row.badge.text:SetText(alliance and L["Alliance application"] or L["Join request"])
+            local ink = alliance and C.onGold or C.label
+            row.badge.text:SetTextColor(ink.r, ink.g, ink.b)
             local isOpen = r.status == "open"
             -- Invite is whoever the game lets invite; deciding is an officer's, and Decline would do nothing for anybody else.
             -- The game lets no addon invite off Anniversary (#256), and these requests are Forever's and retail's.
             -- EKO: Approve (was Invite, hidden on Forever): an officer's, on any open request. It puts
             -- /ginvite <name> in the chat box; the row closes when the game says the invite went.
-            local officer = JR():CanDecide()
+            local officer = JR():CanDecideRow(r)
             row.invite:SetShown(isOpen and officer); row.whisper:SetShown(true)
-            row.decline:SetShown(isOpen and officer); row.remove:SetShown(not isOpen and officer)
-            -- Whisper sits left of the button on the right: Remove on a closed row, Decline on an open one.
+            row.decline:SetShown(isOpen and officer); row.remove:SetShown(officer)
+            -- Whisper sits left of the officer's buttons: Decline on an open row, Remove on a closed one. A
+            -- player who is not an officer has none of them, so Whisper takes the right edge.
             row.whisper:ClearAllPoints()
-            row.whisper:SetPoint("RIGHT", (not isOpen and officer) and row.remove or row.decline, "LEFT", -6, 0)
+            if officer then
+                row.whisper:SetPoint("RIGHT", isOpen and row.decline or row.remove, "LEFT", -6, 0)
+            else
+                row.whisper:SetPoint("RIGHT", -6, 0)
+            end
+            row.invite.label:SetText(r.kind == "alliance" and L["Accept"] or "Approve")
             row.invite:SetEnabled(isOpen)
             row.invite:SetScript("OnClick", function() JR():Approve(r.id) end)
-            row.decline:SetScript("OnClick", function() JR():Decide(r.id, "declined") end)
+            row.decline:SetScript("OnClick", function(self) showMenu(self, declineItems(r)) end)
             row.remove:SetScript("OnClick", function() JR():Remove(r.id) end)
             row.whisper:SetScript("OnClick", function() ChatFrame_OpenChat("/w " .. GuildOS:WhisperTarget(r.character) .. " ") end)
             -- The officers' tools: officers only, on the line under the text (#ops).
-            local editable = tracker() and tracker():CanEdit() or false
+            -- The recruiting tools are for join requests; an alliance application has none.
+            local editable = (tracker() and tracker():CanEdit() or false) and r.kind ~= "alliance"
             for _, b in ipairs({ row.stage, row.claim, row.notes, row.check }) do b:SetShown(editable) end
             if editable then paintTools(row, r) end
             row:Show()
@@ -346,6 +446,20 @@ function GuildOS:CreateJoinRequestsPanel(parent)
         .. " Approve puts /ginvite in your chat box: press Enter.", 10, C.label.r, C.label.g, C.label.b)
     note:SetPoint("LEFT", count, "RIGHT", 16, 0)
     local refresh = self:BuildJoinRequestsList(parent, count, "GuildOSJoinRequestsTabScroll", UI.GAP + 22, 0, 0, 0)
+    return function()
+        if JR() then GuildOS:SafeCall(JR().Refresh, JR()) end
+        refresh()
+    end
+end
+
+-- The Alliance tab's Applications sub-tab: the alliance applications, as the same cards. Accept grants
+-- observer access; only an ambassador can answer one, so the tab is shown to ambassadors only.
+function GuildOS:CreateAllianceApplicationsPanel(parent)
+    local count = UI:CreateText(parent, "", 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+    count:SetPoint("TOPLEFT", 0, -UI.GAP)
+    local note = UI:CreateText(parent, L["Asked for read-only access to the alliance. Accept grants observer access, and only an ambassador can answer."], 10, C.label.r, C.label.g, C.label.b)
+    note:SetPoint("LEFT", count, "RIGHT", 16, 0)
+    local refresh = self:BuildJoinRequestsList(parent, count, "GuildOSAllianceApplicationsScroll", UI.GAP + 22, 0, 0, 0, "alliance")
     return function()
         if JR() then GuildOS:SafeCall(JR().Refresh, JR()) end
         refresh()

@@ -391,11 +391,11 @@ function GuildOS:CreateDashboardPanel(panel)
         end
         -- EKO patch: a leveling guild's pulse. GuildOS users instead of item level, the level spread under it.
         local gosUsers, band = 0, { 0, 0, 0, 0 }
-        local saved = (GuildOS.db and GuildOS.db.members) or {}
         for i = 1, GetNumGuildMembers() or 0 do
             local n, _, _, lv = GetGuildRosterInfo(i)
             local s = n and (n:match("^([^-]+)") or n)
-            if s and saved[s] and saved[s].addonVersion then gosUsers = gosUsers + 1 end
+            local rec = s and GuildOS.EKO and GuildOS.EKO:MemberRecord(s, n)
+            if rec and rec.addonVersion then gosUsers = gosUsers + 1 end
             lv = lv or 0
             local b = lv >= GuildOS.Client.maxLevel and 4 or lv >= 40 and 3 or lv >= 20 and 2 or 1
             band[b] = band[b] + 1

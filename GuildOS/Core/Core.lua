@@ -90,6 +90,7 @@ local DB_DEFAULTS = {
     firstSeen = {},      -- [playerKey] = timestamp first observed by GuildOS
     trials = {},
     altLinks = {},  -- [altKey] = mainKey  (officer-maintained, for account-wide attunement propagation)
+    altStamps = {}, -- [altKey] = time that link last changed; a removal keeps its time (see MergeAltLinks)
     consumableChecks = { lastResults = {} },
     wishlists = {},   -- [charKey] = [{ itemId, itemLink, order, isOffspec }] — per-character wishlists
     cores = {},       -- [coreName] = { lootMaster, attendance, points, members }
@@ -292,6 +293,7 @@ local MODULE_START = {
     { "AllianceChat" },
     -- The alliance set in the guild info, its hidden channel and the allied /g (issues #344, #348).
     { "AllianceLink" },
+    { "AllianceObserver" },
     { "GuildChat" },
     { "RosterLog" },
     { "BanList" },
@@ -351,6 +353,8 @@ local MODULE_START = {
     { "ChehulGossip" },
     -- WoW: Forever and retail: the request to join a guild, from both sides. After the gossip, whose prefix it rides.
     { "JoinRequests" },
+    -- Recruiters and officers say they are online (ChehulOnline), for the guildless screen.
+    { "OnlineLeaders" },
     -- Applicant tracker: the stage, claim, notes and checklist of each join request, shared by the officers.
     { "RecruitTracker" },
     -- The recruit info text at the bottom of the Recruiting tab, edited by rank and shared by the sync.
@@ -448,6 +452,10 @@ function GuildOS:InitModules()
     if GuildOS.MaybeShowOnboarding then
         GuildOS.Compat.After(6, function() GuildOS:MaybeShowOnboarding() end)
     end
+    -- A guildless character chooses to join the guild or apply to an alliance; asked at each login until it does.
+    GuildOS.Compat.After(8, function()
+        if GuildOS.MaybeShowGuildlessChoice then GuildOS:MaybeShowGuildlessChoice() end
+    end)
     -- WoW: Forever: the founding letter to a GM whose guild has none yet (issue #208).
     if GuildOS.MaybeShowFoundingLetter then
         GuildOS.Compat.After(12, function() GuildOS:MaybeShowFoundingLetter() end)

@@ -63,6 +63,81 @@ local function fillScroll(scroll, content)
     UI:BindScrollChildWidth(scroll, content)
 end
 
+-- Sizes for the redesigned Overview: one allied guild's card, one upcoming event row.
+local CARD_H = 78
+local EVENT_H = 26
+
+-- A flat coloured square, used for status dots.
+local function square(parent, size, r, g, b)
+    local t = parent:CreateTexture(nil, "ARTWORK")
+    t:SetSize(size, size)
+    t:SetColorTexture(r, g, b, 1)
+    return t
+end
+
+-- A 3px strip down the left edge of a card or row, in that guild's own colour.
+local function guildStrip(parent, guildName)
+    local t = parent:CreateTexture(nil, "ARTWORK")
+    t:SetPoint("TOPLEFT", 0, 0)
+    t:SetPoint("BOTTOMLEFT", 0, 0)
+    t:SetWidth(3)
+    t:SetColorTexture(GuildOS.Alliance.GuildColor(guildName))
+    return t
+end
+
+-- "1 guild, 4 members" rather than "1 guilds, 4 members".
+local function guildCountText(n, members)
+    if n == 1 then return string.format(L["%d guild, %d members"], n, members) end
+    return string.format(L["%d guilds, %d members"], n, members)
+end
+
+-- Leaders of each allied guild, from the roster held for it, and whether one of them is on the mesh.
+local function collectLeaderGuilds(ally)
+    local out = {}
+    local pact = ally and ally:Get()
+    local sync, net = GuildOS.AllianceSync, _G.ChehulNet
+    if not (pact and sync and sync._BuildRoster) then return out end
+    local mine, now = ally:MyGuildName(), time()
+    local peers = (net and net.Peers and net:Peers()) or {}
+    local ttl = (net and net.PEER_TTL) or 600
+    local own = ally:OwnRoster()
+    for guildName in pairs(pact.guilds) do
+        if not ally:IsBlocked(guildName) then
+            local rows
+            if guildName == mine then
+                rows = sync._BuildRoster(GuildOS.db.members, sync.ROSTER_CAP, GuildOS.db.altLinks)
+            else
+                local entry = sync:Remote(guildName, "roster")
+                rows = entry and type(entry.data) == "table" and entry.data or {}
+            end
+            local leaders = {}
+            for _, r in ipairs(rows) do
+                if r.ld and r.n then
+                    local short = r.n:match("^([^-]+)") or r.n
+                    local online
+                    if guildName == mine then
+                        -- Our own guild: the game says who is online, mesh or no mesh.
+                        online = own.onlineNames[short] == true
+                    else
+                        local pe = peers[short]
+                        online = pe ~= nil and (now - (pe.ts or 0)) <= ttl
+                    end
+                    leaders[#leaders + 1] = { name = short, role = r.ld, online = online }
+                end
+            end
+            if #leaders > 0 then
+                table.sort(leaders, function(a, b)
+                    if a.online ~= b.online then return a.online end
+                    return a.name < b.name
+                end)
+                out[#out + 1] = { guild = guildName, leaders = leaders, mine = guildName == mine }
+            end
+        end
+    end
+    table.sort(out, function(a, b) return a.guild < b.guild end)
+    return out
+end
+
 ----------------------------------------------------------------------
 -- Overview: the header band, the allied guild table, the blocked list.
 ----------------------------------------------------------------------
@@ -119,7 +194,7 @@ local function BuildOverview(panel)
         -- The name takes the width it needs; the tag and the size follow it as secondary text (#371).
         title:SetText(string.format("%s  |cff%s[%s]  %s|r",
             summary.name, hex(C.label), summary.tag,
-            string.format(L["%d guilds, %d members"], #summary.guilds, summary.members)))
+            guildCountText(#summary.guilds, summary.members)))
 
         local bridgeText = summary.bridge or L["nobody online"]
         if summary.amBridge then
@@ -131,12 +206,32 @@ local function BuildOverview(panel)
             summary.channel or "?", chanText))
 
         local y = 0
+        local cal = GuildOS.Calendar
+        local events = (cal and cal.AllianceEvents and cal:AllianceEvents()) or {}
+        -- Our own shared events join the alliance's: one list, soonest first.
+        for _, ev in ipairs((cal and cal.OwnAllianceEvents and cal:OwnAllianceEvents()) or {}) do
+            events[#events + 1] = ev
+        end
+        table.sort(events, function(a, b) return (a.when or 0) < (b.when or 0) end)
+        local leaderGuilds = collectLeaderGuilds(ally)
+
+        -- The next event each allied guild has published, and how many of its leaders are on the mesh.
+        local nextByGuild, leadersOn = {}, {}
+        for _, ev in ipairs(events) do
+            if ev.guild and not nextByGuild[ev.guild] then nextByGuild[ev.guild] = ev end
+        end
+        for _, lg in ipairs(leaderGuilds) do
+            local on = 0
+            for _, l in ipairs(lg.leaders) do
+                if l.online then on = on + 1 end
+            end
+            leadersOn[lg.guild] = { on = on, total = #lg.leaders }
+        end
 
         ------------------------------------------------------------------
         -- Schedule conflicts. Only rendered when there is something to say,
         -- so a healthy week costs no vertical space at all.
         ------------------------------------------------------------------
-        local cal = GuildOS.Calendar
         local conflicts = (cal and cal.AllianceConflicts and cal:AllianceConflicts()) or {}
         if #conflicts > 0 then
             y = sectionTitle(string.format(L["SCHEDULE CONFLICTS (%d)"], #conflicts), y)
@@ -180,7 +275,80 @@ local function BuildOverview(panel)
         end
 
         ------------------------------------------------------------------
-        -- Allied guilds: the shared table header (#371), its labels flush with the rows' text.
+        -- One card per allied guild: identity, freshness, who vouches for it, and what it has
+        -- coming up. The table below keeps the exact numbers.
+        ------------------------------------------------------------------
+        y = sectionTitle(L["ALLIED GUILDS"], y)
+        for _, g in ipairs(summary.guilds) do
+            local gr, gg, gb = ally.GuildColor(g.name)
+            local card = CreateFrame("Frame", nil, content, "BackdropTemplate")
+            card:SetHeight(CARD_H)
+            card:SetPoint("TOPLEFT", 0, -y)
+            card:SetPoint("TOPRIGHT", 0, -y)
+            card:SetBackdrop({
+                bgFile = "Interface\\Buttons\\WHITE8x8",
+                edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = GuildOS.UI:Edge(card),
+            })
+            card:SetBackdropColor(C.panel.r, C.panel.g, C.panel.b, 1)
+            card:SetBackdropBorderColor(C.line.r, C.line.g, C.line.b, 1)
+            guildStrip(card, g.name)
+
+            -- Line 1: the name in the guild's colour, and how many of its members the mesh can see.
+            local label = g.name
+            if g.isOwner then label = label .. "  " .. L["(owner)"] end
+            if g.isMine then label = label .. "  " .. L["(you)"] end
+            local nameFs = UI:CreateText(card, label, 13, gr, gg, gb)
+            nameFs:SetPoint("TOPLEFT", 14, -10)
+
+            local seenFs = UI:CreateText(card, string.format(g.live and L["%d/%d online"] or L["%d/%d seen"], g.seen, g.members), 11,
+                C.textDim.r, C.textDim.g, C.textDim.b)
+            seenFs:SetPoint("TOPRIGHT", -10, -12)
+            local live = g.seen > 0
+            local dot = square(card, 7,
+                live and C.online.r or C.offline.r,
+                live and C.online.g or C.offline.g,
+                live and C.online.b or C.offline.b)
+            dot:SetPoint("RIGHT", seenFs, "LEFT", -6, 0)
+
+            -- Line 2: the ambassadors who vouch for it, and when its data last arrived.
+            local amb = table.concat(g.ambassadors, ", ")
+            local ambFs = UI:CreateText(card, string.format(L["Ambassadors: %s"], amb ~= "" and amb or "-"),
+                11, C.textDim.r, C.textDim.g, C.textDim.b)
+            ambFs:SetPoint("TOPLEFT", 14, -32)
+            ambFs:SetPoint("RIGHT", card, "RIGHT", -150, 0)
+            ambFs:SetJustifyH("LEFT")
+            ambFs:SetWordWrap(false)
+
+            local ageFs = UI:CreateText(card, g.live and L["live"] or (g.ts and GuildOS:TimeAgo(g.ts) or L["never"]), 11,
+                C.textDim.r, C.textDim.g, C.textDim.b)
+            ageFs:SetPoint("TOPRIGHT", -10, -32)
+
+            -- Line 3: the next event this guild has published, and how many of its leaders are online.
+            local nx = nextByGuild[g.name]
+            local nextText = L["No events scheduled"]
+            if nx then
+                nextText = string.format(L["Next: %s"],
+                    string.format("%s  %s", GuildOS:LocalDate("%a %H:%M", nx.when), nx.title or "?"))
+            end
+            local nextFs = UI:CreateText(card, nextText, 11, C.text.r, C.text.g, C.text.b)
+            nextFs:SetPoint("TOPLEFT", 14, -54)
+            nextFs:SetPoint("RIGHT", card, "RIGHT", -150, 0)
+            nextFs:SetJustifyH("LEFT")
+            nextFs:SetWordWrap(false)
+
+            local lo = leadersOn[g.name]
+            if lo then
+                local leadFs = UI:CreateText(card, string.format(L["%d of %d leaders online"], lo.on, lo.total),
+                    11, C.label.r, C.label.g, C.label.b)
+                leadFs:SetPoint("TOPRIGHT", -10, -54)
+            end
+
+            y = y + CARD_H + 6
+        end
+        y = y + UI.GAP
+
+        ------------------------------------------------------------------
+        -- Allied guilds: the table keeps the exact numbers under the cards (#371).
         ------------------------------------------------------------------
         local COLS = {
             { label = L["GUILD"],       x = 0 },
@@ -218,13 +386,12 @@ local function BuildOverview(panel)
                 live and C.online.b or C.offline.b)
             mark:SetPoint("LEFT", 0, 0)
 
-            local label = g.name
-            if g.isOwner then label = label .. " " .. L["(owner)"] end
-            if g.isMine then label = label .. " " .. L["(you)"] end
-            local nameFs = UI:CreateText(row, label, 11, C.text.r, C.text.g, C.text.b)
+            -- The owner and you badges live on the card above; here the name stays on one line.
+            local nameFs = UI:CreateText(row, g.name, 11, C.text.r, C.text.g, C.text.b)
             nameFs:SetPoint("LEFT", 12, 0)
             nameFs:SetWidth(184)
             nameFs:SetJustifyH("LEFT")
+            nameFs:SetWordWrap(false)
 
             local seenFs = UI:CreateText(row, string.format("%d/%d", g.seen, g.members), 11,
                 C.textDim.r, C.textDim.g, C.textDim.b)
@@ -237,7 +404,7 @@ local function BuildOverview(panel)
             ambFs:SetJustifyH("LEFT")
             ambFs:SetWordWrap(false)
 
-            local age = g.ts and GuildOS:TimeAgo(g.ts) or L["never"]
+            local age = g.live and L["live"] or (g.ts and GuildOS:TimeAgo(g.ts) or L["never"])
             local ageFs = UI:CreateText(row, age, 11, C.textDim.r, C.textDim.g, C.textDim.b)
             ageFs:SetPoint("LEFT", 478, 0)
 
@@ -249,7 +416,7 @@ local function BuildOverview(panel)
                 GameTooltip:AddLine(string.format(
                     L["Seen: %d of %d known members are visible on the presence mesh."],
                     g.seen, g.members), 0.8, 0.8, 0.8, true)
-                GameTooltip:AddLine(L["Only players running Guild OS are counted, so this is a floor, not the real online count."],
+                GameTooltip:AddLine(L["Only players running OutlawOS are counted, so this is a floor, not the real online count."],
                     0.6, 0.6, 0.6, true)
                 GameTooltip:Show()
             end)
@@ -261,9 +428,59 @@ local function BuildOverview(panel)
             y = y + ROW_H
         end
 
-        -- Upcoming events published by allied guilds, with a slot request.
-        local events = (cal and cal.AllianceEvents and cal:AllianceEvents()) or {}
+        ------------------------------------------------------------------
+        -- Leaders: each guild's leaders, with a dot for whether one is on OutlawOS right now.
+        -- The presence mesh sees Guild OS clients only, so a leader without the addon reads not seen.
+        ------------------------------------------------------------------
+        if #leaderGuilds > 0 then
+            y = y + UI.GAP
+            y = sectionTitle(L["LEADERS ONLINE"], y)
+            for _, g in ipairs(leaderGuilds) do
+                local gr, gg, gb = ally.GuildColor(g.guild)
+                local head = UI:CreateText(content,
+                    g.guild .. (g.mine and ("  " .. L["(you)"]) or ""), 11, gr, gg, gb)
+                head:SetPoint("TOPLEFT", 0, -y)
+                y = y + 18
+                for _, l in ipairs(g.leaders) do
+                    local row = CreateFrame("Frame", nil, content)
+                    row:SetHeight(16)
+                    row:SetPoint("TOPLEFT", 12, -y)
+                    row:SetPoint("TOPRIGHT", 0, -y)
+
+                    local dot = square(row, 7,
+                        l.online and C.online.r or C.offline.r,
+                        l.online and C.online.g or C.offline.g,
+                        l.online and C.online.b or C.offline.b)
+                    dot:SetPoint("LEFT", 0, 0)
+
+                    local nameFs = UI:CreateText(row, l.name, 11, C.text.r, C.text.g, C.text.b)
+                    nameFs:SetPoint("LEFT", 14, 0)
+                    nameFs:SetWidth(150)
+                    nameFs:SetJustifyH("LEFT")
+
+                    local roleFs = UI:CreateText(row, l.role, 11, C.textDim.r, C.textDim.g, C.textDim.b)
+                    roleFs:SetPoint("LEFT", 170, 0)
+
+                    local stateText = l.online and L["online"] or L["not seen"]
+                    local stateFs
+                    if l.online then
+                        stateFs = UI:CreateText(row, stateText, 11, C.text.r, C.text.g, C.text.b)
+                    else
+                        stateFs = UI:CreateText(row, stateText, 11, C.textDim.r, C.textDim.g, C.textDim.b)
+                    end
+                    stateFs:SetPoint("LEFT", 300, 0)
+
+                    y = y + 16
+                end
+                y = y + 8
+            end
+        end
+
+        ------------------------------------------------------------------
+        -- Upcoming events published by allied guilds, each in its guild's colour, with a slot request.
+        ------------------------------------------------------------------
         if #events > 0 then
+            y = y + UI.GAP
             y = sectionTitle(L["UPCOMING ALLIANCE EVENTS"], y)
 
             for i = 1, math.min(#events, 8) do
@@ -271,23 +488,36 @@ local function BuildOverview(panel)
                 local size = tonumber(ev.size) or GuildOS.Client.defaultRaidSize   -- from another guild
                 local full = (ev.yes or 0) >= size
                 local when = GuildOS:LocalDate("%a %H:%M", ev.when)
-                local fs = UI:CreateText(content, string.format("%s  %s  |cff%s%s  %d/%d|r",
-                    when, ev.title or "?", hex(C.label), ev.guild or "?", ev.yes or 0, size),
+
+                local row = CreateFrame("Frame", nil, content)
+                row:SetHeight(EVENT_H)
+                row:SetPoint("TOPLEFT", 0, -y)
+                row:SetPoint("TOPRIGHT", 0, -y)
+
+                local bg = row:CreateTexture(nil, "BACKGROUND")
+                bg:SetAllPoints()
+                bg:SetColorTexture(C.well.r, C.well.g, C.well.b, 1)
+                guildStrip(row, ev.guild)
+
+                local fs = UI:CreateText(row, string.format("%s  %s  |cff%s%s|r  %d/%d",
+                    when, ev.title or "?", ally.GuildColorHex(ev.guild), ev.guild or "?", ev.yes or 0, size),
                     11, C.text.r, C.text.g, C.text.b)
-                fs:SetPoint("TOPLEFT", 0, -y)
-                fs:SetPoint("RIGHT", content, "RIGHT", -190, 0)
+                fs:SetPoint("LEFT", 12, 0)
+                fs:SetPoint("RIGHT", row, "RIGHT", -190, 0)
                 fs:SetJustifyH("LEFT")
                 fs:SetWordWrap(false)
 
-                if full then
-                    local fullFs = UI:CreateText(content, L["full"], 10,
-                        C.textDim.r, C.textDim.g, C.textDim.b)
-                    fullFs:SetPoint("TOPRIGHT", 0, -y)
+                if ev.own then
+                    local yoursFs = UI:CreateText(row, L["Yours"], 10, C.textDim.r, C.textDim.g, C.textDim.b)
+                    yoursFs:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+                elseif full then
+                    local fullFs = UI:CreateText(row, L["full"], 10, C.textDim.r, C.textDim.g, C.textDim.b)
+                    fullFs:SetPoint("RIGHT", row, "RIGHT", -8, 0)
                 else
-                    local roleBtn = UI:CreateButton(content, L["DPS"], 56, 18)
+                    local askBtn = UI:CreateButton(row, L["Request slot"], 100, 18)
+                    askBtn:SetPoint("RIGHT", row, "RIGHT", -6, 0)
+                    local roleBtn = UI:CreateButton(row, L["DPS"], 56, 18)
                     roleBtn.role = "DPS"
-                    local askBtn = UI:CreateButton(content, L["Request slot"], 100, 18)
-                    askBtn:SetPoint("TOPRIGHT", 0, -y + 2)
                     roleBtn:SetPoint("RIGHT", askBtn, "LEFT", -6, 0)
                     roleBtn:SetScript("OnClick", function()
                         local order = { TANK = "HEALER", HEALER = "DPS", DPS = "TANK" }
@@ -304,7 +534,7 @@ local function BuildOverview(panel)
                         end
                     end)
                 end
-                y = y + ROW_H
+                y = y + EVENT_H + 4
             end
         end
 
@@ -492,8 +722,58 @@ end
 -- Chat: the alliance feed. Conversation and alliance events on one timeline,
 -- which is the one thing a default chat tab cannot do.
 ----------------------------------------------------------------------
+-- Copy: WoW gives an addon no clipboard to write to, so a line goes into a box with its text selected,
+-- and Ctrl+C takes it from there.
+local COPY_BOX
+local function showCopyBox(text)
+    if not COPY_BOX then
+        local f = CreateFrame("Frame", "GuildOSAllyCopyBox", UIParent, "BackdropTemplate")
+        f:SetSize(440, 96)
+        f:SetPoint("CENTER")
+        f:SetFrameStrata("DIALOG")
+        f:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = GuildOS.UI:Edge(f),
+        })
+        f:SetBackdropColor(C.popup.r, C.popup.g, C.popup.b, 1)
+        f:SetBackdropBorderColor(C.lineHi.r, C.lineHi.g, C.lineHi.b, 1)
+        f:EnableMouse(true)
+
+        local hint = UI:CreateText(f, L["Press Ctrl+C to copy, then Esc."], 11,
+            C.textSoft.r, C.textSoft.g, C.textSoft.b)
+        hint:SetPoint("TOPLEFT", 12, -10)
+
+        local edit = makeInput(f, 416)
+        edit:SetPoint("TOPLEFT", 12, -32)
+        edit:HookScript("OnEscapePressed", function() f:Hide() end)
+
+        local close = UI:CreateButton(f, L["Close"], 80, 22)
+        close:SetPoint("BOTTOMRIGHT", -12, 10)
+        close:SetScript("OnClick", function() f:Hide() end)
+
+        f.edit = edit
+        COPY_BOX = f
+    end
+    COPY_BOX.edit:SetText(text or "")
+    COPY_BOX:Show()
+    COPY_BOX.edit:SetFocus()
+    COPY_BOX.edit:HighlightText()
+end
+
 local function BuildChat(panel)
     local CHAT = function() return GuildOS.AllianceChat end
+    local ROW2_Y = 20 + UI.GAP            -- the search row
+    local PIN_Y = ROW2_Y + 24 + UI.GAP    -- the pinned notice, when there is one, sits here
+
+    -- Session state, not saved: the guild the feed is narrowed to, and the lines this session sent
+    -- (Up recalls them). A new line of ours, or a jump, brings the feed back to its newest line.
+    local filterGuild
+    local history, historyAt = {}, nil
+    local forceBottom = true
+
+    -- Declared before anything that calls it: the buttons below close over it, and a later
+    -- declaration would leave those closures pointing at a nil global.
+    local refresh
 
     -- The status and the toggles share the screen's first line, flush with its edges (#371).
     local status = UI:CreateText(panel, "", 10, C.textDim.r, C.textDim.g, C.textDim.b)
@@ -509,8 +789,47 @@ local function BuildChat(panel)
     local gchatBtn = UI:CreateButton(panel, L["Allied /g"], 120, 20)
     gchatBtn:SetPoint("RIGHT", clearBtn, "LEFT", -6, 0)
 
+    -- Second row: the search box, and the guild the feed is narrowed to.
+    local filterBtn = UI:CreateButton(panel, L["All guilds"], 150, 24)
+    filterBtn:SetPoint("TOPRIGHT", 0, -ROW2_Y)
+    local search = makeInput(panel, 200, { placeholder = L["Search the chat"] })
+    search:SetPoint("TOPLEFT", 0, -ROW2_Y)
+    search:SetPoint("RIGHT", filterBtn, "LEFT", -UI.GAP, 0)
+    search:SetHeight(24)
+
+    -- The pinned notice: one line an ambassador keeps at the top of the feed.
+    local pinCard = CreateFrame("Frame", nil, panel, "BackdropTemplate")
+    pinCard:SetPoint("TOPLEFT", 0, -PIN_Y)
+    pinCard:SetPoint("TOPRIGHT", 0, -PIN_Y)
+    pinCard:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = GuildOS.UI:Edge(pinCard),
+    })
+    pinCard:SetBackdropColor(C.bg2.r, C.bg2.g, C.bg2.b, 0.7)
+    pinCard:SetBackdropBorderColor(C.gold.r, C.gold.g, C.gold.b, 0.5)
+    local pinRail = pinCard:CreateTexture(nil, "ARTWORK")
+    pinRail:SetPoint("TOPLEFT", 0, 0)
+    pinRail:SetPoint("BOTTOMLEFT", 0, 0)
+    pinRail:SetWidth(3)
+    pinRail:SetColorTexture(C.gold.r, C.gold.g, C.gold.b, 0.95)
+    local pinWho = UI:CreateText(pinCard, "", 10, C.textDim.r, C.textDim.g, C.textDim.b)
+    pinWho:SetPoint("TOPLEFT", 14, -8)
+    pinWho:SetJustifyH("LEFT")
+    local pinBody = UI:CreateText(pinCard, "", 12, C.text.r, C.text.g, C.text.b)
+    pinBody:SetPoint("TOPLEFT", 14, -24)
+    pinBody:SetJustifyH("LEFT")
+    pinBody:SetWordWrap(true)
+    local pinUnpin = UI:CreateButton(pinCard, L["Unpin"], 64, 18)
+    pinUnpin:SetPoint("TOPRIGHT", -8, -6)
+    pinUnpin:SetScript("OnClick", function()
+        local ok, err = ALLY():UnpinMessage()
+        if not ok and err then GuildOS:Print(err) end
+        refresh()
+    end)
+    pinCard:Hide()
+
     local holder = CreateFrame("Frame", nil, panel)
-    holder:SetPoint("TOPLEFT", 0, -(20 + UI.GAP))
+    holder:SetPoint("TOPLEFT", 0, -PIN_Y)
     holder:SetPoint("BOTTOMRIGHT", 0, 24 + UI.GAP)
     local scroll, content = UI:CreateScrollFrame(holder, "GuildOSAllianceChatScroll")
     fillScroll(scroll, content)
@@ -521,19 +840,44 @@ local function BuildChat(panel)
     local sendBtn = UI:CreateButton(panel, L["Send"], 62, 24)
     sendBtn:SetPoint("BOTTOMRIGHT", 0, 0)
 
+    -- Shown only when the feed is scrolled up, away from its newest line.
+    local jump = UI:CreateButton(panel, L["Latest"], 84, 22)
+    jump:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -14, 8)
+    jump:Hide()
+
+    local function atBottom()
+        return scroll:GetVerticalScroll() >= scroll:GetVerticalScrollRange() - 4
+    end
+    scroll:HookScript("OnVerticalScroll", function() setShown(jump, not atBottom()) end)
+    jump:SetScript("OnClick", function()
+        forceBottom = true
+        refresh()
+    end)
+
     local empty = UI:CreateText(content, L["Nothing here yet. Say hello."], 11,
         C.textSoft.r, C.textSoft.g, C.textSoft.b)
     empty:Hide()
+
+    -- A small text button on a card's top row. The card's own state is read at click time.
+    local function actionButton(card, text, onClick)
+        local btn = CreateFrame("Button", nil, card)
+        btn:SetSize(40, 14)
+        btn.fs = btn:CreateFontString(nil, "OVERLAY")
+        GuildOS:ApplyFont(btn.fs, 9)
+        btn.fs:SetPoint("RIGHT", btn, "RIGHT", 0, 0)
+        btn.fs:SetText(text)
+        btn.fs:SetTextColor(C.textDim.r, C.textDim.g, C.textDim.b)
+        btn:SetScript("OnEnter", function() btn.fs:SetTextColor(C.text.r, C.text.g, C.text.b) end)
+        btn:SetScript("OnLeave", function() btn.fs:SetTextColor(C.textDim.r, C.textDim.g, C.textDim.b) end)
+        btn:SetScript("OnClick", onClick)
+        return btn
+    end
 
     -- Blocks are POOLED. Refresh runs on every incoming message and WoW never
     -- frees a frame, so building widgets per refresh leaked for the whole
     -- session. Created on demand, parked when the log shrinks.
     local CLASS_TEX = "Interface\\WorldStateFrame\\Icons-Classes"
     local blocks = {}
-    -- Declared BEFORE getBlock: the hide button closes over it, and a later
-    -- declaration would leave that closure pointing at a nil global.
-    local refresh
-
     local function getBlock(i)
         if blocks[i] then return blocks[i] end
 
@@ -543,7 +887,7 @@ local function BuildChat(panel)
             edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = GuildOS.UI:Edge(card),
         })
 
-        -- Left accent bar in the speaker's class colour. This is the "bubble":
+        -- Left accent bar in the speaker's guild colour. This is the "bubble":
         -- WHITE8x8 cannot round a corner without shipping an art asset, so the
         -- card reads as a card through the bar and the hairline border instead.
         local accent = card:CreateTexture(nil, "ARTWORK")
@@ -555,15 +899,42 @@ local function BuildChat(panel)
         icon:SetSize(20, 20)
         icon:SetPoint("TOPLEFT", 10, -7)
 
+        -- Online dot, just right of the icon: green when the speaker is on right now.
+        local presence = card:CreateTexture(nil, "ARTWORK")
+        presence:SetSize(6, 6)
+        presence:SetPoint("TOPLEFT", 33, -14)
+
         local nameFS = UI:CreateText(card, "", 11, C.text.r, C.text.g, C.text.b)
-        nameFS:SetPoint("TOPLEFT", 38, -7)
+        nameFS:SetPoint("TOPLEFT", 42, -7)
         nameFS:SetJustifyH("LEFT")
 
         local timeFS = UI:CreateText(card, "", 9, C.textDim.r, C.textDim.g, C.textDim.b)
-        timeFS:SetPoint("TOPRIGHT", -8, -8)
+        timeFS:SetPoint("TOPRIGHT", -26, -9)
+
+        -- What this card holds right now, read by its action buttons at click time.
+        local st = {}
+        local reply = actionButton(card, L["Reply"], function()
+            if st.name then
+                input:SetText(st.name .. ": ")
+                input:SetFocus()
+            end
+        end)
+        reply:SetPoint("RIGHT", timeFS, "LEFT", -10, 0)
+        local copy = actionButton(card, L["Copy"], function()
+            if st.text then showCopyBox(st.text) end
+        end)
+        copy:SetPoint("RIGHT", reply, "LEFT", -8, 0)
+        local pinBtn = actionButton(card, L["Pin"], function()
+            if st.text then
+                local ok, err = ALLY():PinMessage(st.name .. ": " .. st.text)
+                if not ok and err then GuildOS:Print(err) end
+                refresh()
+            end
+        end)
+        pinBtn:SetPoint("RIGHT", copy, "LEFT", -8, 0)
 
         local bodyFS = UI:CreateText(card, "", 11, C.text.r, C.text.g, C.text.b)
-        bodyFS:SetPoint("TOPLEFT", 38, -22)
+        bodyFS:SetPoint("TOPLEFT", 42, -22)
         bodyFS:SetJustifyH("LEFT")
         bodyFS:SetWordWrap(true)
 
@@ -615,22 +986,28 @@ local function BuildChat(panel)
         end)
 
         blocks[i] = {
-            card = card, accent = accent, icon = icon,
+            card = card, accent = accent, icon = icon, presence = presence,
             nameFS = nameFS, timeFS = timeFS, bodyFS = bodyFS, hit = hit,
-            hide = hide, classTex = CLASS_TEX,
+            hide = hide, reply = reply, copy = copy, pinBtn = pinBtn, st = st,
+            classTex = CLASS_TEX,
         }
         return blocks[i]
     end
-
-    -- refresh is declared above, next to the block pool.
 
     local function doSend()
         local chat = CHAT()
         if not chat then return end
         -- Enter and click are hardware events, which is what makes a channel
         -- send legal here at all (see Modules/RecruitmentSystem.lua).
-        if chat:Send(input:GetText()) then
+        local text = input:GetText() or ""
+        if chat:Send(text) then
+            if text ~= "" then
+                table.insert(history, 1, text)
+                while #history > 20 do table.remove(history) end
+            end
+            historyAt = nil
             input:SetText("")
+            forceBottom = true
         else
             GuildOS:Print(L["Not connected to the alliance channel."])
         end
@@ -638,6 +1015,22 @@ local function BuildChat(panel)
     end
     sendBtn:SetScript("OnClick", doSend)
     input:SetScript("OnEnterPressed", doSend)
+
+    -- Up recalls the lines this session sent, newest first; Down walks back toward an empty box.
+    input:HookScript("OnArrowPressed", function(self, key)
+        if key == "UP" and #history > 0 then
+            historyAt = math.min((historyAt or 0) + 1, #history)
+            self:SetText(history[historyAt])
+        elseif key == "DOWN" and historyAt then
+            historyAt = historyAt - 1
+            if historyAt < 1 then
+                historyAt = nil
+                self:SetText("")
+            else
+                self:SetText(history[historyAt])
+            end
+        end
+    end)
 
     clearBtn:SetScript("OnClick", function()
         if CHAT() then CHAT():Clear() end
@@ -659,6 +1052,32 @@ local function BuildChat(panel)
         refresh()
     end)
 
+    -- The guild filter steps through the pact's guilds in name order, then back to all of them.
+    filterBtn:SetScript("OnClick", function()
+        local list = {}
+        local pact = ALLY():Get()
+        if pact then
+            for name in pairs(pact.guilds) do list[#list + 1] = name end
+            table.sort(list)
+        end
+        local nextGuild
+        if filterGuild == nil then
+            nextGuild = list[1]
+        else
+            for i, name in ipairs(list) do
+                if name == filterGuild then
+                    nextGuild = list[i + 1]
+                    break
+                end
+            end
+        end
+        filterGuild = nextGuild
+        forceBottom = true
+        refresh()
+    end)
+
+    search:HookScript("OnTextChanged", function() refresh() end)
+
     refresh = function()
         local chat = CHAT()
         if not chat then return end
@@ -666,6 +1085,12 @@ local function BuildChat(panel)
         -- The child's width is kept by BindScrollChildWidth (fillScroll), gutter included (#371).
         -- No clear() here: the rows are pooled, so this refresh shows exactly
         -- the ones it needs and parks the rest at the end.
+
+        local ally = ALLY()
+        local pact = ally and ally:Get()
+        local AC = GuildOS.AllianceChat
+        -- Whether the feed was already at its newest line before this refresh changes its height.
+        local wasBottom = atBottom()
 
         local prefs = chat:Prefs()
         sysBtn.label:SetText(prefs.system and L["Events: on"] or L["Events: off"])
@@ -675,42 +1100,87 @@ local function BuildChat(panel)
             and string.format(L["%s connected"], chat:ChannelName() or "?")
             or (chat:Prefs().chat and L["connecting..."] or L["not connected"]))
 
+        -- The filter button names the guild it narrows to. A guild that has left the pact drops out of it.
+        if filterGuild and not (pact and pact.guilds[filterGuild]) then filterGuild = nil end
+        filterBtn.label:SetText(filterGuild and string.format(L["Guild: %s"], filterGuild) or L["All guilds"])
+
+        -- The pinned notice holds its place above the feed; with none, the feed takes the room.
+        local pinned = ally and ally:Pin()
+        local canAdmin = ally and ally:CanAdminister()
+        local holderTop = PIN_Y
+        if pact and pinned and pinned.text then
+            local who = string.format(L["Pinned by %s"], pinned.by or "?")
+            if pinned.guild and pinned.guild ~= "" then who = who .. "  \194\183  " .. pinned.guild end
+            if (pinned.ts or 0) > 0 then
+                who = who .. "  \194\183  " .. GuildOS:LocalDate("%a %H:%M", pinned.ts)
+            end
+            pinWho:SetText(who)
+            pinBody:SetWidth(math.max(panel:GetWidth() - 28, 200))
+            pinBody:SetText(pinned.text)
+            setShown(pinUnpin, canAdmin)
+            local ph = math.max(34, (pinBody:GetStringHeight() or 12) + 32)
+            pinCard:SetHeight(ph)
+            pinCard:Show()
+            holderTop = PIN_Y + ph + UI.GAP
+        else
+            pinCard:Hide()
+        end
+        holder:ClearAllPoints()
+        holder:SetPoint("TOPLEFT", 0, -holderTop)
+        holder:SetPoint("BOTTOMRIGHT", 0, 24 + UI.GAP)
+
+        -- The feed: each line is kept or dropped by the guild filter and the search box, then grouped
+        -- by speaker. A line that opens a new day is preceded by the day's name.
+        local query = (search:GetText() or ""):lower()
         local rawLog = chat:Log()
         local hidden = chat:HiddenSet()
         local log = {}
         for _, e in ipairs(rawLog) do
-            if e.sys or not hidden[GuildOS.AllianceChat.HiddenKey(e.n, e.m)] then
+            if (e.sys or not hidden[AC.HiddenKey(e.n, e.m)]) and AC.PassesFilter(e, filterGuild, query) then
                 log[#log + 1] = e
             end
         end
-        local groups = GuildOS.AllianceChat.GroupLog(log, GuildOS.AllianceChat.GROUP_WINDOW)
-        local canHide = GuildOS.Alliance and GuildOS.Alliance:CanAdminister()
-        local myGuild = GuildOS.Alliance and GuildOS.Alliance:MyGuildName()
-        -- The wrap width of a message: refresh runs only while the tab is shown, so the child's
-        -- width is real; the cards themselves hang by both sides (#371).
+        local groups = AC.GroupLog(log, AC.GROUP_WINDOW)
+        local rows, lastDay = {}, nil
+        for _, g in ipairs(groups) do
+            if g.t and g.t > 0 then
+                local day = GuildOS:LocalDate("%Y-%m-%d", g.t)
+                if day ~= lastDay then
+                    rows[#rows + 1] = { divider = GuildOS:LocalDate("%A, %b %d", g.t) }
+                    lastDay = day
+                end
+            end
+            rows[#rows + 1] = { group = g }
+        end
+
+        local canHide = ally and ally:CanAdminister()
+        local myGuild = ally and ally:MyGuildName()
+        local me = (GuildOS.Compat.PlayerName() or ""):match("^([^-]+)") or ""
+        -- The wrap width of a message; the cards hang by both sides of the list (#371).
         local width = math.max(content:GetWidth(), 200)
         local y = 0
 
-        for i, g in ipairs(groups) do
+        for i, row in ipairs(rows) do
             local b = getBlock(i)
-            local stamp = g.t and date("%H:%M", g.t) or ""
 
-            if g.sys then
-                -- Events stand apart: no card, no speaker, a line in `label`, or `warn` for a warning.
-                -- No marker in front of it (#371).
-                local col = hex((g.sys == "warn") and C.warn or C.label)
+            if row.divider then
                 b.card:SetBackdropColor(0, 0, 0, 0)
                 b.card:SetBackdropBorderColor(0, 0, 0, 0)
                 b.accent:Hide()
                 b.icon:Hide()
+                b.presence:Hide()
                 b.nameFS:Hide()
+                b.timeFS:Hide()
                 b.hit:Hide()
                 b.hide:Hide()
-                b.timeFS:SetText(stamp)
+                b.reply:Hide()
+                b.copy:Hide()
+                b.pinBtn:Hide()
+                b.bodyFS:SetJustifyH("CENTER")
                 b.bodyFS:SetPoint("TOPLEFT", 0, -4)
-                b.bodyFS:SetWidth(width - 60)
-                b.bodyFS:SetText(string.format("|cff%s%s|r", col, g.lines[1] or ""))
-                local h = math.max(18, (b.bodyFS:GetStringHeight() or 12) + 8)
+                b.bodyFS:SetWidth(width)
+                b.bodyFS:SetText(string.format("|cff%s%s|r", hex(C.label), row.divider))
+                local h = 22
                 b.card:ClearAllPoints()
                 b.card:SetPoint("TOPLEFT", 0, -y)
                 b.card:SetPoint("TOPRIGHT", 0, -y)
@@ -718,69 +1188,130 @@ local function BuildChat(panel)
                 b.card:Show()
                 y = y + h + 2
             else
-                local info = GuildOS.Alliance and GuildOS.Alliance:SpeakerInfo(g.name)
-                local cr, cg, cb = GuildOS:GetClassColor(info and info.class)
-                local own = (g.guild == myGuild)
-
-                b.card:SetBackdropColor(C.bg2.r, C.bg2.g, C.bg2.b, own and 0.35 or 0.55)
-                b.card:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.35)
-                -- The rail is the GUILD's colour, matching the bulletin, so one
-                -- colour means one guild everywhere in this panel. Class still
-                -- reads off the icon and the name, which is where you look for
-                -- it anyway.
-                local gr, gg, gb = GuildOS.Alliance.GuildColor(g.guild)
-                b.accent:SetColorTexture(gr, gg, gb, 0.95)
-                b.accent:Show()
-
-                local coords = CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[info and info.class]
-                if coords then
-                    b.icon:SetTexture(b.classTex)
-                    b.icon:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
-                    b.icon:Show()
-                else
-                    b.icon:Hide()
+                local g = row.group
+                -- When the line was said: day and time to the minute, then how long ago that was.
+                local stamp = ""
+                if g.t and g.t > 0 then
+                    stamp = GuildOS:LocalDate("%a %H:%M", g.t) .. "  \194\183  " .. GuildOS:TimeAgo(g.t)
                 end
 
-                -- The guild tag stays dim for our own guild: in an alliance
-                -- channel the signal worth reading is WHICH ALLY is speaking.
-                b.nameFS:SetText(string.format("%s  |cff%s[%s]|r",
-                    g.name or "?", hex(own and C.labelDim or C.info), g.guild or "?"))
-                b.nameFS:SetTextColor(cr, cg, cb)
-                b.nameColor = { cr, cg, cb }
-                b.nameFS:Show()
+                if g.sys then
+                    -- Events stand apart: no card, no speaker, a line in `label`, or `warn` for a warning.
+                    -- No marker in front of it (#371).
+                    local col = hex((g.sys == "warn") and C.warn or C.label)
+                    b.card:SetBackdropColor(0, 0, 0, 0)
+                    b.card:SetBackdropBorderColor(0, 0, 0, 0)
+                    b.accent:Hide()
+                    b.icon:Hide()
+                    b.presence:Hide()
+                    b.nameFS:Hide()
+                    b.hit:Hide()
+                    b.hide:Hide()
+                    b.reply:Hide()
+                    b.copy:Hide()
+                    b.pinBtn:Hide()
+                    b.st.name, b.st.text = nil, nil
+                    b.timeFS:Show()
+                    b.timeFS:SetText(stamp)
+                    b.bodyFS:SetJustifyH("LEFT")
+                    b.bodyFS:SetPoint("TOPLEFT", 0, -4)
+                    b.bodyFS:SetWidth(width - 60)
+                    b.bodyFS:SetText(string.format("|cff%s%s|r", col, g.lines[1] or ""))
+                    local h = math.max(18, (b.bodyFS:GetStringHeight() or 12) + 8)
+                    b.card:ClearAllPoints()
+                    b.card:SetPoint("TOPLEFT", 0, -y)
+                    b.card:SetPoint("TOPRIGHT", 0, -y)
+                    b.card:SetHeight(h)
+                    b.card:Show()
+                    y = y + h + 2
+                else
+                    local text = table.concat(g.lines, "\n")
+                    local info = ally and ally:SpeakerInfo(g.name)
+                    local cr, cg, cb = GuildOS:GetClassColor(info and info.class)
+                    local own = (g.guild == myGuild)
+                    local mention = AC.MentionsMe(text, me)
 
-                b.timeFS:SetText(stamp)
-                b.bodyFS:SetPoint("TOPLEFT", 38, -22)
-                b.bodyFS:SetWidth(width - 46)
-                b.bodyFS:SetText(table.concat(g.lines, "\n"))
+                    b.card:SetBackdropColor(C.bg2.r, C.bg2.g, C.bg2.b, own and 0.35 or 0.55)
+                    if mention then
+                        -- A line that names you wears the warning tint, so it is found at a glance.
+                        b.card:SetBackdropColor(C.warn.r, C.warn.g, C.warn.b, 0.16)
+                    end
+                    b.card:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.35)
 
-                local h = math.max(34, (b.bodyFS:GetStringHeight() or 12) + 28)
-                b.card:ClearAllPoints()
-                b.card:SetPoint("TOPLEFT", 0, -y)
-                b.card:SetPoint("TOPRIGHT", 0, -y)
-                b.card:SetHeight(h)
-                b.card:Show()
+                    -- The rail is the GUILD's colour, matching the bulletin, so one
+                    -- colour means one guild everywhere in this panel. Class still
+                    -- reads off the icon and the name, which is where you look for
+                    -- it anyway.
+                    local gr, gg, gb = GuildOS.Alliance.GuildColor(g.guild)
+                    b.accent:SetColorTexture(gr, gg, gb, 0.95)
+                    b.accent:Show()
 
-                b.hit.name = g.name
-                b.hit.guild = g.guild
-                b.hit:Show()
+                    local coords = CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[info and info.class]
+                    if coords then
+                        b.icon:SetTexture(b.classTex)
+                        b.icon:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
+                        b.icon:Show()
+                    else
+                        b.icon:Hide()
+                    end
 
-                -- Hides the whole block's text, which is what the ambassador
-                -- clicked on: a run of lines from one speaker reads as one
-                -- message and pulling half of it would look like a glitch.
-                b.hide.who = g.name
-                b.hide.text = table.concat(g.lines, "\n")
-                setShown(b.hide, canHide)
-                y = y + h + 3
+                    local online = ally and ally:IsOnlineNow(g.name, g.guild)
+                    b.presence:SetColorTexture(
+                        online and C.online.r or C.offline.r,
+                        online and C.online.g or C.offline.g,
+                        online and C.online.b or C.offline.b, 1)
+                    b.presence:Show()
+
+                    -- The speaker's rank in their guild follows the name, dimmer than it.
+                    local role = ally and ally:RankOf(g.name, g.guild)
+                    local roleText = role and string.format("  |cff%s%s|r", hex(C.label), role) or ""
+                    b.nameFS:SetText(string.format("%s  |cff%s[%s]|r%s",
+                        g.name or "?", hex(own and C.labelDim or C.info), g.guild or "?", roleText))
+                    b.nameFS:SetTextColor(cr, cg, cb)
+                    b.nameColor = { cr, cg, cb }
+                    b.nameFS:Show()
+
+                    b.timeFS:Show()
+                    b.timeFS:SetText(stamp)
+                    b.bodyFS:SetJustifyH("LEFT")
+                    b.bodyFS:SetPoint("TOPLEFT", 42, -22)
+                    b.bodyFS:SetWidth(width - 54)
+                    b.bodyFS:SetText(AC.Highlight(text, query))
+
+                    local h = math.max(34, (b.bodyFS:GetStringHeight() or 12) + 28)
+                    b.card:ClearAllPoints()
+                    b.card:SetPoint("TOPLEFT", 0, -y)
+                    b.card:SetPoint("TOPRIGHT", 0, -y)
+                    b.card:SetHeight(h)
+                    b.card:Show()
+
+                    b.hit.name = g.name
+                    b.hit.guild = g.guild
+                    b.hit:Show()
+
+                    -- Hides the whole block's text, which is what the ambassador
+                    -- clicked on: a run of lines from one speaker reads as one
+                    -- message and pulling half of it would look like a glitch.
+                    b.hide.who = g.name
+                    b.hide.text = text
+                    setShown(b.hide, canHide)
+
+                    b.st.name, b.st.text = g.name, text
+                    b.reply:Show()
+                    b.copy:Show()
+                    setShown(b.pinBtn, canHide)
+                    y = y + h + 3
+                end
             end
         end
 
-        -- Park every pooled block the log no longer needs.
-        for i = #groups + 1, #blocks do
+        -- Park every pooled block the feed no longer needs.
+        for i = #rows + 1, #blocks do
             blocks[i].card:Hide()
         end
 
         if #log == 0 then
+            empty:SetText((query ~= "" or filterGuild) and L["No lines match."] or L["Nothing here yet. Say hello."])
             empty:SetPoint("TOPLEFT", 0, 0)
             empty:Show()
             y = 20
@@ -788,12 +1319,18 @@ local function BuildChat(panel)
             empty:Hide()
         end
         content:SetHeight(math.max(y, 1))
+
+        -- Stick to the newest line only if the feed was already there, or this refresh is ours.
+        local stick = forceBottom or wasBottom
+        forceBottom = false
         -- Deferred one frame: the scroll range is recomputed after the content
         -- height lands, so scrolling to the bottom in this frame would clamp
         -- against the OLD range and leave the newest line off screen.
         local target = math.max(0, y - holder:GetHeight())
         GuildOS.Compat.After(0, function()
-            if panel:IsVisible() then scroll:SetVerticalScroll(target) end
+            if not panel:IsVisible() then return end
+            if stick then scroll:SetVerticalScroll(target) end
+            setShown(jump, not atBottom())
         end)
     end
 
@@ -801,6 +1338,277 @@ local function BuildChat(panel)
         GuildOS.AllianceChat:OnRefresh(function()
             if panel:IsVisible() then refresh() end
         end)
+    end
+
+    return refresh
+end
+
+----------------------------------------------------------------------
+-- Events: the alliance's upcoming events, the Calendar's, soonest first. An ambassador creates one with the
+-- Calendar's own editor, shared to the alliance, and only ambassadors approve or cancel them. Anyone in the
+-- alliance can ask for a slot in another guild's event.
+----------------------------------------------------------------------
+local PEND_H, PEND_MAX = 22, 6
+local EVENT_ROLE_NEXT = { TANK = "HEALER", HEALER = "DPS", DPS = "TANK" }
+
+local function eventRoleName(role)
+    return ({ TANK = L["Tank"], HEALER = L["Healer"], DPS = L["DPS"] })[role] or L["DPS"]
+end
+
+local function BuildEvents(panel)
+    local count = UI:CreateText(panel, "", 11, C.label.r, C.label.g, C.label.b)
+    count:SetPoint("TOPRIGHT", 0, -3)
+    local title = UI:CreateSectionTitle(panel, "", true)
+    title:SetPoint("TOPLEFT", 0, 0)
+    title:SetPoint("RIGHT", count, "LEFT", -UI.GAP, 0)
+    title:SetWordWrap(false)
+
+    local FORM_Y = 18 + UI.GAP
+    local createBtn = UI:CreateButton(panel, L["Create event"], 130, 26)
+    createBtn:SetPoint("TOPRIGHT", 0, -FORM_Y)
+    createBtn:SetScript("OnClick", function() GuildOS.OpenAllianceEventEditor() end)
+
+    local hint = UI:CreateText(panel, "", 10, C.textDim.r, C.textDim.g, C.textDim.b)
+    hint:SetPoint("TOPLEFT", 0, -(FORM_Y + 6))
+
+    -- What happened to the last action. Errors used to go to the chat frame only, where a refused action
+    -- looked like nothing had happened.
+    local status = UI:CreateText(panel, "", 10, C.textDim.r, C.textDim.g, C.textDim.b)
+    status:SetPoint("TOPRIGHT", 0, -(FORM_Y + 26 + UI.GAP))
+    status:SetJustifyH("RIGHT")
+    local function feedback(ok, msg)
+        if not msg or msg == "" then return end
+        status:SetText(msg)
+        local col = ok and C.online or C.red
+        status:SetTextColor(col.r, col.g, col.b)
+    end
+
+    local holder = CreateFrame("Frame", nil, panel)
+    holder:SetPoint("TOPLEFT", 0, -(FORM_Y + 26 + UI.GAP + 16 + UI.GAP))
+    holder:SetPoint("BOTTOMRIGHT", 0, 0)
+    local scroll, content = UI:CreateScrollFrame(holder, "GuildOSAllianceEventsScroll")
+    fillScroll(scroll, content)
+
+    local empty = UI:CreateText(content, L["No upcoming events."], 12, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+    empty:SetPoint("TOPLEFT", 0, 0)
+    empty:Hide()
+
+    -- The role each event's request button asks for, kept across refreshes.
+    local roles = {}
+
+    local refresh
+
+    -- Cards are pooled, and so are the rows of pending requests inside them: WoW never frees a frame.
+    local cards = {}
+    local function pendRow(card, j)
+        if card.pend[j] then return card.pend[j] end
+        local row = {}
+        row.frame = CreateFrame("Frame", nil, card.card)
+        row.frame:SetHeight(PEND_H)
+        row.name = UI:CreateText(row.frame, "", 11, C.text.r, C.text.g, C.text.b)
+        row.name:SetPoint("LEFT", 14, 0)
+        row.role = UI:CreateText(row.frame, "", 10, C.label.r, C.label.g, C.label.b)
+        row.role:SetPoint("LEFT", 170, 0)
+        row.no = UI:CreateButton(row.frame, L["Decline"], 84, 18)
+        row.no:SetPoint("RIGHT", row.frame, "RIGHT", -6, 0)
+        row.yes = UI:CreateButton(row.frame, L["Approve"], 84, 18)
+        row.yes:SetPoint("RIGHT", row.no, "LEFT", -6, 0)
+        row.yes:SetScript("OnClick", function(self)
+            local ok, err = GuildOS.Calendar:ApproveAlliance(self.eventId, self.key)
+            feedback(ok, ok and L["Request approved."] or err)
+            refresh()
+        end)
+        row.no:SetScript("OnClick", function(self)
+            local ok, err = GuildOS.Calendar:DeclineAlliance(self.eventId, self.key, "declined")
+            feedback(ok, ok and L["Request declined."] or err)
+            refresh()
+        end)
+        card.pend[j] = row
+        return row
+    end
+
+    local function getCard(i)
+        if cards[i] then return cards[i] end
+        local card = CreateFrame("Frame", nil, content, "BackdropTemplate")
+        card:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = GuildOS.UI:Edge(card),
+        })
+        card:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.3)
+
+        local rail = card:CreateTexture(nil, "ARTWORK")
+        rail:SetPoint("TOPLEFT", 0, 0)
+        rail:SetPoint("BOTTOMLEFT", 0, 0)
+        rail:SetWidth(3)
+
+        local who = UI:CreateText(card, "", 10, C.textDim.r, C.textDim.g, C.textDim.b)
+        who:SetPoint("TOPLEFT", 14, -8)
+        who:SetJustifyH("LEFT")
+
+        local when = UI:CreateText(card, "", 9, C.textDim.r, C.textDim.g, C.textDim.b)
+        when:SetPoint("TOPRIGHT", -10, -9)
+
+        local ttl = UI:CreateText(card, "", 13, C.text.r, C.text.g, C.text.b)
+        ttl:SetPoint("TOPLEFT", 14, -24)
+        ttl:SetJustifyH("LEFT")
+        ttl:SetWordWrap(false)
+
+        local spots = UI:CreateText(card, "", 11, C.text.r, C.text.g, C.text.b)
+        spots:SetPoint("TOPRIGHT", -10, -24)
+
+        local note = UI:CreateText(card, "", 10, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+        note:SetPoint("TOPLEFT", 14, -44)
+        note:SetJustifyH("LEFT")
+        note:SetWordWrap(true)
+
+        local role = UI:CreateButton(card, "", 70, 22)
+        role:SetScript("OnClick", function(self)
+            local nextRole = EVENT_ROLE_NEXT[roles[self.eventId] or "DPS"] or "DPS"
+            roles[self.eventId] = nextRole
+            self.label:SetText(eventRoleName(nextRole))
+        end)
+
+        local ask = UI:CreateButton(card, L["Request slot"], 110, 22)
+        ask:SetScript("OnClick", function(self)
+            local ok, err = GuildOS.Calendar:RequestAllianceSlot(self.eventId, self.guild, roles[self.eventId] or "DPS", "")
+            feedback(ok, ok and string.format(L["Slot requested from %s."], self.guild) or err)
+            refresh()
+        end)
+
+        local state = UI:CreateText(card, "", 10, C.textDim.r, C.textDim.g, C.textDim.b)
+
+        local cancel = UI:CreateButton(card, L["Cancel event"], 100, 22)
+        cancel:SetScript("OnClick", function(self)
+            GuildOS.Calendar:Cancel(self.eventId)
+            feedback(true, L["Event cancelled."])
+            refresh()
+        end)
+
+        cards[i] = {
+            card = card, rail = rail, who = who, when = when, ttl = ttl, spots = spots,
+            note = note, role = role, ask = ask, state = state, cancel = cancel, pend = {},
+        }
+        return cards[i]
+    end
+
+    refresh = function()
+        local ally = GuildOS.Alliance
+        local cal = GuildOS.Calendar
+        local canAnswer = (cal and cal:IsAllianceAmbassador()) and true or false
+        local summary = ally and ally:Summary()
+
+        local events = {}
+        for _, ev in ipairs((cal and cal:AllianceEvents()) or {}) do events[#events + 1] = ev end
+        for _, ev in ipairs((cal and cal:OwnAllianceEvents()) or {}) do events[#events + 1] = ev end
+        table.sort(events, function(a, b) return (a.when or 0) < (b.when or 0) end)
+
+        title:SetText((summary and summary.name) or "")
+        count:SetText(string.format(L["%d upcoming"], #events))
+        setShown(createBtn, canAnswer)
+        hint:SetText(canAnswer and L["Ambassadors create events. Every guild in the alliance sees them."]
+            or L["Only alliance ambassadors can create events. Request a slot on any event below."])
+
+        local width = math.max(content:GetWidth(), 200)
+        local y = 0
+        for i, ev in ipairs(events) do
+            local c = getCard(i)
+            local r, g, b = ally.GuildColor(ev.guild)
+            local own = ev.own and true or false
+            local full = (ev.yes or 0) >= (ev.size or 0)
+            local pending = ev.pending or {}
+            local hosting = own and canAnswer
+
+            c.card:SetBackdropColor(C.bg2.r, C.bg2.g, C.bg2.b, 0.5)
+            c.rail:SetColorTexture(r, g, b, 0.95)
+
+            local kindText = (cal and cal:KindLabel(ev.kind)) or ev.kind
+            local eyebrow = string.format("|cff%s%s|r  \194\183  |cff%s%s|r",
+                ally.GuildColorHex(ev.guild), (ev.guild or "?"):upper(), hex(C.label), kindText)
+            if hosting and #pending > 0 then
+                eyebrow = eyebrow .. string.format("  \194\183  |cff%s%s|r", hex(C.gold), string.format(L["Requests (%d)"], #pending))
+            end
+            c.who:SetText(eyebrow)
+            c.when:SetText(GuildOS:LocalDate("%a %b %d %H:%M", ev.when))
+            c.ttl:SetText(ev.title or "")
+            c.spots:SetText(string.format(L["%d/%d spots"], ev.yes or 0, ev.size or 0))
+
+            local y0 = 44
+            if ev.note and ev.note ~= "" then
+                c.note:Show()
+                c.note:SetWidth(width - 40)
+                c.note:SetText(ev.note)
+                y0 = y0 + (c.note:GetStringHeight() or 12) + 6
+            else
+                c.note:Hide()
+            end
+
+            -- The action row: a request for another guild's event, a status, and for the host's ambassador a cancel.
+            local showAsk = not own and not full
+            c.role.eventId = ev.id
+            c.role.label:SetText(eventRoleName(roles[ev.id] or "DPS"))
+            c.role:ClearAllPoints()
+            c.role:SetPoint("TOPLEFT", c.card, "TOPLEFT", 14, -y0)
+            c.ask.eventId, c.ask.guild = ev.id, ev.guild
+            c.ask:ClearAllPoints()
+            c.ask:SetPoint("LEFT", c.role, "RIGHT", 6, 0)
+            setShown(c.role, showAsk)
+            setShown(c.ask, showAsk)
+
+            local stateText = ""
+            if own then
+                stateText = L["Yours"]
+            elseif full then
+                stateText = L["Full"]
+            end
+            c.state:SetText(stateText)
+            c.state:ClearAllPoints()
+            c.state:SetPoint("TOPLEFT", c.card, "TOPLEFT", 14, -(y0 + 5))
+            setShown(c.state, not showAsk and stateText ~= "")
+
+            c.cancel.eventId = ev.id
+            c.cancel:ClearAllPoints()
+            c.cancel:SetPoint("TOPRIGHT", c.card, "TOPRIGHT", -10, -y0)
+            setShown(c.cancel, hosting)
+
+            -- The host's ambassador sees the requests waiting, one row each, with Approve and Decline.
+            local py = y0 + 26
+            local shownPend = 0
+            if hosting then
+                for j, s in ipairs(pending) do
+                    if j > PEND_MAX then break end
+                    local row = pendRow(c, j)
+                    row.frame:ClearAllPoints()
+                    row.frame:SetPoint("TOPLEFT", c.card, "TOPLEFT", 0, -py)
+                    row.frame:SetPoint("TOPRIGHT", c.card, "TOPRIGHT", 0, -py)
+                    row.frame:Show()
+                    row.name:SetText(s.name or "?")
+                    row.role:SetText(eventRoleName(s.role))
+                    row.yes.eventId, row.yes.key = ev.id, s.key
+                    row.no.eventId, row.no.key = ev.id, s.key
+                    py = py + PEND_H
+                    shownPend = j
+                end
+            end
+            for j = shownPend + 1, #c.pend do c.pend[j].frame:Hide() end
+
+            local h = py + 8
+            c.card:ClearAllPoints()
+            c.card:SetPoint("TOPLEFT", 0, -y)
+            c.card:SetPoint("TOPRIGHT", 0, -y)
+            c.card:SetHeight(h)
+            c.card:Show()
+            y = y + h + UI.GAP
+        end
+
+        for i = #events + 1, #cards do cards[i].card:Hide() end
+
+        if #events == 0 then
+            empty:Show()
+            y = 24
+        else
+            empty:Hide()
+        end
+        content:SetHeight(math.max(y, 1))
     end
 
     return refresh
@@ -918,7 +1726,7 @@ local function BuildBulletin(panel)
         local summary = ally and ally:Summary()
         title:SetText((summary and summary.name) or "")
         count:SetText(summary
-            and string.format(L["%d guilds, %d members"], #summary.guilds, summary.members) or "")
+            and guildCountText(#summary.guilds, summary.members) or "")
 
         local canPost = ally and ally:CanAdminister()
         setShown(box, canPost)
@@ -939,9 +1747,19 @@ local function BuildBulletin(panel)
             c.card:SetBackdropColor(C.bg2.r, C.bg2.g, C.bg2.b, 0.5)
             c.rail:SetColorTexture(r, g, b, 0.95)
 
-            c.who:SetText(string.format("|cff%s%s|r  \194\183  %s",
-                Ally.GuildColorHex(p.guild), (p.guild or "?"):upper(), p.by or "?"))
-            c.when:SetText(p.ts and GuildOS:TimeAgo(p.ts) or "")
+            -- Who wrote it and in what role: the guild, then the poster, then their rank.
+            local eyebrow = string.format("|cff%s%s|r  \194\183  |cff%s%s|r",
+                Ally.GuildColorHex(p.guild), (p.guild or "?"):upper(), hex(C.text), p.by or "?")
+            if p.role and p.role ~= "" then
+                eyebrow = eyebrow .. string.format("  \194\183  |cff%s%s|r", hex(C.label), p.role)
+            end
+            c.who:SetText(eyebrow)
+            -- When it was written, to the minute, and how long ago that was.
+            if p.ts and p.ts > 0 then
+                c.when:SetText(GuildOS:LocalDate("%a %H:%M", p.ts) .. "  \194\183  " .. GuildOS:TimeAgo(p.ts))
+            else
+                c.when:SetText("")
+            end
 
             c.body:SetWidth(width - 40)
             c.body:SetText(p.text or "")
@@ -1613,6 +2431,9 @@ end
 local SUBTABS = {
     { key = "bulletin", label = L["Bulletin"], needsPact = true },
     { key = "chat",     label = L["Chat"],     needsPact = true },
+    { key = "events",   label = L["Events"],   needsPact = true },
+    -- The alliance applications: for ambassadors only, the ones who can accept or decline them.
+    { key = "applications", label = L["Applications"], needsAmbassador = true },
     { key = "overview", label = L["Overview"] },
     { key = "setup",    label = L["Setup"] },
     { key = "manage",   label = L["Manage"] },
@@ -1651,13 +2472,18 @@ function GuildOS:CreateAlliancePanel(parent, _mainFrame)
     -- pact leaves no gap in the bar. UI:FlowBar wraps to a second row when
     -- the window is too narrow, and its returned height is what pushes the
     -- sub-panels down.
+    local function isAmbassador()
+        local A = GuildOS.Alliance
+        return (A and A.IsMyAmbassador and A:IsMyAmbassador()) and true or false
+    end
+
     local hasPactNow = false
     local function layoutTabs(hasPact)
         hasPactNow = hasPact
         local visible, first = {}, nil
         for _, t in ipairs(SUBTABS) do
             local btn = btns[t.key]
-            local show = hasPact or not t.needsPact
+            local show = (hasPact or not t.needsPact) and (not t.needsAmbassador or isAmbassador())
             setShown(btn, show)
             if show then
                 visible[#visible + 1] = btn
@@ -1681,8 +2507,9 @@ function GuildOS:CreateAlliancePanel(parent, _mainFrame)
     end
 
     local builders = {
-        chat = BuildChat, overview = BuildOverview,
+        chat = BuildChat, overview = BuildOverview, events = BuildEvents,
         bulletin = BuildBulletin, manage = BuildManage, setup = BuildSetup,
+        applications = function(p) return GuildOS:CreateAllianceApplicationsPanel(p) end,
     }
     flexHints = {}
     for _, t in ipairs(SUBTABS) do
@@ -1703,6 +2530,17 @@ function GuildOS:CreateAlliancePanel(parent, _mainFrame)
         if not btn then return end
         btn.label:SetText(n > 0 and string.format("%s (%d)", L["Chat"], n) or L["Chat"])
     end
+    -- The Applications tab says how many are open, "Applications (2)", and follows each change.
+    local function paintApplications()
+        local btn = btns["applications"]
+        if not (btn and GuildOS.JoinRequests) then return end
+        local ok, n = pcall(GuildOS.JoinRequests.OpenCount, GuildOS.JoinRequests, "alliance")
+        n = ok and n or 0
+        btn.label:SetText(n > 0 and string.format(L["Applications (%d)"], n) or L["Applications"])
+    end
+    if GuildOS.JoinRequests and GuildOS.JoinRequests.Listen then GuildOS.JoinRequests:Listen(paintApplications) end
+    paintApplications()
+
     if GuildOS.AllianceChat then
         GuildOS.AllianceChat:OnRefresh(function()
             if parent:IsVisible() then paintUnread() end
@@ -1721,6 +2559,7 @@ function GuildOS:CreateAlliancePanel(parent, _mainFrame)
         end
         selectSub(want)
         paintUnread()
+        paintApplications()
     end)
 
     ----------------------------------------------------------------

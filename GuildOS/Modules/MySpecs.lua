@@ -1,5 +1,5 @@
 ----------------------------------------------------------------------
--- OutlawOS - My Char: the main spec and the offspec of every character.
+-- OutlawOS - My Toon: the main spec and the offspec of every character.
 --
 -- The spec list, role colours, role icons and the tab itself come from GuildOS_Unbroken by
 -- Christian (the "My Char" tab), used with his permission. The sync, the roster marks, the
@@ -227,6 +227,14 @@ function MySpecs.Save(ms, os)
   return true
 end
 
+-- Re-sends this character's own record. It rides on the answer to a guild sync request (CommSystem), so a
+-- member who logged in after the record was saved still gets it. Receivers apply it only when it is newer.
+function MySpecs.PublishOwn()
+  local st, me = Store(), Me()
+  local r = st and me and st[me]
+  if r and r.ed == me then Publish(r) end
+end
+
 -- The spec this character is playing right now, as a key, or nil.
 function MySpecs.Detect()
   local class = MyClass()
@@ -316,7 +324,7 @@ local function specTexture(row)
   hit:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     GameTooltip:AddLine(L["No spec recorded yet"], 1, 0.82, 0)
-    GameTooltip:AddLine(L["This member has not set a main spec in My Char, so their role is not known."], 0.8, 0.8, 0.8, true)
+    GameTooltip:AddLine(L["This member has not set a main spec in My Toon, so their role is not known."], 0.8, 0.8, 0.8, true)
     GameTooltip:Show()
   end)
   hit:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -467,7 +475,7 @@ ev:SetScript("OnEvent", function(_, event)
 end)
 
 ----------------------------------------------------------------------
--- The "My Char" tab
+-- The "My Toon" tab
 ----------------------------------------------------------------------
 local function openMenu(anchor, items)
   if not (UIDropDownMenu_Initialize and UIDropDownMenu_CreateInfo and UIDropDownMenu_AddButton and ToggleDropDownMenu) then
@@ -1138,7 +1146,7 @@ local function BuildPanel(panel)
 end
 
 UI:RegisterFeature({
-  id = "mychar", label = L["My Char"], order = 50,
+  id = "mychar", label = L["My Toon"], order = 50,
   build = function(c) return BuildPanel(c) end,
 })
 

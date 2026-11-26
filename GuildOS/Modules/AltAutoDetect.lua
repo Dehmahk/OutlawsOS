@@ -128,7 +128,7 @@ function AltAutoDetect:LinkOwnAlts(mainKey, altKeys)
     local links, changed = self:PlanGroup(GuildOS.db.altLinks, altKeys, mainKey)
     if GuildOS:IsOfficer() then
         if changed > 0 then
-            GuildOS.db.altLinks = links
+            GuildOS:SetAltLinks(links)
             if GuildOS.CommSystem then GuildOS.CommSystem:BroadcastAltLinks() end
         end
         return changed
@@ -364,7 +364,11 @@ function AltAutoDetect:HandleSelfClaim(sender, data)
             GuildOS.db.altLinks = GuildOS.db.altLinks or {}
             local senderGroup = GuildOS:GetLinkedChars(senderKey)
             for _, k in ipairs(senderGroup) do
-                if k == claim.main then GuildOS.db.altLinks[claim.main] = nil; break end
+                if k == claim.main then
+                    GuildOS.db.altLinks[claim.main] = nil
+                    GuildOS:StampAltLink(claim.main)
+                    break
+                end
             end
             for _, k in ipairs(claim.alts) do
                 if k ~= claim.main then GuildOS:LinkAlt(k, claim.main) end

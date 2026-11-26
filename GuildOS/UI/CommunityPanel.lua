@@ -2145,7 +2145,7 @@ local function BuildAboutSub(panel)
     editBtn:SetScript("OnClick", function()
         if EKO then EKO:OpenAboutEditor(EKO:AboutToText(ABOUT_SECTIONS)) end
     end)
-    local refresh
+    local refresh, lastWidth
     refresh = function()
         clear(child)
         editBtn:SetShown(EKO and EKO.CanEditAbout and EKO:CanEditAbout() or false)
@@ -2155,6 +2155,8 @@ local function BuildAboutSub(panel)
             local parsed = EKO:ParseAbout(stored.text)
             if #parsed > 0 then sections = parsed end
         end
+        local width = child:GetWidth() or 0
+        lastWidth = width
         local y = 0
         for i, sec in ipairs(sections) do
             if i > 1 then y = y + SECTION_SPACE end
@@ -2165,7 +2167,9 @@ local function BuildAboutSub(panel)
             for _, line in ipairs(sec.lines) do
                 local fs = UI:CreateText(child, line, 12, C.text.r, C.text.g, C.text.b)
                 fs:SetPoint("TOPLEFT", 0, -y)
-                fs:SetPoint("TOPRIGHT", -8, -y)
+                -- Set the width before reading the height: a wrapped line is measured at this width,
+                -- so a narrow window gets the extra rows it needs instead of overlapping the next line.
+                if width > 8 then fs:SetWidth(width - 8) end
                 fs:SetJustifyH("LEFT")
                 fs:SetWordWrap(true)
                 y = y + math.max(16, (fs:GetStringHeight() or 14) + 6)
@@ -2173,6 +2177,13 @@ local function BuildAboutSub(panel)
         end
         child:SetHeight(math.max(1, y))
     end
+    -- Re-lay the page when the window's width changes. The width check stops the page's own height
+    -- changes, made by refresh, from calling it again.
+    child:HookScript("OnSizeChanged", function()
+        C_Timer.After(0, function()
+            if panel:IsVisible() and (child:GetWidth() or 0) ~= lastWidth then refresh() end
+        end)
+    end)
     if EKO then EKO.aboutRefresh = function() if panel:IsVisible() then refresh() end end end
     return refresh
 end

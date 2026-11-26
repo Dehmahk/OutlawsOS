@@ -235,7 +235,7 @@ function EKO:SkinWindow(f)
 end
 
 -- The login banner: the guild's name and the motto across the screen, the first login of a session.
-function EKO:ShowBanner()
+function EKO:ShowBanner(greeting)
     local C = GuildOS.Colors
     local b = self.banner
     if not b then
@@ -267,7 +267,8 @@ function EKO:ShowBanner()
     local _, rank = GetGuildInfo("player")
     local first = (UnitName("player") or ""):match("^(%S+)") or ""
     b.title:SetText("Eastern Kingdoms Outlaws")
-    b.sub:SetText((rank == "Guild Master" and "Welcome back, Matriarch." or ("Welcome back, " .. first .. ".")) .. "   Free by choice, bound by bond.")
+    local line = greeting or (rank == "Guild Master" and "Welcome back, Matriarch." or ("Welcome back, " .. first .. "."))
+    b.sub:SetText(line .. "   Free by choice, bound by bond.")
     b:SetAlpha(0)
     b:Show()
     if UIFrameFadeIn then UIFrameFadeIn(b, 1.2, 0, 1) else b:SetAlpha(1) end
@@ -277,6 +278,9 @@ function EKO:ShowBanner()
     end)
 end
 
+-- The line the banner shows when the Guild Master logs in, on every OutlawOS client in the guild.
+local MATRIARCH_LINE = "The Matriarch has arrived."
+
 local bannerEv = CreateFrame("Frame")
 bannerEv:RegisterEvent("PLAYER_ENTERING_WORLD")
 bannerEv:SetScript("OnEvent", function(_, _, isLogin)
@@ -284,13 +288,44 @@ bannerEv:SetScript("OnEvent", function(_, _, isLogin)
     C_Timer.After(6, function()
         GuildOS:SafeCall(function()
             local db = EKO:DB()
-            if not EKO.themeOn or (db and db.noBanner) then return end
-            local gname = GetGuildInfo("player")
+            local gname, _, rankIndex = GetGuildInfo("player")
             if gname ~= "Eastern Kingdoms Outlaws" then return end
-            EKO:ShowBanner()
+            local isMatriarch = rankIndex == 0
+            -- The Guild Master's login goes out to the guild, whatever this client's banner setting is.
+            if isMatriarch and GuildOS.SyncService then
+                GuildOS.SyncService:Publish("matriarch", "arrived", { by = UnitName("player") }, { priority = "NORMAL" })
+            end
+            if not EKO.themeOn or (db and db.noBanner) then return end
+            EKO:ShowBanner(isMatriarch and MATRIARCH_LINE or nil)
         end)
     end)
 end)
+
+-- Another member's Guild Master login: the same banner here. Only the guild master on the roster counts,
+-- so a message from anyone else claiming it is dropped.
+local function isMatriarchOnRoster(sender)
+    local want = (sender or ""):match("^([^-]+)")
+    if not want or want == "" then return false end
+    for i = 1, (GetNumGuildMembers() or 0) do
+        local name, _, rankIndex = GetGuildRosterInfo(i)
+        if name and rankIndex == 0 and (name:match("^([^-]+)") or name) == want then return true end
+    end
+    return false
+end
+
+if GuildOS.SyncService then
+    GuildOS.SyncService:On("matriarch", function(_, sender)
+        GuildOS:SafeCall(function()
+            if not IsInGuild or not IsInGuild() then return end
+            local db = EKO:DB()
+            if not EKO.themeOn or (db and db.noBanner) then return end
+            local gname = GetGuildInfo("player")
+            if gname ~= "Eastern Kingdoms Outlaws" then return end
+            if not isMatriarchOnRoster(sender) then return end
+            EKO:ShowBanner(MATRIARCH_LINE)
+        end)
+    end)
+end
 
 -- Lore lines in the Activity feed (Modules/Digest.lua reads these keys).
 L["%d new member(s): %s"] = "%d signed the Ledger: %s"
@@ -356,6 +391,13 @@ end
 ----------------------------------------------------------------------
 -- The guild roster, read once per call
 ----------------------------------------------------------------------
+-- A member's addon record. Records are keyed "Name-Realm" while the roster's names are short, so try
+-- the short name, the roster's full name, then this realm's key.
+function EKO:MemberRecord(name, full)
+    local gdb = (GuildOS.db and GuildOS.db.members) or {}
+    return gdb[name] or (full and gdb[full]) or gdb[GuildOS:GetPlayerKey(name) or name] or nil
+end
+
 -- { [short] = { name, rank, rankIndex, level, class, online, hoursOff, index } }
 function EKO:Roster()
     local out = {}
@@ -664,6 +706,16 @@ function EKO:IsLeader(name)
     return false
 end
 
+-- Quick Tools (the Inner Circle's leadership-only tab): an officer, or the Raid Marshal rank that the
+-- Raid Leader role holds. Event Organizers and recruiters are Heralds, so they are left out.
+function EKO:CanQuickTools()
+    if not (IsInGuild and IsInGuild()) then return false end
+    local _, rank = GetGuildInfo("player")
+    if not rank then return false end
+    if rank == self.ROLE_RANK["Event Organizer"] or rank == self.ROLE_RANK["Recruiter"] then return false end
+    return rank == self.ROLE_RANK["Raid Leader"] or GuildOS:IsOfficer() == true
+end
+
 -- Recruiting permissions (GuildOS:CanRecruit, CanRecruitByName) are in Modules/RecruitmentSystem.lua.
 
 -- Verified Bounty Board clears this week that name the member (the clear's `who` list).
@@ -691,11 +743,10 @@ function EKO:Candidates()
     local r = db.ready
     local t = now()
     local alts = (GuildOS.db and GuildOS.db.altLinks) or {}
-    local members = (GuildOS.db and GuildOS.db.members) or {}
     local out = {}
     local lotwText = (self:Lotw() or {}).text or ""
     for name, m in pairs(self:Roster()) do
-        local mem = members[name]
+        local mem = self:MemberRecord(name, m.full)
         local gos = (mem and mem.addonVersion) and true or false
         if m.rank == "Recruit" and gos and not alts[name] and not self:IsLeader(name)
             and not (r.skip[name] and r.skip[name] > t) then
@@ -877,13 +928,13 @@ end
 function EKO:SuggestData()
     local TT = GuildOS.TrialTracker
     local roster = self:Roster()
-    local members = (GuildOS.db and GuildOS.db.members) or {}
     local alts = (GuildOS.db and GuildOS.db.altLinks) or {}
     local t = now()
     local d = { soon = {}, cleanup = {}, leadersAway = {}, noGuildOSOnline = {}, noGuildOS = 0, total = 0, ready = 0 }
     for name, m in pairs(roster) do
         d.total = d.total + 1
-        if not (members[name] and members[name].addonVersion) then
+        local rec = self:MemberRecord(name, m.full)
+        if not (rec and rec.addonVersion) then
             d.noGuildOS = d.noGuildOS + 1
             if m.online then d.noGuildOSOnline[#d.noGuildOSOnline + 1] = name end
         end
@@ -1405,7 +1456,6 @@ end
 -- First to each level (from the journal's level milestones) and the first of each class to max level.
 function EKO:LevelFirsts()
     local firstAt, classMax = {}, {}
-    local members = (GuildOS.db and GuildOS.db.members) or {}
     local max = GuildOS.Client and GuildOS.Client.maxLevel or 60
     for _, e in pairs(entries()) do
         if type(e) == "table" and (e.type == "member.level" or e.type == "member.level60") then
@@ -1415,7 +1465,7 @@ function EKO:LevelFirsts()
                 local f = firstAt[level]
                 if not f or (e.at or 0) < f.at then firstAt[level] = { name = s, at = e.at or 0 } end
                 if level >= max then
-                    local mem = members[s] or members[e.subjectKey]
+                    local mem = self:MemberRecord(s, e.subjectKey)
                     local cls = mem and mem.class
                     if cls and (not classMax[cls] or (e.at or 0) < classMax[cls].at) then classMax[cls] = { name = s, at = e.at or 0 } end
                 end
@@ -1677,6 +1727,17 @@ function EKO:JournalBlock(key, content, y, width)
             set:SetScript("OnClick", function()
                 EKO:TextPopup("This week's Bounty Board", "One dungeon per line. Start with Low:, Mid: or High: for its tier, e.g.  Low: The Hall of Thanes",
                     bt and bt.text or "Low: \nLow: \nMid: \nMid: \nHigh: \nHigh: ", function(t) EKO:SaveBounties(t) end)
+            end)
+            local sc = UI:CreateButton(b, "Set verified clears", 130, 20)
+            sc:SetPoint("TOPRIGHT", -106, 2)
+            sc:SetScript("OnClick", function()
+                local cs = shared("bountyclears")
+                local cur = (type(cs) == "table" and cs.week == EKO:WeekStart()) and (cs.text or "") or ""
+                EKO:TextPopup("Verified clears",
+                    "Paste this week's rows from the Bounty Board sheet's Clears tab, columns A to J, all at once. Only the newest week in the paste counts. Each Clear # with three or more Outlaws marks its dungeon's poster. Clear the box to remove them.",
+                    cur, function(t)
+                        EKO:SetShared("bountyclears", { text = t, week = (t ~= "" and EKO:WeekStart()) or nil })
+                    end)
             end)
         end
         if #list == 0 then
@@ -2529,7 +2590,7 @@ local function gazetteLine(raw)
 end
 EKO.GazetteLine = gazetteLine   -- the Now tab's preview styles its lines the same way
 
-function EKO:ShowGazettePopup(gz)
+function EKO:ShowGazettePopup(gz, title)
     local UI, C = GuildOS.UI, GuildOS.Colors
     local gold = { r = 1, g = 0.82, b = 0 }
     local f = self.gazettePopup
@@ -2596,7 +2657,11 @@ function EKO:ShowGazettePopup(gz)
     child:SetHeight(y + 10)
     f.sf:SetVerticalScroll(0)
 
-    f.copy:SetScript("OnClick", function() GuildOS:ShowExportPopup("The Outlaw Gazette", gz) end)
+    if y <= 4 then add("No notes for this release.", 12, C.textSoft, 6) end
+    child:SetHeight(y + 10)
+    local heading = title or "The Outlaw Gazette"
+    f.title:SetText(heading)
+    f.copy:SetScript("OnClick", function() GuildOS:ShowExportPopup(heading, gz) end)
     f:Show(); f:Raise()
 end
 
@@ -2686,12 +2751,47 @@ end
 ----------------------------------------------------------------------
 -- The Gilded Feather > Wanted: posters, the Hunter, Most Wanted, Location of the Week
 ----------------------------------------------------------------------
+-- Clears typed in on the Wanted page: { week, clears = { [dungeon] = { { names = {...}, full = bool }, ... } } }.
+EKO.CLEARS_MAX = 3   -- clears per dungeon on one board
+local function formClears()
+    local s = shared("bountyclearsform")
+    if type(s) ~= "table" or s.week ~= EKO:WeekStart() then return {} end
+    return s.clears or {}
+end
+
 function EKO:BuildWantedSub(panel)
     local UI, C = GuildOS.UI, GuildOS.Colors
     local _, child = makeList(panel, "GuildOSEKOWantedScroll", 0)
     local refresh
+    local formState, live = nil, {}
+    -- Copies what is typed into the open boxes back into the state, before a rebuild or a save.
+    local function captureForm()
+        if not formState then return end
+        for dungeon, rows in pairs(formState.rows) do
+            for i, r in ipairs(rows) do
+                local l = live[dungeon] and live[dungeon][i]
+                if l then
+                    for k = 1, 5 do r.names[k] = l.boxes[k]:GetText() or "" end
+                    r.full = l.cb:GetChecked() and true or false
+                end
+            end
+        end
+    end
+    local function formSync(week)
+        if formState and formState.week == week then return end
+        formState = { week = week, rows = {} }
+        for dungeon, list in pairs(formClears()) do
+            formState.rows[dungeon] = {}
+            for _, c in ipairs(list) do
+                local names = {}
+                for k = 1, 5 do names[k] = c.names[k] or "" end
+                table.insert(formState.rows[dungeon], { names = names, full = c.full and true or false })
+            end
+        end
+    end
     refresh = function()
         if not EKO:DB() then return end
+        captureForm()
         clear(child)
         local width = math.max(400, (child:GetWidth() or 0) > 1 and child:GetWidth() or 760)
         local y = 0
@@ -2706,7 +2806,20 @@ function EKO:BuildWantedSub(panel)
         -- Wanted posters
         local bt = EKO:Bounties()
         local list = bt and EKO:ParseBounties(bt.text) or {}
-        sectionAt(child, "WANTED  ·  this week's bounties", y); y = y + 26
+        local wh = sectionAt(child, "WANTED  ·  this week's bounties", y)
+        if GuildOS:IsOfficer() then
+            local cb = btn(wh, "Verified clears", 120, function()
+                local cs = shared("bountyclears")
+                local cur = (type(cs) == "table" and cs.week == EKO:WeekStart()) and (cs.text or "") or ""
+                EKO:TextPopup("Verified clears",
+                    "Paste this week's rows from the Bounty Board sheet's Clears tab, columns A to J, all at once. Only the newest week in the paste counts. Each Clear # with three or more Outlaws marks its dungeon's poster. Clear the box to remove them.",
+                    cur, function(t)
+                        EKO:SetShared("bountyclears", { text = t, week = (t ~= "" and EKO:WeekStart()) or nil })
+                    end)
+            end)
+            cb:SetPoint("TOPRIGHT", 0, 2)
+        end
+        y = y + 26
         if #list == 0 then
             txt(child, "No bounties posted this week yet. Officers post them in Journal > Set bounties.", 0, y, width, 12, C.textSoft)
             y = y + 22
@@ -2753,6 +2866,80 @@ function EKO:BuildWantedSub(panel)
                 end
             end
             y = y + (math.floor((#list - 1) / cols) + 1) * (ch + 12)
+        end
+
+        -- Verified clears, typed in: one block per dungeon on the board, up to CLEARS_MAX clears each.
+        if GuildOS:IsOfficer() and #list > 0 then
+            formSync(EKO:WeekStart())
+            y = y + 12
+            sectionAt(child, "VERIFIED CLEARS  ·  type them in, or paste above", y); y = y + 24
+            live = {}
+            local nameW = math.max(50, math.floor((width - 200) / 5) - 6)
+            for _, bnt in ipairs(list) do
+                local rows = formState.rows[bnt.name] or {}
+                formState.rows[bnt.name] = rows
+                txt(child, GOLDC .. bnt.name .. "|r" .. (bnt.tier and ("  ·  " .. bnt.tier .. " tier") or ""), 0, y, width, 12)
+                y = y + 18
+                live[bnt.name] = {}
+                for i, r in ipairs(rows) do
+                    local rowF = CreateFrame("Frame", nil, child)
+                    rowF:SetSize(width, 26)
+                    rowF:SetPoint("TOPLEFT", 0, -y)
+                    local entry = { boxes = {} }
+                    live[bnt.name][i] = entry
+                    for k = 1, 5 do
+                        local box = input(rowF, nameW, "Name")
+                        box:SetPoint("LEFT", (k - 1) * (nameW + 6), 0)
+                        box:SetText(r.names[k] or "")
+                        entry.boxes[k] = box
+                    end
+                    local cb = CreateFrame("CheckButton", nil, rowF, "UICheckButtonTemplate")
+                    cb:SetSize(22, 22)
+                    cb:SetPoint("LEFT", 5 * (nameW + 6), 0)
+                    cb:SetChecked(r.full)
+                    entry.cb = cb
+                    local cbl = UI:CreateText(rowF, "Full party", 10, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+                    cbl:SetPoint("LEFT", cb, "RIGHT", 2, 0)
+                    local rm = btn(rowF, "Remove", 66, function()
+                        captureForm()
+                        table.remove(formState.rows[bnt.name], i)
+                        refresh()
+                    end)
+                    rm:SetPoint("LEFT", cbl, "RIGHT", 6, 0)
+                    y = y + 28
+                end
+                if #rows < EKO.CLEARS_MAX then
+                    local add = btn(child, "+ Add clear", 100, function()
+                        captureForm()
+                        table.insert(formState.rows[bnt.name], { names = { "", "", "", "", "" }, full = false })
+                        refresh()
+                    end)
+                    add:SetPoint("TOPLEFT", 0, -y)
+                    y = y + 26
+                end
+                y = y + 8
+            end
+            local sv = btn(child, "Save verified clears", 160, function()
+                captureForm()
+                local clears = {}
+                for dungeon, rows in pairs(formState.rows) do
+                    for _, r in ipairs(rows) do
+                        local names, seen = {}, {}
+                        for _, n in ipairs(r.names) do
+                            local t = (n or ""):match("^%s*(.-)%s*$")
+                            if t ~= "" and not seen[t] then seen[t] = true; names[#names + 1] = t end
+                        end
+                        if #names > 0 then
+                            clears[dungeon] = clears[dungeon] or {}
+                            table.insert(clears[dungeon], { names = names, full = r.full and true or false })
+                        end
+                    end
+                end
+                EKO:SetShared("bountyclearsform", { week = EKO:WeekStart(), clears = clears })
+            end)
+            sv:SetPoint("TOPLEFT", 0, -y)
+            if UI.SetButtonVariant then UI:SetButtonVariant(sv, "primary") end
+            y = y + 30
         end
 
         -- Most Wanted (Notoriety)
@@ -2831,6 +3018,18 @@ end
 ----------------------------------------------------------------------
 -- The Gilded Feather > Raffle
 ----------------------------------------------------------------------
+-- The raffle's gold per place, one per line. Read fresh each time, so it edits what is saved now.
+-- Shared by the Raffle tab and Quick Tools.
+function EKO:EditRafflePrizes()
+    local r = self:Raffle()
+    self:TextPopup("Raffle prizes", "Gold per place, one per line (1st on the first line). Use 0.7 for 70s, 0.5 for 50s, 0.3 for 30s.",
+        table.concat(r.prizes, "\n"), function(t)
+            local p = {}
+            for n in t:gmatch("%d+%.?%d*") do p[#p + 1] = tonumber(n) end
+            if #p > 0 then self:SetShared("raffle", { text = r.text, prizes = p, winners = r.winners or {}, week = r.week }) end
+        end)
+end
+
 function EKO:BuildRaffleSub(panel)
     local UI, C = GuildOS.UI, GuildOS.Colors
     local _, child = makeList(panel, "GuildOSEKORaffleScroll", 0)
@@ -2857,14 +3056,7 @@ function EKO:BuildRaffleSub(panel)
                 if a then ChatFrame_OpenChat("/g " .. a) else GuildOS:Print("Draw a winner first.") end
             end)
             hb("Draw next place", 120, function() EKO:DrawRaffle() end)
-            hb("Prizes", 70, function()
-                EKO:TextPopup("Raffle prizes", "Gold per place, one per line (1st on the first line). Use 0.7 for 70s, 0.5 for 50s, 0.3 for 30s.",
-                    table.concat(r.prizes, "\n"), function(t)
-                        local p = {}
-                        for n in t:gmatch("%d+%.?%d*") do p[#p + 1] = tonumber(n) end
-                        if #p > 0 then EKO:SetShared("raffle", { text = r.text, prizes = p, winners = r.winners or {}, week = r.week }) end
-                    end)
-            end)
+            hb("Prizes", 70, function() EKO:EditRafflePrizes() end)
             hb("Set entries", 90, function()
                 EKO:TextPopup("Raffle entries", "Entries are counted from this week's clears. Set a list here only to override them for this week, one Outlaw per line, e.g.  Ryzen Moros 4. Clear the box to go back to the counted entries.",
                     r.text or "", function(t) EKO:SetShared("raffle", { text = t, prizes = r.prizes, winners = {}, week = (t ~= "" and EKO:WeekStart()) or nil }) end)
@@ -3023,9 +3215,103 @@ end
 ----------------------------------------------------------------------
 -- Inner Circle > Outlaw Desk: Hunter, LotW, strikes, Quote the Code, Gazette, ads, anniversaries
 ----------------------------------------------------------------------
+----------------------------------------------------------------------
+-- Quick Tools (leadership only): the editors and actions an officer or Raid Leader uses most, grouped
+-- by what they change. Each button opens the same editor as its home screen and keeps that screen's check.
+----------------------------------------------------------------------
+function EKO:BuildQuickSub(panel)
+    local _, child = makeList(panel, "GuildOSEKOQuickScroll", 0)
+    local refresh
+    refresh = function()
+        if not EKO:DB() then return end
+        clear(child)
+        local width = math.max(400, (child:GetWidth() or 0) > 1 and child:GetWidth() or 760)
+        local officer = GuildOS:IsOfficer()
+        local y = 0
+
+        -- A category: its title, then its buttons in rows that wrap at the panel's width. An item with
+        -- `when` shows only while that returns true.
+        local function category(title, items)
+            local shown = {}
+            for _, it in ipairs(items) do
+                if not it.when or it.when() then shown[#shown + 1] = it end
+            end
+            if #shown == 0 then return end
+            sectionAt(child, title, y, y == 0); y = y + 26
+            local x, rowY = 0, y
+            for _, it in ipairs(shown) do
+                local w = it.w or 150
+                if x > 0 and x + w > width then x = 0; rowY = rowY + 26 end
+                btn(child, it.label, w, it.fn):SetPoint("TOPLEFT", x, -rowY)
+                x = x + w + 6
+            end
+            y = rowY + 36
+        end
+
+        category("LOCATION OF THE WEEK", {
+            { label = "Edit spots & prizes", w = 170, when = function() return officer end,
+              fn = function() EKO:EditLotw() end },
+        })
+
+        -- Bounty Hunter of the Month: a name, Crown, and who holds it this month.
+        sectionAt(child, "BOUNTY HUNTER OF THE MONTH", y, y == 0); y = y + 26
+        local hbox = input(child, 180, "Bounty Hunter of the Month")
+        hbox:SetPoint("TOPLEFT", 0, -y)
+        local crown = btn(child, "Crown", 70, function() EKO:SetHunter(hbox:GetText()); refresh() end)
+        crown:SetPoint("LEFT", hbox, "RIGHT", 6, 0)
+        local h = EKO:Hunter()
+        local ht = txt(child, (h and h.month == monthKey()) and ("Current: " .. GOLDC .. h.name .. "|r") or "", 0, 0, 220, 11)
+        ht:ClearAllPoints(); ht:SetPoint("LEFT", crown, "RIGHT", 10, 0)
+        y = y + 36
+
+        category("BOUNTY BOARD", {
+            { label = "Set bounties", w = 120, when = function() return officer end, fn = function()
+                local bt = EKO:Bounties()
+                EKO:TextPopup("This week's Bounty Board", "One dungeon per line. Start with Low:, Mid: or High: for its tier, e.g.  Low: The Hall of Thanes",
+                    bt and bt.text or "Low: \nLow: \nMid: \nMid: \nHigh: \nHigh: ", function(t) EKO:SaveBounties(t) end)
+            end },
+            { label = "Set verified clears", w = 150, when = function() return officer end, fn = function()
+                local cs = shared("bountyclears")
+                local cur = (type(cs) == "table" and cs.week == EKO:WeekStart()) and (cs.text or "") or ""
+                EKO:TextPopup("Verified clears",
+                    "Paste this week's rows from the Bounty Board sheet's Clears tab, columns A to J, all at once. Only the newest week in the paste counts. Each Clear # with three or more Outlaws marks its dungeon's poster. Clear the box to remove them.",
+                    cur, function(t)
+                        EKO:SetShared("bountyclears", { text = t, week = (t ~= "" and EKO:WeekStart()) or nil })
+                    end)
+            end },
+        })
+
+        -- Reset raffle is left to the Raffle tab: it clears the winners with no way back, so it isn't one click here.
+        category("RAFFLE", {
+            { label = "Raffle prizes", w = 120, when = function() return officer end, fn = function() EKO:EditRafflePrizes() end },
+            { label = "Draw next place", w = 130, when = function() return officer end, fn = function() EKO:DrawRaffle() end },
+            { label = "Announce raffle", w = 130, when = function() return officer end, fn = function()
+                local a = EKO:RaffleAnnouncement()
+                if a then ChatFrame_OpenChat("/g " .. a) else GuildOS:Print("Draw a winner first.") end
+            end },
+        })
+
+        category("GAZETTE AND ANNOUNCEMENTS", {
+            { label = "The Outlaw Gazette", w = 150, fn = function() EKO:ShowGazettePopup(EKO:Gazette()) end },
+            { label = "Edit Gazette", w = 110, when = function() return EKO:CanEditAbout() end,
+              fn = function() EKO:OpenGazetteEditor() end },
+            { label = "Post Announcement", w = 150,
+              when = function() return GuildOS.Announcements ~= nil and GuildOS.Announcements.CanPost() end,
+              fn = function() GuildOS.Announcements.OpenPopup() end },
+        })
+
+        category("CHECKS", {
+            { label = "Check who's online", w = 150, fn = function() EKO:CheckPatch() end },
+        })
+    end
+    return refresh
+end
+
 function EKO:BuildDeskSub(panel)
     local UI, C = GuildOS.UI, GuildOS.Colors
     local _, child = makeList(panel, "GuildOSEKODeskScroll", 0)
+    local stillOpen = false -- the install check's "still on GuildOS" list starts closed
+    local onOpen, noOpen = false, false -- and so do the "on OutlawOS" and "no addon data" lists
     local refresh
     refresh = function()
         if not EKO:DB() then return end
@@ -3057,6 +3343,10 @@ function EKO:BuildDeskSub(panel)
         local h = EKO:Hunter()
         local ht = txt(row, (h and h.month == monthKey()) and ("Current: " .. GOLDC .. h.name .. "|r") or "", 0, 4, 220, 11)
         ht:ClearAllPoints(); ht:SetPoint("LEFT", b3, "RIGHT", 10, 0)
+        -- Opens the announcement popup (Modules/Announcements.lua); hidden for recruiters, who cannot post.
+        local bPost = btn(row, "Post Announcement", 150, function() GuildOS.Announcements.OpenPopup() end)
+        bPost:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+        if not (GuildOS.Announcements and GuildOS.Announcements.CanPost()) then bPost:Hide() end
         y = y + 32
 
         -- Who has OutlawOS: every leader (the Leadership tab's list and the roster's Leadership ranks), with
@@ -3113,10 +3403,9 @@ function EKO:BuildDeskSub(panel)
         for _, u in ipairs(EKO:PatchUsers()) do
             if u.at and u.at >= recent then checked[short(u.name)] = u end
         end
-        local gdb = (GuildOS.db and GuildOS.db.members) or {}
         local still, onOutlaw, noAddon = {}, {}, {}
         for name, m in pairs(EKO:Roster()) do
-            local mem = gdb[name]
+            local mem = EKO:MemberRecord(name, m.full)
             if checked[name] then
                 onOutlaw[#onOutlaw + 1] = { name = name, m = m, online = m.online }
             elseif mem and mem.addonVersion then
@@ -3132,31 +3421,63 @@ function EKO:BuildDeskSub(panel)
         table.sort(still, byOnline)
         table.sort(onOutlaw, byOnline)
         table.sort(noAddon, byOnline)
-        local function joinNames(list)
-            if #list == 0 then return "None." end
-            local out = {}
-            for i, u in ipairs(list) do out[i] = u.name end
-            return table.concat(out, ", ")
+        -- A list of members behind a Show list button, the same as the Still on GuildOS list.
+        local function memberList(title, list, open, onToggle, extra)
+            sectionAt(child, title, y); y = y + 26
+            if #list == 0 then
+                txt(child, "None.", 0, y, width, 12, C.textSoft); y = y + 22
+            else
+                local toggle = CreateFrame("Frame", nil, child)
+                toggle:SetHeight(24); toggle:SetPoint("TOPLEFT", 0, -y); toggle:SetPoint("TOPRIGHT", 0, -y)
+                local tb = btn(toggle, (open and "Hide list" or "Show list") .. "  (" .. #list .. ")", 150, onToggle)
+                tb:SetPoint("LEFT", 0, 0)
+                y = y + 30
+                if open then
+                    for i, u in ipairs(list) do
+                        local r = newRow(child, y, i, 22)
+                        cell(r, u.m and classColored(u.m) or u.name, 8, 200)
+                        if extra then cell(r, extra(u), 215, 200) end
+                        cell(r, u.online and (GREEN .. "online|r") or (GREY .. "offline|r"), 430, 70)
+                        y = y + 24
+                    end
+                end
+            end
+            y = y + 8
         end
         sectionAt(child, string.format("INSTALL CHECK  ·  %d on OutlawOS, %d still on GuildOS, %d no addon", #onOutlaw, #still, #noAddon), y)
         y = y + 26
         local inote = txt(child, "On OutlawOS: a check-in in the last " .. EKO.PATCH_RECENT_DAYS .. " days. Still on GuildOS: the guild's addon sync shows GuildOS and no recent check-in. Use Check who's online above to refresh.", 0, y, width, 10, C.textSoft)
         y = y + (inote:GetStringHeight() or 12) + 10
-        for i, u in ipairs(still) do
-            local r = newRow(child, y, i, 22)
-            cell(r, u.m and classColored(u.m) or u.name, 8, 200)
-            cell(r, "|cffff6060GuildOS|r  v" .. tostring(u.v), 215, 200)
-            cell(r, u.online and (GREEN .. "online|r") or (GREY .. "offline|r"), 430, 70)
-            y = y + 24
+        if #still == 0 then
+            txt(child, "Nobody is still on GuildOS.", 0, y, width, 12, C.textSoft); y = y + 22
+        else
+            local toggle = CreateFrame("Frame", nil, child)
+            toggle:SetHeight(24); toggle:SetPoint("TOPLEFT", 0, -y); toggle:SetPoint("TOPRIGHT", 0, -y)
+            local tb = btn(toggle, (stillOpen and "Hide list" or "Show list") .. "  (" .. #still .. ")", 150, function()
+                stillOpen = not stillOpen
+                refresh()
+            end)
+            tb:SetPoint("LEFT", 0, 0)
+            y = y + 30
+            if stillOpen then
+                for i, u in ipairs(still) do
+                    local r = newRow(child, y, i, 22)
+                    cell(r, u.m and classColored(u.m) or u.name, 8, 200)
+                    cell(r, "|cffff6060GuildOS|r  v" .. tostring(u.v), 215, 200)
+                    cell(r, u.online and (GREEN .. "online|r") or (GREY .. "offline|r"), 430, 70)
+                    y = y + 24
+                end
+            end
         end
-        if #still == 0 then txt(child, "Nobody is still on GuildOS.", 0, y, width, 12, C.textSoft); y = y + 22 end
         y = y + 8
-        sectionAt(child, "ON OUTLAWOS  ·  " .. #onOutlaw, y); y = y + 26
-        local t1 = txt(child, joinNames(onOutlaw), 0, y, width, 11, C.text)
-        y = y + (t1:GetStringHeight() or 14) + 12
-        sectionAt(child, "NO ADDON DATA  ·  " .. #noAddon, y); y = y + 26
-        local t2 = txt(child, joinNames(noAddon), 0, y, width, 11, C.textSoft)
-        y = y + (t2:GetStringHeight() or 14) + 12
+        memberList("ON OUTLAWOS  ·  " .. #onOutlaw, onOutlaw, onOpen, function()
+            onOpen = not onOpen
+            refresh()
+        end)
+        memberList("NO ADDON DATA  ·  " .. #noAddon, noAddon, noOpen, function()
+            noOpen = not noOpen
+            refresh()
+        end)
 
         -- Anniversaries
         -- Milestones grouped by tier: a heading with a count, then the first few names and "and N more".
@@ -3330,6 +3651,93 @@ function EKO:VerifiedClears()
     for _, r in ipairs(self:WeekBountyRuns()) do
         out[#out + 1] = { d = r.name, tier = tierOf[nameKey(r.name)], who = r.who }
     end
+    for _, m in ipairs(self:ManualClears()) do
+        out[#out + 1] = { d = m.d, tier = tierOf[nameKey(m.d)], who = m.who }
+    end
+    return out
+end
+
+-- Clears an officer pasted from the Bounty Board sheet's Clears tab this week, for clears the journal
+-- missed (the posters read these with the journal's). Only a clear with three or more Outlaws counts.
+function EKO:ManualClears()
+    local out = {}
+    local s = shared("bountyclears")
+    if type(s) == "table" and s.week == self:WeekStart() then
+        for _, g in ipairs(self:ParseClears(s.text or "")) do
+            if #g.who >= 3 then out[#out + 1] = g end
+        end
+    end
+    for dungeon, list in pairs(formClears()) do
+        for _, c in ipairs(list) do
+            if #c.names >= 3 then out[#out + 1] = { d = dungeon, who = c.names } end
+        end
+    end
+    return out
+end
+
+-- Rows copied from the Clears tab (Date, Week, Clear #, Outlaw, Dungeon, ...): one group per Clear #
+-- and dungeon, of the newest week in the paste. The header row and anything else is skipped.
+-- Dungeons the Clears tab uses. A pasted row that lost its tabs is split on these names.
+local CLEAR_DUNGEON_NAMES = {
+    "Hall of Thanes", "Deadmines", "Excavation Site", "Shadowfang Keep", "Drowned City", "Scarlet Monastery",
+    "Ragefire Chasm", "Ruins of Lordaeron", "Blackfathom Deeps", "Dalaran", "Uldaman", "Krol'dok Stronghold",
+}
+
+-- One row of the Clears tab as { week, clear, who, d }, or nil. A row with tabs (a copy from the sheet) is
+-- read by column. A row whose tabs were lost is read from its start: date (optional), week, Clear #, the
+-- Outlaw's name, then the dungeon, which is the first of CLEAR_DUNGEON_NAMES found after the name.
+local function clearRow(line)
+    if line:find("\t") then
+        local f = {}
+        for part in (line .. "\t"):gmatch("([^\t]*)\t") do f[#f + 1] = (part:match("^%s*(.-)%s*$")) end
+        local week = tonumber(f[2]) or tonumber((f[2] or ""):match("(%d+)"))
+        local clear, who, dungeon = f[3], f[4], f[5]
+        if week and clear and clear ~= "" and who and who ~= "" and dungeon and dungeon ~= "" then
+            return { week = week, clear = clear, who = who, d = dungeon }
+        end
+        return nil
+    end
+    local rest = line:gsub("^%s*%d%d%d%d%-%d%d%-%d%d%s+", "")
+    local week, clear, tail = rest:match("^%s*(%d+)%s+(%d+)%s+(.-)%s*$")
+    if not week or not tail then return nil end
+    local at, found
+    for _, name in ipairs(CLEAR_DUNGEON_NAMES) do
+        local s = tail:find(name, 1, true)
+        if s and (not at or s < at) then at, found = s, name end
+    end
+    if not at then return nil end
+    local who = tail:sub(1, at - 1):match("^%s*(.-)%s*$")
+    if who == "" then return nil end
+    return { week = tonumber(week), clear = clear, who = who, d = found }
+end
+
+-- Clears pasted from the Bounty Board sheet's Clears tab: one group per Clear # and dungeon, of the newest
+-- week in the paste. The header row and anything else is skipped.
+function EKO:ParseClears(text)
+    local rows, bestWeek = {}, nil
+    for raw in (tostring(text or ""):gsub("|", "") .. "\n"):gmatch("([^\n]*)\n") do
+        local r = clearRow((raw:gsub("\r", "")))
+        if r then
+            rows[#rows + 1] = r
+            if not bestWeek or r.week > bestWeek then bestWeek = r.week end
+        end
+    end
+    local groups, order = {}, {}
+    for _, r in ipairs(rows) do
+        if r.week == bestWeek then
+            local key = r.clear .. "|" .. r.d
+            if not groups[key] then
+                groups[key] = { d = r.d, who = {} }
+                order[#order + 1] = key
+            end
+            local g = groups[key]
+            local seen = false
+            for _, n in ipairs(g.who) do if n == r.who then seen = true end end
+            if not seen then g.who[#g.who + 1] = r.who end
+        end
+    end
+    local out = {}
+    for _, k in ipairs(order) do out[#out + 1] = groups[k] end
     return out
 end
 
@@ -3382,18 +3790,23 @@ end
 EKO.PATCH_VERSION = GuildOS.VERSION or "?"   -- the CurseForge version each client checks in with
 -- A check-in this many days old or less counts as OutlawOS in the install check.
 EKO.PATCH_RECENT_DAYS = 14
+-- This release's notes, sent with each check-in so a guildmate on an older version can read them (Data/Changelog.lua).
+EKO.NOTES_MAX = 1500
+EKO.RELEASE_NOTES_TEXT = ((GuildOS.RELEASE_NOTES and GuildOS.RELEASE_NOTES.text) or ""):sub(1, EKO.NOTES_MAX)
 
-local function rememberPatch(name, v)
+local function rememberPatch(name, v, notes)
     local db = EKO:DB()
     if not db or not name then return end
     db.patchUsers = db.patchUsers or {}
-    db.patchUsers[short(name)] = { v = v or "?", at = now() }
+    local rec = { v = v or "?", at = now() }
+    if type(notes) == "string" and notes ~= "" then rec.n = notes:sub(1, EKO.NOTES_MAX) end
+    db.patchUsers[short(name)] = rec
 end
 
 function EKO:SayHello(act)
-    rememberPatch(meName(), self.PATCH_VERSION)
+    rememberPatch(meName(), self.PATCH_VERSION, self.RELEASE_NOTES_TEXT)
     if GuildOS.SyncService then
-        GuildOS.SyncService:Publish("ekowho", act or "hello", { v = self.PATCH_VERSION }, { priority = "BULK" })
+        GuildOS.SyncService:Publish("ekowho", act or "hello", { v = self.PATCH_VERSION, n = self.RELEASE_NOTES_TEXT }, { priority = "BULK" })
     end
 end
 
@@ -3409,7 +3822,7 @@ if GuildOS.SyncService then
     GuildOS.SyncService:On("ekowho", function(env, sender)
         local d = env and env.data
         if type(d) ~= "table" then return end
-        rememberPatch(sender, d.v)
+        rememberPatch(sender, d.v, d.n)
         -- A check: answer after a short random wait so twenty clients don't answer in the same second.
         if env.act == "ping" and short(sender) ~= short(meName()) then
             C_Timer.After(1 + math.random() * 4, function() GuildOS:SafeCall(function() EKO:SayHello("hello") end) end)
@@ -3425,19 +3838,63 @@ whoEv:SetScript("OnEvent", function()
 end)
 
 -- The list for the Outlaw Desk: { name, v, at, online, rank }, online first.
+-- Members of the guild who checked in with OutlawOS in the last EKO.PATCH_RECENT_DAYS days: the Install
+-- check's "On OutlawOS" count, which the Roster's With OutlawOS card shows.
+function EKO:OnOutlawCount()
+    local recent = now() - EKO.PATCH_RECENT_DAYS * DAY
+    local n = 0
+    for _, u in ipairs(self:PatchUsers()) do
+        if u.at and u.at >= recent and u.m then n = n + 1 end
+    end
+    return n
+end
+
 function EKO:PatchUsers()
     local db = self:DB()
     local roster = self:Roster()
     local out = {}
     for name, rec in pairs(db and db.patchUsers or {}) do
         local m = roster[name]
-        out[#out + 1] = { name = name, v = rec.v, at = rec.at, online = m and m.online, rank = m and m.rank, m = m }
+        out[#out + 1] = { name = name, v = rec.v, at = rec.at, n = rec.n, online = m and m.online, rank = m and m.rank, m = m }
     end
     table.sort(out, function(a, b)
         if (a.online and 1 or 0) ~= (b.online and 1 or 0) then return a.online end
         return (a.at or 0) > (b.at or 0)
     end)
     return out
+end
+
+-- The OutlawOS version a member last checked in with, when that check-in is recent. nil when there is none,
+-- so the roster tooltip can say OutlawOS is not installed.
+function EKO:OutlawVersionFor(name)
+    local db = self:DB()
+    local rec = db and db.patchUsers and db.patchUsers[short(name)]
+    if not rec or not rec.at or rec.at < now() - EKO.PATCH_RECENT_DAYS * DAY then return nil end
+    return rec.v
+end
+
+-- OutlawOS versions compare as major.minor.patch with a short major (1.38.0). A date-style string an
+-- old build sent (2026.11.21) has a four-digit first part: it is not compared, so it never counts as newer.
+local function parseVersion(v)
+    local a, b, c = tostring(v or ""):match("^(%d%d?%d?)%.(%d+)%.(%d+)$")
+    if not a then return nil end
+    return tonumber(a) * 1000000 + tonumber(b) * 1000 + tonumber(c)
+end
+
+-- The newest OutlawOS version a guildmate has checked in with, when it is newer than this one: that
+-- version and its notes. nil when this one is current or no newer check-in is on record.
+function EKO:NewerRelease()
+    local mine = parseVersion(self.PATCH_VERSION)
+    if not mine then return nil end
+    local best
+    for _, rec in ipairs(self:PatchUsers()) do
+        local theirs = parseVersion(rec.v)
+        if theirs and theirs > mine and (not best or theirs > best.num) then
+            best = { num = theirs, v = rec.v, n = rec.n }
+        end
+    end
+    if not best then return nil end
+    return best.v, best.n or ""
 end
 
 ----------------------------------------------------------------------

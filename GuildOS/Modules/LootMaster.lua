@@ -1307,23 +1307,7 @@ function LootMaster:ShowCouncilResultFrame(winner, itemLink, lootSlot, allCandid
     if self.councilFrame then self.councilFrame:Hide() end
 
     local numRows = allCandidates and #allCandidates or 0
-    local f = CreateFrame("Frame", "GuildOSCouncilFrame", UIParent, "BackdropTemplate")
-    f:SetSize(460, 110 + numRows * 22)
-    f:SetPoint("CENTER")
-    f:SetBackdrop({
-        bgFile   = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = GuildOS.UI:Edge(f),
-    })
-    f:SetBackdropColor(0.058, 0.058, 0.075, 0.98)
-    f:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, C.border.a)
-    UI:StylePopup(f)
-    f:SetFrameStrata("DIALOG")
-    f:SetMovable(true)
-    f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
-    f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+    local f = UI:CreateDialogFrame("GuildOSCouncilFrame", 460, 110 + numRows * 22)
 
     -- Title, in the text colour: gold is the selection's (#371).
     local title = UI:CreateTitle(f, L["Wishlist Council"], 13)

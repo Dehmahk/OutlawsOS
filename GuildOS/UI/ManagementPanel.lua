@@ -15,7 +15,7 @@ local SUBTABS = {
     { key = "ready",    label = "Ready for Outlaw" },  -- EKO patch (UI/EKO.lua)
     { key = "circle",   label = "Inner Circle" },      -- EKO patch (UI/EKO.lua)
     { key = "desk",     label = "Outlaw Desk" },       -- EKO patch (UI/EKO.lua)
-    { key = "ranks",    label = L["Ranks"] },
+    { key = "quick",    label = "Quick Tools", leadersOnly = true },   -- EKO patch (UI/EKO.lua): leadership only
     { key = "inactive", label = L["Inactivity"] },
     { key = "suggest",  label = L["Suggestions"] },
     { key = "motd",     label = L["MOTD / Info"] },
@@ -170,95 +170,6 @@ local function MakeVirtualList(holder, name, rowStep, createRow, fillRow)
     end)
     holder:HookScript("OnSizeChanged", function() list:Update() end)
     return list
-end
-
-local function BuildRanksSub(panel)
-    local note = UI:CreateText(panel,
-        L["Rank changes are Blizzard-protected: the arrow buttons open the official guild panel for you to confirm."],
-        11, C.silver.r, C.silver.g, C.silver.b)
-    note:SetPoint("TOPLEFT", 0, 0)
-
-    local listHolder = CreateFrame("Frame", nil, panel)
-    listHolder:SetPoint("TOPLEFT", 0, -(14 + GAP))
-    listHolder:SetPoint("BOTTOMRIGHT", 0, 0)
-
-    local empty = UI:CreateText(listHolder, L["Roster empty or unavailable."], 11, C.silver.r, C.silver.g, C.silver.b)
-    empty:SetPoint("TOPLEFT", 0, -4)
-    empty:Hide()
-
-    local function createRow(parent)
-        local row = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-        row:SetHeight(ROW_H)
-        row:SetBackdrop({ bgFile = WHITE })
-        row.nameFS = UI:CreateText(row, "", 11)
-        row.nameFS:SetPoint("LEFT", 8, 0)
-        row.rankFS = UI:CreateText(row, "", 10, C.silver.r, C.silver.g, C.silver.b)
-        row.rankFS:SetPoint("LEFT", 180, 0)
-        row.lvlFS = UI:CreateText(row, "", 9, C.textDim.r, C.textDim.g, C.textDim.b)
-        row.lvlFS:SetPoint("LEFT", 340, 0)
-        -- Demote one step (higher rankIndex), promote one (lower). Shown where the rank may.
-        row.downBtn = UI:CreateButton(row, "|TInterface\\BUTTONS\\Arrow-Down-Up:14:14|t", 26, 18)
-        row.downBtn:SetPoint("RIGHT", -8, 0)
-        row.downBtn:SetScript("OnClick", function()
-            GuildOS.GuildManager:Demote(row.member.fullName)
-            GuildOS.GuildManager:RefreshUI()
-        end)
-        row.upBtn = UI:CreateButton(row, "|TInterface\\BUTTONS\\Arrow-Up-Up:14:14|t", 26, 18)
-        row.upBtn:SetPoint("RIGHT", -38, 0)
-        row.upBtn:SetScript("OnClick", function()
-            GuildOS.GuildManager:Promote(row.member.fullName)
-            GuildOS.GuildManager:RefreshUI()
-        end)
-        return row
-    end
-
-    local canPromote, canDemote = false, false
-    local function fillRow(row, m, idx)
-        row.member = m
-        local alt = (idx % 2 == 0) and C.row1 or C.row2
-        row:SetBackdropColor(alt.r, alt.g, alt.b, alt.a)
-        local cr, cg, cb = GuildOS:GetClassColor(m.class)
-        local dim = m.online and 1 or 0.55
-        row.nameFS:SetText(m.name)
-        row.nameFS:SetTextColor(cr * dim, cg * dim, cb * dim)
-        row.rankFS:SetText(m.rankName)
-        row.lvlFS:SetText(L["Lv "] .. m.level)
-        row.downBtn:SetShown(canDemote)
-        row.upBtn:SetShown(canPromote)
-    end
-
-    local list = MakeVirtualList(listHolder, "GuildOSMgmtRanksScroll", ROW_H + 2, createRow, fillRow)
-
-    return function()
-        local GM = GuildOS.GuildManager
-        canPromote = GM:CanPromote() and true or false
-        canDemote = GM:CanDemote() and true or false
-
-        -- Collect roster, sort by rank then name.
-        local members = {}
-        local n = GetNumGuildMembers() or 0
-        for i = 1, n do
-            local name, rankName, rankIndex, level, _, _, _, _, isOnline, _, classFile = GetGuildRosterInfo(i)
-            if name then
-                members[#members + 1] = {
-                    name = name:match("^([^-]+)") or name,
-                    fullName = name,
-                    rankName = rankName or "?",
-                    rankIndex = rankIndex or 0,
-                    level = level or 0,
-                    class = classFile or "",
-                    online = isOnline,
-                }
-            end
-        end
-        table.sort(members, function(a, b)
-            if a.rankIndex ~= b.rankIndex then return a.rankIndex < b.rankIndex end
-            return a.name:lower() < b.name:lower()
-        end)
-
-        empty:SetShown(#members == 0)
-        list:SetData(members)
-    end
 end
 
 ----------------------------------------------------------------------
@@ -1106,7 +1017,7 @@ end
 ----------------------------------------------------------------------
 function GuildOS:CreateManagementPanel(parent, _mainFrame)
     parent.subPanels = {}
-    parent.activeSub = "ranks"
+    parent.activeSub = "ready"
 
     -- Sub-tab bar. Anchored on the left only: UI:FlowBar reads GetWidth to
     -- decide where to wrap, and a frame pinned on both sides reports a
@@ -1119,7 +1030,13 @@ function GuildOS:CreateManagementPanel(parent, _mainFrame)
     local subTabBtns = {}
     local subTabList = {}
 
+    -- Quick Tools is for leadership only (EKO:CanQuickTools). Anyone else who lands on it gets Ready for Outlaw.
+    local function canQuick()
+        return GuildOS.EKO ~= nil and GuildOS.EKO.CanQuickTools ~= nil and GuildOS.EKO:CanQuickTools() == true
+    end
+
     local function selectSub(key)
+        if key == "quick" and not canQuick() then key = "ready" end
         parent.activeSub = key
         for k, info in pairs(parent.subPanels) do
             info.panel:SetShown(k == key)
@@ -1163,7 +1080,6 @@ function GuildOS:CreateManagementPanel(parent, _mainFrame)
     end
 
     local builders = {
-        ranks    = BuildRanksSub,
         inactive = BuildInactiveSub,
         suggest  = function(p) return GuildOS.EKO and GuildOS.EKO.BuildSuggestSub and GuildOS.EKO:BuildSuggestSub(p) or BuildSuggestSub(p) end,   -- EKO patch
         motd     = BuildMotdSub,
@@ -1175,6 +1091,7 @@ function GuildOS:CreateManagementPanel(parent, _mainFrame)
         ready    = function(p) return GuildOS.EKO and GuildOS.EKO:BuildReadySub(p) end,
         circle   = function(p) return GuildOS.EKO and GuildOS.EKO:BuildCircleSub(p) end,
         desk     = function(p) return GuildOS.EKO and GuildOS.EKO:BuildDeskSub(p) end,
+        quick    = function(p) return GuildOS.EKO and GuildOS.EKO:BuildQuickSub(p) end,
     }
     for _, t in ipairs(SUBTABS) do
         local p = makeSubPanel()
@@ -1182,8 +1099,23 @@ function GuildOS:CreateManagementPanel(parent, _mainFrame)
         parent.subPanels[t.key] = { panel = p, refresh = refresh }
     end
 
+    -- The tabs this viewer may see, shown or hidden to match. A hidden tab takes no space in the bar.
+    local function visibleTabs()
+        local shown = {}
+        for _, t in ipairs(SUBTABS) do
+            local b = subTabBtns[t.key]
+            if t.leadersOnly then b:SetShown(canQuick()) end
+            if b:IsShown() then shown[#shown + 1] = b end
+        end
+        return shown
+    end
+    local function flowTabs()
+        UI:FlowBar(bar, visibleTabs(), { gap = 4, rowGap = 4, rowH = TAB_H })
+    end
+
     parent:SetScript("OnShow", function()
-        selectSub(parent.activeSub or "ranks")
+        flowTabs()
+        selectSub(parent.activeSub or "ready")
     end)
 
     -- Exposed so the layout can be inspected from outside the builder.
@@ -1196,7 +1128,7 @@ function GuildOS:CreateManagementPanel(parent, _mainFrame)
     ----------------------------------------------------------------
     UI:MakeResponsive(parent, function(_, w, _)
         bar:SetWidth(math.max(TAB_MIN_W, w - 20))
-        UI:FlowBar(bar, subTabList, { gap = 4, rowGap = 4, rowH = TAB_H })
+        flowTabs()
         parent.RefreshActive()
     end)
 end

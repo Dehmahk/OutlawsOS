@@ -879,8 +879,8 @@ function GuildOS:CreateRosterPanel(parent, host)
     end
 
     -- Full-width rail button with a label and a right-aligned count
-    local function CreateRailButton()
-        local b = CreateFrame("Button", nil, rail, "BackdropTemplate")
+    local function CreateRailButton(parent)
+        local b = CreateFrame("Button", nil, parent or rail, "BackdropTemplate")
         b:SetSize(RAIL_BTN_W, 24)
         b:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = GuildOS.UI:Edge(b) })
         b:SetBackdropColor(C.bg1.r, C.bg1.g, C.bg1.b, 0.0)
@@ -999,6 +999,32 @@ function GuildOS:CreateRosterPanel(parent, host)
     local classHeader = UI:CreateHeaderText(rail, L["CLASSES"])
     classHeader:SetPoint("BOTTOMLEFT", rail, "BOTTOMLEFT", RAIL_PAD + 2, 10 + GRID.rows * CHIP_ROW_H + 2)
 
+    -- The rank list lives in a box clipped between the RANKS header and the CLASSES title. A short
+    -- window scrolls the list (mouse wheel over it) instead of drawing ranks over the class chips.
+    local CLASS_TOP = 10 + GRID.rows * CHIP_ROW_H + 22
+    local rankBox = CreateFrame("Frame", nil, rail)
+    rankBox:SetPoint("TOPLEFT", rail, "TOPLEFT", 0, RANK_TOP)
+    rankBox:SetPoint("BOTTOMRIGHT", rail, "BOTTOMRIGHT", 0, CLASS_TOP)
+    rankBox:SetClipsChildren(true)
+    rankBox:EnableMouseWheel(true)
+    local rankList = CreateFrame("Frame", nil, rankBox)
+    rankList:SetPoint("TOPLEFT", rankBox, "TOPLEFT", 0, 0)
+    rankList:SetPoint("TOPRIGHT", rankBox, "TOPRIGHT", 0, 0)
+    rankList:SetHeight(1)
+    host.rankBox, host.rankList, host.rankListH, host.rankScroll = rankBox, rankList, 0, 0
+    rankBox:SetScript("OnMouseWheel", function(_, delta) host:ScrollRanks(-delta) end)
+
+    -- Move the rank list so `to` (or `steps` rows from where it is) shows, kept inside its height.
+    function host:ScrollRanks(steps, to)
+        local over = math.max(0, (self.rankListH or 0) - self.rankBox:GetHeight())
+        local off = to or ((self.rankScroll or 0) + (steps or 0) * RANK_H)
+        off = math.max(0, math.min(off, over))
+        self.rankScroll = off
+        self.rankList:ClearAllPoints()
+        self.rankList:SetPoint("TOPLEFT", self.rankBox, "TOPLEFT", 0, off)
+        self.rankList:SetPoint("TOPRIGHT", self.rankBox, "TOPRIGHT", 0, off)
+    end
+
     function host:UpdateRailActive()
         self.segBtns.all:SetActive(self.segment == "all")
         self.segBtns.online:SetActive(self.segment == "online")
@@ -1054,13 +1080,13 @@ function GuildOS:CreateRosterPanel(parent, host)
             groups[#groups + 1] = { title = L["Other"] or "Other", items = other }
         end
 
-        local y, slot, hdr = RANK_TOP, 0, 0
+        local y, slot, hdr = 0, 0, 0
         for gi, g in ipairs(groups) do
             if gi > 1 then y = y - GROUP_GAP end
             hdr = hdr + 1
             local fs = self.rankHeaders[hdr]
             if not fs then
-                fs = UI:CreateHeaderText(rail, "", 12)   -- EKO patch: group titles a size up from 10
+                fs = UI:CreateHeaderText(self.rankList, "", 12)   -- EKO patch: group titles a size up from 10
                 self.rankHeaders[hdr] = fs
             end
             fs:SetText(g.title)
@@ -1072,7 +1098,7 @@ function GuildOS:CreateRosterPanel(parent, host)
                 slot = slot + 1
                 local b = self.rankBtns[slot]
                 if not b then
-                    b = CreateRailButton()
+                    b = CreateRailButton(self.rankList)
                     self.rankBtns[slot] = b
                 end
                 b:ClearAllPoints()
@@ -1085,6 +1111,9 @@ function GuildOS:CreateRosterPanel(parent, host)
                 y = y - RANK_H
             end
         end
+        self.rankListH = math.max(0, -y)
+        self.rankList:SetHeight(math.max(1, self.rankListH))
+        self:ScrollRanks(0)
         for h = hdr + 1, #self.rankHeaders do
             self.rankHeaders[h]:Hide()
         end
@@ -1388,11 +1417,16 @@ function GuildOS:CreateRosterPanel(parent, host)
         if self.kpiOffOn then self.kpiOffOn:SetText(numOffOn) end
         if self.kpiRecOn then self.kpiRecOn:SetText(numRecOn) end
 
-        -- Addon coverage + average item level (members with stored addon data)
+        -- With OutlawOS: members who checked in with OutlawOS recently (the Install check's count). The
+        -- stored addon data also covers GuildOS members, so it does not count here. Average item level
+        -- still uses the stored data (members with some).
         local numWithAddon, ilvlSum, ilvlCount = 0, 0, 0
+        if GuildOS.EKO and GuildOS.EKO.OnOutlawCount then
+            local ok, n = pcall(GuildOS.EKO.OnOutlawCount, GuildOS.EKO)
+            if ok and n then numWithAddon = n end
+        end
         for _, data in pairs(GuildOS.db.members) do
             if data.lastUpdate and data.lastUpdate > 0 then
-                numWithAddon = numWithAddon + 1
                 if data.avgIlvl and data.avgIlvl > 0 then
                     ilvlSum = ilvlSum + data.avgIlvl
                     ilvlCount = ilvlCount + 1
@@ -1472,6 +1506,7 @@ function GuildOS:CreateRosterPanel(parent, host)
         end
 
         host:LayoutToolbar(w - RAIL_WIDTH)
+        host:ScrollRanks(0)   -- a taller window may leave the rank list room to spare: clamp its scroll
 
         -- Table columns.
         local tableW = w - RAIL_WIDTH - ROW_INSET - SCROLL_GUTTER
@@ -2347,6 +2382,21 @@ function ShowRowTooltip(row)
             GameTooltip:AddLine(string.format(L["Guild OS v%s (newer than yours)"], data.addonVersion), 0.5, 0.5, 0.5)
         else
             GameTooltip:AddLine(string.format("Guild OS v%s", data.addonVersion), 0.5, 0.5, 0.5)
+        end
+    end
+    -- OutlawOS: the version this member last checked in with, or that they are not installed.
+    if GuildOS.EKO and GuildOS.EKO.OutlawVersionFor and data.name then
+        local okV, ov = pcall(GuildOS.EKO.OutlawVersionFor, GuildOS.EKO, data.name)
+        if okV then
+            if not ov then
+                GameTooltip:AddLine("OutlawOS not installed", C.red.r, C.red.g, C.red.b)
+            elseif ov == GuildOS.EKO.PATCH_VERSION then
+                GameTooltip:AddLine("OutlawOS v" .. ov, C.green.r, C.green.g, C.green.b)
+            elseif CompareVersions(ov, GuildOS.EKO.PATCH_VERSION) < 0 then
+                GameTooltip:AddLine("OutlawOS v" .. ov .. " (outdated)", C.warn.r, C.warn.g, C.warn.b)
+            else
+                GameTooltip:AddLine("OutlawOS v" .. ov .. " (newer than yours)", 0.5, 0.5, 0.5)
+            end
         end
     end
     GameTooltip:AddLine(L["Left-click: details, right-click: actions"], 0.5, 0.5, 0.5)
@@ -3234,6 +3284,7 @@ function GuildOS:CreateRecruitmentPanel(parent, _mainFrame)
         local val = tonumber(box:GetText())
         if val and val >= 60 then
             GuildOS.db.recruitment.interval = val
+            if GuildOS.Recruitment then GuildOS.Recruitment:MarkEdited() end
             GuildOS:Print(string.format(L["Interval set to %ds."], val))
         else
             box:SetText(tostring(GuildOS.db.recruitment.interval))
@@ -3317,6 +3368,7 @@ function GuildOS:CreateRecruitmentPanel(parent, _mainFrame)
             local problem = GuildOS.Recruitment.ChatTextProblem(txt)
             if problem then return GuildOS:Print(problem) end
             GuildOS.db.recruitment.message = txt
+            if GuildOS.Recruitment then GuildOS.Recruitment:MarkEdited() end
             GuildOS:Print(L["Recruitment message updated."])
         end
     end
@@ -3669,6 +3721,7 @@ function GuildOS:CreateRecruitmentPanel(parent, _mainFrame)
         local txt = box:GetText()
         if txt and txt ~= "" then
             GuildOS.db.recruitment.discord = txt
+            if GuildOS.Recruitment then GuildOS.Recruitment:MarkEdited() end
             GuildOS:Print(L["Discord link updated."])
         end
     end

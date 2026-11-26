@@ -32,6 +32,21 @@ end
 -- Whether a write from `sender` may touch an event (issue #283): an officer any; a creator who is not
 -- one only an event under their own name, never a raid from the site. `existing` is the stored event
 -- (nil for a new one), `incoming` what the write carries.
+-- An ambassador of the sender's guild writing an event shared to the alliance, whatever its rank: the
+-- alliance rule. A guild-only event still needs the calendar rank. `existing` and `incoming` are the two
+-- sides of the write; either one shared is enough.
+function Calendar.AllianceWrite(existing, incoming, sender)
+    local ally = GuildOS.Alliance
+    local pact = ally and ally:Get()
+    local mine = ally and ally:MyGuildName()
+    if not pact or not mine or not ally.IsAmbassador(pact, mine, sender) then
+        return false
+    end
+    local shared = (type(existing) == "table" and existing.shareAlliance)
+        or (type(incoming) == "table" and incoming.shareAlliance)
+    return shared and true or false
+end
+
 function Calendar.MayWriteRemote(existing, incoming, sender, officer)
     if officer then return true end
     -- Each one on its own: ipairs over { existing, incoming } stops at a nil existing, and a new event
@@ -41,12 +56,26 @@ function Calendar.MayWriteRemote(existing, incoming, sender, officer)
         if type(e.id) == "string" and e.id:sub(1, 4) == "web:" then return false end
         return sameName(e.author, sender)
     end
-    return (existing ~= nil or incoming ~= nil) and theirs(existing) and theirs(incoming)
+    local own = (existing ~= nil or incoming ~= nil) and theirs(existing) and theirs(incoming)
+    return own or Calendar.AllianceWrite(existing, incoming, sender)
+end
+
+-- Whether this character is an ambassador of their guild in the alliance. Only they create, edit, cancel
+-- and answer requests for the alliance's events.
+function Calendar:IsAllianceAmbassador()
+    local ally = GuildOS.Alliance
+    return ally ~= nil and ally.IsMyAmbassador ~= nil and ally:IsMyAmbassador() == true
+end
+
+-- Officers, and the ambassadors, may answer a slot request on an alliance event.
+function Calendar:CanAnswerAlliance()
+    return GuildOS:IsOfficer() or self:IsAllianceAmbassador()
 end
 
 -- Whether this client may change or delete an event: an officer any, a creator their own (issue #283).
 function Calendar:MayManage(e)
     if GuildOS:IsOfficer() then return true end
+    if type(e) == "table" and e.shareAlliance and self:IsAllianceAmbassador() then return true end
     return type(e) == "table" and not self:IsWebEvent(e) and GuildOS:MayCreateEvents()
         and sameName(e.author, GuildOS.Compat.PlayerName())
 end
@@ -510,14 +539,18 @@ end
 
 -- The rank, the kind (issue #308) and the fields every new event needs; nil, with the reason said, when
 -- one is missing.
-local function validNew(title, when, kind)
-    if not GuildOS:MayCreateEvents() then
-        GuildOS:Print(L["|cffFF4444Your rank cannot create events.|r"])
-        return nil
-    end
-    if not Calendar:MayCreateKind(kind) then
-        GuildOS:Print(L["|cffFF4444Your rank cannot create this type of event.|r"])
-        return nil
+local function validNew(title, when, kind, shareAlliance)
+    -- An ambassador's event shared to the alliance needs no calendar rank (the alliance rule).
+    local byAlliance = shareAlliance and Calendar:IsAllianceAmbassador()
+    if not byAlliance then
+        if not GuildOS:MayCreateEvents() then
+            GuildOS:Print(L["|cffFF4444Your rank cannot create events.|r"])
+            return nil
+        end
+        if not Calendar:MayCreateKind(kind) then
+            GuildOS:Print(L["|cffFF4444Your rank cannot create this type of event.|r"])
+            return nil
+        end
     end
     title = strtrim(title or "")
     when = tonumber(when)
@@ -529,7 +562,7 @@ local function validNew(title, when, kind)
 end
 
 function Calendar:Create(title, when, size, note, kind, shareAlliance, extra)
-    title, when = validNew(title, when, kind)
+    title, when = validNew(title, when, kind, shareAlliance)
     if not title then return end
     local e = newEvent(title, when, size, note, kind, shareAlliance, extra)
     self:_Add(e)
@@ -650,7 +683,7 @@ function Calendar:CreateSeries(title, when, size, note, kind, shareAlliance, rep
     if not knownRep(rep) then
         return self:Create(title, when, size, note, kind, shareAlliance, extra) and 1 or nil
     end
-    title, when = validNew(title, when, kind)
+    title, when = validNew(title, when, kind, shareAlliance)
     if not title then return nil end
     local t = date("*t", when)
     local template = newEvent(title, when, size, note, kind, shareAlliance, extra)
@@ -975,7 +1008,8 @@ function Calendar:Update(id, title, when, size, note, kind, shareAlliance, extra
     if not e or e.canceled then return end
     -- An event becomes only a kind its creator may create (#308). Kept as it is, it stays theirs to edit,
     -- reschedule and end, whatever the officers closed since.
-    if normalizeKind(kind) ~= normalizeKind(e.kind) and not self:MayCreateKind(kind) then
+    if normalizeKind(kind) ~= normalizeKind(e.kind) and not (e.shareAlliance and self:IsAllianceAmbassador())
+        and not self:MayCreateKind(kind) then
         GuildOS:Print(L["|cffFF4444Your rank cannot create this type of event.|r"])
         return
     end
@@ -1202,7 +1236,8 @@ function Calendar:OnSync(env, sender)
         -- already and keeps its kind: editing, rescheduling, ending, cancelling or deleting it stays theirs.
         local keeps = type(existing) == "table" and type(incoming) == "table"
             and normalizeKind(existing.kind) == normalizeKind(incoming.kind)
-        if type(incoming) == "table" and not keeps and not self:KindOpenToMembers(incoming.kind) then return end
+        if type(incoming) == "table" and not keeps and not Calendar.AllianceWrite(existing, incoming, sender)
+            and not self:KindOpenToMembers(incoming.kind) then return end
     end
     if (env.act == "create" or env.act == "update") and d and d.event then
         local e = d.event
@@ -1397,6 +1432,34 @@ function Calendar._BuildAllianceEvents(events, now, cap)
             kind = e.kind, note = e.note, author = e.author, yes = yes, names = names,
         }
     end
+    return out
+end
+
+-- This guild's own events shared to the alliance, live now or still running, in the shape the Events
+-- tab reads: the seats taken and the requests waiting for an answer.
+function Calendar:OwnAllianceEvents()
+    local out = {}
+    local ally = GuildOS.Alliance
+    local mine = ally and ally:MyGuildName()
+    if not mine then
+        return out
+    end
+    local now = GetServerTime()
+    for _, e in pairs(self:GetEvents()) do
+        if type(e) == "table" and e.shareAlliance and not e.canceled and not self:IsWebEvent(e)
+            and (tonumber(e.when) or 0) + 4 * 3600 > now then
+            local pending = {}
+            for key, p in pairs(e.allyPending or {}) do
+                pending[#pending + 1] = { key = key, name = p.name, role = p.role, guild = p.guild }
+            end
+            table.sort(pending, function(a, b) return tostring(a.name) < tostring(b.name) end)
+            out[#out + 1] = {
+                id = e.id, title = e.title, when = e.when, size = e.size, kind = e.kind, note = e.note,
+                yes = self:GetComposition(e).yes, guild = mine, own = true, pending = pending,
+            }
+        end
+    end
+    table.sort(out, function(a, b) return (a.when or 0) < (b.when or 0) end)
     return out
 end
 
@@ -1671,8 +1734,8 @@ end
 -- Officer decisions
 ----------------------------------------------------------------------
 function Calendar:ApproveAlliance(eventId, key)
-    if not GuildOS:IsOfficer() then
-        return false, L["|cffFF4444Officers only.|r"]
+    if not self:CanAnswerAlliance() then
+        return false, L["Only an alliance ambassador can do that."]
     end
     local e = self:GetEvents()[eventId or ""]
     local p = e and e.allyPending and e.allyPending[key or ""]
@@ -1707,8 +1770,8 @@ function Calendar:ApproveAlliance(eventId, key)
 end
 
 function Calendar:DeclineAlliance(eventId, key, why)
-    if not GuildOS:IsOfficer() then
-        return false, L["|cffFF4444Officers only.|r"]
+    if not self:CanAnswerAlliance() then
+        return false, L["Only an alliance ambassador can do that."]
     end
     local e = self:GetEvents()[eventId or ""]
     local p = e and e.allyPending and e.allyPending[key or ""]

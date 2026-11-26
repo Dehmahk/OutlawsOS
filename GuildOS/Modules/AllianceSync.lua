@@ -103,6 +103,22 @@ function AllianceSync._BuildRoster(members, cap, altLinks)
         return out
     end
     cap = tonumber(cap) or AllianceSync.ROSTER_CAP
+    -- This guild's leaders (EKO.LEADERS) by short name, so an allied reader can show who leads it.
+    local leaderRole = {}
+    for _, l in ipairs((GuildOS.EKO and GuildOS.EKO.LEADERS) or {}) do
+        if type(l) == "table" and l.name and l.role then leaderRole[l.name] = l.role end
+    end
+    -- Each member's rank in this guild, from the game roster, so an allied reader can show a
+    -- speaker's role. Read once per build, not once per member.
+    local rankOf = {}
+    if type(GetNumGuildMembers) == "function" and type(GetGuildRosterInfo) == "function" then
+        for i = 1, GetNumGuildMembers() or 0 do
+            local name, rankName = GetGuildRosterInfo(i)
+            if name and rankName and rankName ~= "" then
+                rankOf[(name:match("^([^-]+)") or name):lower()] = GuildOS:SanitizeUserText(rankName, 32)
+            end
+        end
+    end
     local keys = {}
     for key in pairs(members) do
         if type(key) == "string" then
@@ -149,6 +165,8 @@ function AllianceSync._BuildRoster(members, cap, altLinks)
                 -- Retail: the spec's id, so an allied reader names it in their own language (#184).
                 si = type(m.spec) == "table" and tonumber(m.spec.specID) or nil,
                 m = main and (main:match("^([^-]+)") or main) or nil,
+                ld = leaderRole[(m.name:match("^([^-]+)") or m.name)],
+                rk = rankOf[(m.name:match("^([^-]+)") or m.name):lower()],
             }
         end
     end

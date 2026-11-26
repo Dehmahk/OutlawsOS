@@ -631,6 +631,33 @@ end
 -- What the alliance already knows about an allied character, from the cached
 -- roster snapshot: guild, class, level, spec, completed attunements. nil for
 -- strangers and for our own guildmates.
+-- Is this character online right now? Our own guild answers from the game roster, which knows every
+-- member. An allied guild answers only from the presence mesh, so a leader without OutlawOS reads offline.
+function Alliance:IsOnlineNow(name, guild)
+    local short = shortName(name or "")
+    if short == "" then return false end
+    if guild and guild == self:MyGuildName() then
+        return self:OwnRoster().onlineNames[short] == true
+    end
+    local net = _G.ChehulNet
+    local peers = (net and net.Peers and net:Peers()) or {}
+    local p = peers[short]
+    return p ~= nil and (time() - (p.ts or 0)) <= ((net and net.PEER_TTL) or 600)
+end
+
+-- The rank a character holds in their own guild: live from the game roster for ours, from the
+-- allied roster snapshot for theirs. Nil when neither knows it.
+function Alliance:RankOf(name, guild)
+    local short = shortName(name or "")
+    if short == "" then return nil end
+    if guild and guild == self:MyGuildName() then
+        local rec = GuildOS:GetMemberRecord(short)
+        return (rec and rec.rank and rec.rank ~= "") and rec.rank or nil
+    end
+    local info = self:MemberInfo(short)
+    return info and info.rank or nil
+end
+
 function Alliance:MemberInfo(name)
     local sync = GuildOS.AllianceSync
     if not sync or not sync.MemberIndex then
@@ -650,6 +677,7 @@ function Alliance:MemberInfo(name)
         professions = row.p,
         attunements = row.a,
         main        = row.m,
+        rank        = row.rk,
     }
 end
 
@@ -958,6 +986,12 @@ function Alliance:OnMessage(payload, sender, dist)
         return
     end
 
+    -- Observers (AllianceObserver.lua) are guildless and hold no pact: their ops are read before any
+    -- gate below, and none of them changes the pact.
+    if GuildOS.AllianceObserver and GuildOS.AllianceObserver:OnWire(op, data, sender) then
+        return
+    end
+
     -- Under the alliance code (issue #348) nothing builds or changes the pact by
     -- whisper, and a data op is believed for the guild it names only with the
     -- proof made from the key and the sender's own name.
@@ -1247,6 +1281,13 @@ function Alliance:_MyEntry()
     return pact and mine and pact.guilds[mine] or nil, mine
 end
 
+-- Is this character an ambassador of our own guild in the alliance? Only they accept alliance applications.
+function Alliance:IsMyAmbassador()
+    local pact = self:Get()
+    local mine = self:MyGuildName()
+    return (pact ~= nil and mine ~= nil and Alliance.IsAmbassador(pact, mine, GuildOS.Compat.PlayerName())) and true or false
+end
+
 function Alliance:AddAmbassador(name)
     if Alliance.InLink() then
         return false, L["This alliance is set in Alliance > Setup. Change it there."]
@@ -1452,6 +1493,24 @@ end
 -- How many members of `guildName` the presence mesh can currently see. This is
 -- an UNDERCOUNT by construction (only players running Guild OS broadcast), and
 -- the UI must say so rather than passing it off as the real online count.
+-- This client's own guild, read straight from the game roster: how many members it has and who is
+-- online right now. Only our own guild has a roster here; the mesh figure stays a floor for the rest.
+function Alliance:OwnRoster()
+    local total, online, onlineNames = 0, 0, {}
+    local n = (GetNumGuildMembers and GetNumGuildMembers()) or 0
+    for i = 1, n do
+        local name, _, _, _, _, _, _, _, isOnline = GetGuildRosterInfo(i)
+        if name then
+            total = total + 1
+            if isOnline then
+                online = online + 1
+                onlineNames[name:match("^([^-]+)") or name] = true
+            end
+        end
+    end
+    return { total = total, online = online, onlineNames = onlineNames }
+end
+
 function Alliance:SeenCount(guildName)
     local net = _G.ChehulNet
     local mesh = GuildOS.Mesh
@@ -1475,6 +1534,7 @@ function Alliance:Summary()
     local sync = GuildOS.AllianceSync
     local chat = GuildOS.AllianceChat
     local mine = self:MyGuildName()
+    local own = mine and self:OwnRoster() or nil
 
     local names = {}
     for guildName in pairs(pact.guilds) do
@@ -1500,6 +1560,12 @@ function Alliance:Summary()
         local roster = sync and sync:Remote(guildName, "roster")
         local count = (roster and type(roster.data) == "table" and #roster.data) or 0
         local seen = self:SeenCount(guildName)
+        local ts = roster and roster.ts or nil
+        local live = false
+        if guildName == mine and own then
+            -- Our own guild: the game's roster is exact, so it replaces the mesh and the stored copy.
+            count, seen, ts, live = own.total, own.online, nil, true
+        end
         out.members = out.members + count
         out.seen = out.seen + seen
         out.guilds[#out.guilds + 1] = {
@@ -1509,7 +1575,8 @@ function Alliance:Summary()
             ambassadors = entry.ambassadors or {},
             members     = count,
             seen        = seen,
-            ts          = roster and roster.ts or nil,
+            ts          = ts,
+            live        = live,
         }
     end
 
@@ -1829,6 +1896,7 @@ function Alliance._BuildBoard(posts, cap)
             id = sorted[i].id,
             t  = sorted[i].text,
             b  = sorted[i].by,
+            r  = sorted[i].role,
             ts = tonumber(sorted[i].ts) or 0,
         }
     end
@@ -1839,6 +1907,66 @@ local function trimBoard(store)
     while #store > Alliance.BOARD_MAX do
         table.remove(store, 1)
     end
+end
+
+-- The alliance chat's pinned notice: one line an ambassador keeps at the top of the feed.
+function Alliance:Pin()
+    return GuildOS.db and GuildOS.db.allianceChatPin or nil
+end
+
+function Alliance:PinMessage(text)
+    if not self:Get() then
+        return false, L["This guild is not in an alliance yet."]
+    end
+    if not self:CanAdminister() then
+        return false, L["Only an alliance ambassador can do that."]
+    end
+    local clean = GuildOS:SanitizeUserText(text, Alliance.BOARD_TEXT_MAX)
+    if clean == "" then
+        return false, L["Write something first."]
+    end
+    local now = (GetServerTime and GetServerTime()) or time()
+    local pin = {
+        text  = clean,
+        by    = shortName(GuildOS.Compat.PlayerName()),
+        guild = self:MyGuildName(),
+        ts    = now,
+    }
+    GuildOS.db.allianceChatPin = pin
+    if GuildOS.SyncService then
+        GuildOS.SyncService:Publish("allypin", "set", { pin = pin })
+    end
+    if GuildOS.AllianceChat then GuildOS.AllianceChat:_Notify() end
+    return true
+end
+
+function Alliance:UnpinMessage()
+    if not self:CanAdminister() then
+        return false, L["Only an alliance ambassador can do that."]
+    end
+    GuildOS.db.allianceChatPin = nil
+    if GuildOS.SyncService then
+        GuildOS.SyncService:Publish("allypin", "clear", {})
+    end
+    if GuildOS.AllianceChat then GuildOS.AllianceChat:_Notify() end
+    return true
+end
+
+function Alliance:OnPinSync(env)
+    if env and env.act == "clear" then
+        GuildOS.db.allianceChatPin = nil
+    else
+        local pin = env and env.data and env.data.pin
+        if type(pin) == "table" and pin.text then
+            GuildOS.db.allianceChatPin = {
+                text  = GuildOS:SanitizeUserText(pin.text, Alliance.BOARD_TEXT_MAX),
+                by    = GuildOS:SanitizeUserText(pin.by, Alliance.GUILD_NAME_MAX),
+                guild = GuildOS:SanitizeUserText(pin.guild, Alliance.GUILD_NAME_MAX),
+                ts    = tonumber(pin.ts) or 0,
+            }
+        end
+    end
+    if GuildOS.AllianceChat then GuildOS.AllianceChat:_Notify() end
 end
 
 function Alliance:PostBoard(text)
@@ -1854,10 +1982,15 @@ function Alliance:PostBoard(text)
         return false, L["Write something first."]
     end
     local now = (GetServerTime and GetServerTime()) or time()
+    local me = shortName(GuildOS.Compat.PlayerName())
+    -- The author's rank in their own guild, so the notice says what role they posted in.
+    local rec = GuildOS:GetMemberRecord(me)
+    local role = rec and rec.rank and GuildOS:SanitizeUserText(rec.rank, 32) or nil
     local post = {
         id   = string.format("%X%04X", now, math.random(0, 0xFFFF)),
         text = clean,
-        by   = shortName(GuildOS.Compat.PlayerName()),
+        by   = me,
+        role = (role and role ~= "") and role or nil,
         ts   = now,
     }
     local store = self:BoardStore()
@@ -1929,6 +2062,7 @@ function Alliance:OnBoardSync(env)
         id   = post.id,
         text = GuildOS:SanitizeUserText(post.text, Alliance.BOARD_TEXT_MAX),
         by   = GuildOS:SanitizeUserText(post.by, Alliance.GUILD_NAME_MAX),
+        role = post.role and GuildOS:SanitizeUserText(post.role, 32) or nil,
         ts   = tonumber(post.ts) or 0,
     }
     table.sort(store, function(a, b) return tostring(a.id) < tostring(b.id) end)
@@ -1948,7 +2082,7 @@ function Alliance:BoardPosts()
     end
     local mine = self:MyGuildName()
     for _, p in ipairs(self:BoardStore()) do
-        out[#out + 1] = { id = p.id, text = p.text, by = p.by, ts = p.ts, guild = mine }
+        out[#out + 1] = { id = p.id, text = p.text, by = p.by, role = p.role, ts = p.ts, guild = mine }
     end
     local sync = GuildOS.AllianceSync
     local store = (GuildOS.db and GuildOS.db.allianceData) or {}
@@ -1957,7 +2091,7 @@ function Alliance:BoardPosts()
             local entry = store[guildName] and store[guildName].board
             if entry and type(entry.data) == "table" then
                 for _, p in ipairs(entry.data) do
-                    out[#out + 1] = { id = p.id, text = p.t, by = p.b, ts = p.ts, guild = guildName }
+                    out[#out + 1] = { id = p.id, text = p.t, by = p.b, role = p.r, ts = p.ts, guild = guildName }
                 end
             end
         end
@@ -2027,6 +2161,13 @@ function Alliance:HandleCommand(args)
     rest = strtrim(rest or "")
 
     if verb == "" then
+        local obs = GuildOS.AllianceObserver
+        if obs and obs:IsObserving() then return obs:Show() end
+        -- Everyone outside the Outlaws gets the Apply screen, which says who may apply and why not.
+        local guild = IsInGuild() and GetGuildInfo("player") or nil
+        if (not IsInGuild() or guild ~= "Eastern Kingdoms Outlaws") and GuildOS.GuildlessStart then
+            return GuildOS.GuildlessStart:ShowAlliance()
+        end
         return self:PrintStatus()
     end
 
@@ -2046,6 +2187,14 @@ function Alliance:HandleCommand(args)
         if ok then
             GuildOS:Print(string.format(L["Invite sent to %s."], rest))
         end
+    elseif verb == "observe" then
+        ok, err = GuildOS.AllianceObserver:Grant(rest)
+        if ok then GuildOS:Print(string.format(L["Observer access sent to %s."], rest)) end
+    elseif verb == "unobserve" then
+        ok, err = GuildOS.AllianceObserver:Revoke(rest)
+        if ok then GuildOS:Print(string.format(L["Observer access removed from %s."], rest)) end
+    elseif verb == "observers" then
+        GuildOS.AllianceObserver:PrintList()
     elseif verb == "leave" then
         ok, err = self:Leave()
         if ok then
@@ -2189,6 +2338,7 @@ function Alliance:Initialize()
     rf:SetScript("OnEvent", function() GuildOS.Alliance._rosterInfo = nil end)
     if GuildOS.SyncService then
         GuildOS.SyncService:On("allyboard", function(env) GuildOS.Alliance:OnBoardSync(env) end)
+        GuildOS.SyncService:On("allypin", function(env) GuildOS.Alliance:OnPinSync(env) end)
     end
     local mesh = _G.ChehulMesh
     if mesh and not self._registered then
@@ -2481,6 +2631,12 @@ function Alliance:_RegisterTests()
         end
         if #Alliance._BuildBoard(nil, 20) ~= 0 then return false, "nil must not error" end
         if #Alliance._BuildBoard({ "junk", 5 }, 20) ~= 0 then return false, "malformed rows must be skipped" end
+        return true
+    end)
+
+    GuildOS.SelfTest:Register("alliance.board_role", function()
+        local out = Alliance._BuildBoard({ { id = "A1", text = "hi", by = "Ann", ts = 5, role = "Officer" } }, 20)
+        if out[1].r ~= "Officer" then return false, "role not carried on the wire" end
         return true
     end)
 

@@ -534,6 +534,51 @@ function AllianceChat:Send(text)
 end
 
 -- A line of the room, already decoded (Modules/AllianceLink.lua, issue #348).
+-- Pure. Does this text name the player? A plain, case-insensitive find on their short name.
+function AllianceChat.MentionsMe(text, short)
+    if type(text) ~= "string" or type(short) ~= "string" or short == "" then
+        return false
+    end
+    return text:lower():find(short:lower(), 1, true) ~= nil
+end
+
+-- Pure. Should this log entry show in the feed, given the guild it is filtered to (nil for all) and a
+-- lower-case search query ("" for none)? System lines show only when nothing is filtered.
+function AllianceChat.PassesFilter(e, guild, query)
+    query = query or ""
+    if e.sys then
+        return guild == nil and query == ""
+    end
+    if guild and e.g ~= guild then
+        return false
+    end
+    if query == "" then
+        return true
+    end
+    return ((e.n or "") .. " " .. (e.m or "")):lower():find(query, 1, true) ~= nil
+end
+
+-- Pure. `text` with every case-insensitive match of `query` picked out in gold. Colour codes are
+-- escaped, so a line that contains "|" still shows as typed.
+function AllianceChat.Highlight(text, query)
+    text = tostring(text or "")
+    query = tostring(query or "")
+    if query == "" then
+        return (text:gsub("|", "||"))
+    end
+    local out, pos = {}, 1
+    local lowText, lowQuery = text:lower(), query:lower()
+    while true do
+        local s, e = lowText:find(lowQuery, pos, true)
+        if not s then break end
+        out[#out + 1] = (text:sub(pos, s - 1):gsub("|", "||"))
+        out[#out + 1] = "|cffffd100" .. (text:sub(s, e):gsub("|", "||")) .. "|r"
+        pos = e + 1
+    end
+    out[#out + 1] = (text:sub(pos):gsub("|", "||"))
+    return table.concat(out)
+end
+
 function AllianceChat:PushLine(name, guild, text)
     self:Push({ t = GetServerTime(), n = name, g = guild, m = GuildOS:SanitizeUserText(text, 240) })
 end

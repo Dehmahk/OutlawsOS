@@ -6,8 +6,16 @@
 --   CRQ|id|character|class|level|role|guild|note   the request, repeated every REPEAT_SECONDS while the
 --                                                  player is online. The id makes a repeat harmless, and it
 --                                                  is what delivery, presence and the answer all hang on
---   CRA|id|state|who                               the answer. officer and member say where it got to and
---                                                  do NOT stop the repetition; invited and declined end it
+--   CRA|id|state|who[|reason|again]                the answer. officer and member say where it got to and
+--                                                  do NOT stop the repetition; invited and declined end it.
+--                                                  A decline may carry a preset reason and a reapply time
+--                                                  (epoch seconds). An older client reads the first four
+--   CRR|id|who                                     an officer took the request off the list. Over GUILD only:
+--                                                  every officer's copy goes, and the player hears nothing
+--   CRX|id|character                               the player takes the request back. Whispered by the player
+--                                                  to the officer heard (else the contacts); an officer's client
+--                                                  passes it on over GUILD. Nothing is answered. CRW is the
+--                                                  gossip's whisper test, so the withdraw is not CRW
 --
 -- The guildless side keeps its queue in GuildOSDB.recruitOutbox[character] (account-wide: a guildless
 -- character has no guild db worth the name) and writes the open ones to GuildOSDB.recruitOutboxWire on
@@ -30,6 +38,25 @@ JR.MAX_OPEN       = 3          -- open requests one character may have
 JR.EXPIRE_SECONDS = 14 * 86400 -- as on the site
 JR.MAX_STORED     = 50         -- rows a guild's client keeps
 JR.ONLINE_SECONDS = 360        -- a request heard this lately belongs to somebody online: the repeat is 300
+JR.EXPIRE_WARN    = 3 * 86400  -- an officer's list flags a request this close to its expiry
+JR.REAPPLY_MAX    = 90 * 86400 -- a reapply time further off than this is not believed
+
+-- The preset reasons a decline may carry: the token goes on the wire, the text is the locale's.
+JR.REASON_ORDER = { "notrecruiting", "level", "schedule", "full" }
+JR.REASONS = {
+    notrecruiting = "Not recruiting right now",
+    level         = "Your level is below what we need right now",
+    schedule      = "Your play times do not match ours",
+    full          = "The guild is full right now",
+}
+
+-- The short questions on the request form. Their answers are packed into the note, the one free field the wire
+-- has: a second one would make an older officer's client drop the request. max is the room each answer has.
+JR.PROMPTS = {
+    { key = "when", tag = "When", question = "When do you usually play?",      max = 36, example = "Weeknights after 8 pm" },
+    { key = "main", tag = "Main", question = "Main or alt?",                   max = 12, example = "Main" },
+    { key = "want", tag = "Want", question = "What do you want from a guild?", max = 48, example = "Raids, friendly people" },
+}
 
 local NOTE_MAX, NAME_MAX, WHO_MAX = 120, 48, 40
 local KEEP_SECONDS = 30 * 86400    -- a closed entry of the player's own queue is forgotten after this
@@ -68,7 +95,7 @@ function JR:Audit()
         asked = asked + 1
         if e.delivered or e.status == "invited" or e.status == "declined" then delivered = delivered + 1 end
     end
-    return { open = self:OpenCount(), asked = asked, delivered = delivered, invites = dropped.invites,
+    return { open = self:OpenCount() + self:OpenCount("alliance"), asked = asked, delivered = delivered, invites = dropped.invites,
              confirmed = dropped.confirmed, dropped = { name = dropped.name, guild = dropped.guild } }
 end
 
@@ -173,14 +200,38 @@ function JR:Latest(ad)
 end
 
 -- Where a request stands: "stored" (nobody has answered: kept here), "officer" or "member" (delivered,
--- and to whom), "invited", "declined" or "expired"; third, when it was answered. Nil for a request that
+-- and to whom), "invited", "declined", "expired" or "withdrawn"; then when it was answered, and for a decline its
+-- reason and reapply time. Nil for a request that
 -- is not this character's.
 function JR:Status(id)
     pruneOutbox()
     local e = outbox()[id]
     if not e then return nil end
-    if e.status ~= "open" then return e.status, e.by, e.answeredAt end
+    if e.status ~= "open" then return e.status, e.by, e.answeredAt, e.reason, e.again end
     return e.delivered or "stored", e.by
+end
+
+-- How many of this character's requests are open, to any guild.
+function JR:OpenMine()
+    pruneOutbox()
+    local n = 0
+    for _, e in pairs(outbox()) do if e.status == "open" then n = n + 1 end end
+    return n
+end
+
+-- The seconds before "Ask again" may send this request once more: a REPEAT_SECONDS gap from the last time it went
+-- out, which is the gap the repeat keeps too. Nil for a request that is not open.
+function JR:AskWait(e)
+    if not e or e.status ~= "open" then return nil end
+    return math.max(0, (e.askedAt or e.at) + self.REPEAT_SECONDS - now())
+end
+
+-- Asks the guild again now, if the gap allows. Returns how many whispers went, or nil and why.
+function JR:AskAgain(id)
+    local e = outbox()[id]
+    if not e or e.status ~= "open" then return nil, "closed" end
+    if (self:AskWait(e) or 0) > 0 then return nil, "wait" end
+    return self:Deliver(e)
 end
 
 -- Whether this session can reach the guild from the game at all: a whisper of ours has been seen to arrive.
@@ -190,13 +241,17 @@ function JR:CanReach()
 end
 
 local function payloadOf(e)
-    return table.concat({ "CRQ", e.id, e.character, e.class or "", e.level or "", e.role or "", e.guild, e.note or "" }, "|")
+    local parts = { "CRQ", e.id, e.character, e.class or "", e.level or "", e.role or "", e.guild, e.note or "" }
+    -- An alliance application is the same request with its kind on the end: nine fields, not eight.
+    if e.kind == "alliance" then parts[#parts + 1] = "alliance" end
+    return table.concat(parts, "|")
 end
 
 -- One round for one request: to the officer heard from that guild, else a member, and the contact names
 -- the ad carries when nobody was heard or the one heard has not answered the round before (an addon that
 -- predates this message never will). Nothing is tried where this client's whisper has not been seen to arrive.
 function JR:Deliver(e)
+    e.askedAt = now()
     local gossip = GuildOS.ChehulGossip
     if not (gossip and gossip:CanWhisper()) then return 0 end
     local payload, sent = payloadOf(e), 0
@@ -224,8 +279,89 @@ function JR:Tick()
     if IsInGuild() then clearOutbox(); changed(); return end
     pruneOutbox()
     for _, e in pairs(outbox()) do
-        if e.status == "open" then self:Deliver(e) end
+        if e.status == "open" then self:Deliver(e)
+        elseif e.status == "withdrawn" and not e.withdrawSent then self:SendWithdraw(e) end
     end
+end
+
+-- The player takes a request back. It closes here at once, and the guild is told as soon as one of its officers
+-- can be reached: Tick keeps trying until one has it.
+function JR:Withdraw(id)
+    local e = outbox()[id]
+    if not e or e.status ~= "open" then return false end
+    e.status, e.answeredAt = "withdrawn", now()
+    self:SendWithdraw(e)
+    changed()
+    return true
+end
+
+-- One round of a withdrawal: to the officer heard from that guild, and to the contacts the ad names, so that one of
+-- the officers who reads it is among them. Returns how many whispers went.
+function JR:SendWithdraw(e)
+    local gossip = GuildOS.ChehulGossip
+    if not (gossip and gossip:CanWhisper()) then return 0 end
+    local payload = table.concat({ "CRX", e.id, e.character or "" }, "|")
+    local names = {}
+    local peer = gossip:PeerFor(e.guild)
+    if peer then names[#names + 1] = peer end
+    for _, name in ipairs(e.ct or {}) do names[#names + 1] = name end
+    local sent, seen = 0, {}
+    for _, name in ipairs(names) do
+        if not seen[name] then
+            seen[name] = true
+            if gossip:Whisper(name, payload) then sent = sent + 1 end
+        end
+    end
+    if sent > 0 then e.withdrawSent = true end
+    return sent
+end
+
+-- How a request was answered, in one line: as it arrives, and at login if it came while the player was away.
+-- Nil for an answer that is not a decision.
+function JR:AnswerText(e)
+    if e.kind == "alliance" then
+        if e.status == "invited" then return string.format(L["Your alliance application to %s was accepted."], e.guild) end
+        return string.format(L["%s declined your alliance application."], e.guild)
+    end
+    if e.status == "invited" then return string.format(L["Invite from %s"], e.guild) end
+    if e.status ~= "declined" then return nil end
+    local line
+    if e.reason and self.REASONS[e.reason] then
+        line = string.format(L["%s declined your request: %s."], e.guild, L[self.REASONS[e.reason]])
+    else
+        line = string.format(L["%s thanked you, but is not opening spots right now"], e.guild)
+    end
+    if e.again then
+        local sep = line:sub(-1) == "." and " " or ". "
+        line = line .. sep .. string.format(L["You can ask again from %s."], date("%d %b %Y", e.again))
+    end
+    return line
+end
+
+-- An answer that came while this character was not in the game is said once, at login. Told is kept on the request,
+-- so the same answer is not said twice.
+function JR:Greet()
+    if IsInGuild() then return end
+    pruneOutbox()
+    for _, e in pairs(outbox()) do
+        if not e.told and e.answeredAt and (e.status == "invited" or e.status == "declined") then
+            e.told = true
+            local line = self:AnswerText(e)
+            if line then GuildOS:Print(line) end
+        end
+    end
+end
+
+-- The form's answers as the note: "When: weeknights · Main: Main · Want: raids". Each answer is cut to its room and a
+-- blank one is left out; nil when all are blank. The separator is a middle dot, since the wire has no room for a bar.
+function JR:PackNote(answers)
+    local parts = {}
+    for _, p in ipairs(self.PROMPTS) do
+        local v = text(answers and answers[p.key], p.max)
+        if v then parts[#parts + 1] = p.tag .. ": " .. v end
+    end
+    if #parts == 0 then return nil end
+    return table.concat(parts, " \194\183 ")
 end
 
 -- Who is asking: this character's name, class token, level and the role it prefers; what the game
@@ -250,10 +386,28 @@ function JR:Me()
     return { character = name, class = class, level = level, role = role }
 end
 
+-- Who may apply to the Outlaws' alliance: a guild master, or a Co-Guild Master, of a guild other than the Outlaws.
+-- Returns true and the applicant's guild name, or false and why: "no-guild", "outlaws" or "rank".
+local OUTLAWS_NAME = "Eastern Kingdoms Outlaws"
+function JR:CanApplyAlliance()
+    if not IsInGuild() then return false, "no-guild" end
+    local guild, rankName, rankIndex = GetGuildInfo("player")
+    if not guild or guild == "" then return false, "no-guild" end
+    if guildKey(guild) == guildKey(OUTLAWS_NAME) then return false, "outlaws" end
+    if rankIndex ~= 0 and rankName ~= "Co-Guild Master" then return false, "rank" end
+    return true, guild
+end
+
 -- Asks `ad`'s guild to take this character. Returns the request, or nil and why: "in-guild", "no-ad",
 -- "too-many" (three are open), "already" (this guild has one open).
-function JR:Send(ad, note)
-    if IsInGuild() then return nil, "in-guild" end
+function JR:Send(ad, note, kind)
+    kind = kind == "alliance" and "alliance" or nil
+    if kind == "alliance" then
+        -- The applicant's guild rides in the note: an extra field would make older officers' clients drop it.
+        local ok, detail = self:CanApplyAlliance()
+        if not ok then return nil, detail end
+        note = "Guild: " .. detail
+    elseif IsInGuild() then return nil, "in-guild" end
     -- The slug is the site's name for the guild and a card heard by CR2 has none: the name stands in.
     if type(ad) ~= "table" or not ad.n then return nil, "no-ad" end
     local key = ad.u or ad.n
@@ -262,7 +416,7 @@ function JR:Send(ad, note)
     for _, e in pairs(box) do
         if e.status == "open" then
             open = open + 1
-            if e.key == key then return nil, "already" end
+            if e.key == key and e.kind == kind then return nil, "already" end
         end
     end
     if open >= self.MAX_OPEN then return nil, "too-many" end
@@ -283,7 +437,7 @@ function JR:Send(ad, note)
     end
     local e = {
         id = id, character = who.character, class = who.class, level = who.level, role = who.role,
-        note = text(note, NOTE_MAX), at = now(), guild = ad.n, slug = ad.u, key = key, ct = contacts, status = "open",
+        note = text(note, NOTE_MAX), at = now(), guild = ad.n, slug = ad.u, key = key, ct = contacts, status = "open", kind = kind,
     }
     box[id] = e
     self:Deliver(e)
@@ -357,11 +511,18 @@ local function openFor(character)
     end
 end
 
--- The rows, open ones first, each group the latest first.
-function JR:List()
+-- Which list a row belongs to: an alliance application (the Alliance tab) or a join request (Recruitment).
+local function kindOf(r) return r.kind == "alliance" and "alliance" or "guild" end
+
+-- The rows of one list, open ones first, each group the latest first. `which` is "alliance" for the
+-- alliance applications; anything else is the join requests.
+function JR:List(which)
     expireRows()
+    local want = which == "alliance" and "alliance" or "guild"
     local list = {}
-    for _, r in pairs(store()) do list[#list + 1] = r end
+    for _, r in pairs(store()) do
+        if r.status ~= "removed" and kindOf(r) == want then list[#list + 1] = r end
+    end
     table.sort(list, function(a, b)
         if (a.status == "open") ~= (b.status == "open") then return a.status == "open" end
         if a.at ~= b.at then return a.at > b.at end
@@ -370,10 +531,11 @@ function JR:List()
     return list
 end
 
-function JR:OpenCount()
+function JR:OpenCount(which)
     expireRows()
+    local want = which == "alliance" and "alliance" or "guild"
     local n = 0
-    for _, r in pairs(store()) do if r.status == "open" then n = n + 1 end end
+    for _, r in pairs(store()) do if r.status == "open" and kindOf(r) == want then n = n + 1 end end
     return n
 end
 
@@ -389,20 +551,36 @@ local function toGuild(payload)
     if mesh then mesh:Guild(PREFIX, payload) end
 end
 
--- What a row tells a person who asks about it: officer or member for an open one, the decision for a
--- closed one, nothing for one that expired. And who says so.
+-- The answer as it goes over the wire. A decline's reason and reapply time ride after the four fields an older
+-- client reads, so an older client still reads the answer.
+local function answerPayload(id, state, who, reason, again)
+    local parts = { "CRA", id, state, who }
+    if reason or again then parts[5], parts[6] = reason or "", again and tostring(again) or "" end
+    return table.concat(parts, "|")
+end
+
+-- A reapply time, off the wire or from an officer's menu: a whole moment ahead, within REAPPLY_MAX. Else nothing.
+local function reapplyAt(v)
+    local t = GuildOS.Finite(tonumber(v))
+    if not t or t ~= math.floor(t) then return nil end
+    if t <= now() or t > now() + JR.REAPPLY_MAX then return nil end
+    return t
+end
+
+-- What a row tells a person who asks about it: officer or member for an open one, the decision (with its reason
+-- and reapply time) for a closed one, nothing for one that expired or was withdrawn. And who says so.
 local function answerOf(r)
     local state = r.status
     if state == "open" then return GuildOS:IsOfficer() and "officer" or "member", me() end
-    if state == "invited" or state == "declined" then return state, r.decidedBy or me() end
+    if state == "invited" or state == "declined" then return state, r.decidedBy or me(), r.reason, r.again end
     return nil
 end
 
 -- `id` is the one the person knows the request by: its own, when it was made in the game.
 local function answerTo(r, name, id)
     local gossip = GuildOS.ChehulGossip
-    local state, by = answerOf(r)
-    if state and gossip then gossip:Whisper(name, table.concat({ "CRA", id or r.id, state, by }, "|")) end
+    local state, by, reason, again = answerOf(r)
+    if state and gossip then gossip:Whisper(name, answerPayload(id or r.id, state, by, reason, again)) end
 end
 
 -- A closed row whose request is heard again: a client that was offline at the decision, or the person
@@ -414,9 +592,9 @@ local function announceAgain(r)
     if now() - (r.toldAt or 0) < JR.REPEAT_SECONDS then return end
     r.toldAt = now()
     local by = r.decidedBy or me()
-    toGuild(table.concat({ "CRA", r.id, r.status, by }, "|"))
+    toGuild(answerPayload(r.id, r.status, by, r.reason, r.again))
     local gossip = GuildOS.ChehulGossip
-    if gossip then gossip:Whisper(r.character, table.concat({ "CRA", r.gameId or r.id, r.status, by }, "|")) end
+    if gossip then gossip:Whisper(r.character, answerPayload(r.gameId or r.id, r.status, by, r.reason, r.again)) end
 end
 
 -- A CRQ off the network. Whispered by the player it is the player's own, and answered; over GUILD it is
@@ -426,7 +604,8 @@ function JR:OnCRQ(payload, sender, dist)
     local mine = GetGuildInfo("player")
     if not mine or mine == "" then return end
     local f = { strsplit("|", payload) }
-    if #f ~= 8 or f[1] ~= "CRQ" or not validId(f[2]) then return end
+    if (#f ~= 8 and #f ~= 9) or f[1] ~= "CRQ" or not validId(f[2]) then return end
+    local kind = f[9] == "alliance" and "alliance" or nil
     if guildKey(f[7]) ~= guildKey(mine) then dropped.guild = dropped.guild + 1; return end
     local character = text(f[3], NAME_MAX)
     if not character then return end
@@ -453,7 +632,7 @@ function JR:OnCRQ(payload, sender, dist)
             if not makeRoom() then return end
             local class, level, role = facts(f[4], f[5], f[6])
             r = { id = f[2], character = character, class = class, level = level, role = role, note = text(f[8], NOTE_MAX),
-                  at = now(), seen = now(), status = "open", source = "addon", relayedBy = (not direct) and sender or nil }
+                  at = now(), seen = now(), status = "open", source = "addon", relayedBy = (not direct) and sender or nil, kind = kind }
             rows[r.id] = r
             if GuildOS:IsOfficer() then tell(GuildOS.JoinRequestsHeard, GuildOS, r) end
         end
@@ -473,9 +652,11 @@ end
 -- A CRA off the network. For a request this character made it is the answer; for a row in the guild's
 -- db it is a decision, and only an officer's word over GUILD is one.
 function JR:OnCRA(payload, sender, dist)
-    local _, id, state, who = strsplit("|", payload)
+    local _, id, state, who, reason, again = strsplit("|", payload)
     if not validRowId(id) or not (ANSWER[state] or state == "invited" or state == "declined") then return end
     who = text(who, WHO_MAX) or ""
+    reason = self.REASONS[reason] and reason or nil
+    again = reapplyAt(again)
 
     local e = (not IsInGuild()) and outbox()[id] or nil
     if e then
@@ -484,11 +665,9 @@ function JR:OnCRA(payload, sender, dist)
             if (ANSWER[state] or 0) >= (ANSWER[e.delivered] or 0) then e.delivered, e.by = state, who end
         else
             e.status, e.by, e.answeredAt = state, who, now()
-            if state == "invited" then
-                GuildOS:Print(string.format(L["Invite from %s"], e.guild))
-            else
-                GuildOS:Print(string.format(L["%s thanked you, but is not opening spots right now"], e.guild))
-            end
+            e.reason, e.again, e.told = reason, again, true
+            local line = self:AnswerText(e)
+            if line then GuildOS:Print(line) end
         end
         changed()
         return
@@ -502,8 +681,59 @@ function JR:OnCRA(payload, sender, dist)
     local r = store()[id]
     if r and r.status == "open" then
         r.status, r.decidedBy, r.decidedAt = state, who, now()
+        r.reason, r.again = reason, again
         changed()
     end
+end
+
+-- A CRR off GUILD: an officer took a request off the list. Only an officer's word counts, as for a decision.
+-- A request this client never heard of becomes the mark, so a repeat of it does not come back as a new row.
+function JR:OnCRR(payload, sender, dist)
+    local _, id, who = strsplit("|", payload)
+    if dist ~= "GUILD" or not validRowId(id) or not inGuild() then return end
+    local gossip = GuildOS.ChehulGossip
+    if not (gossip and gossip:IsOfficerSender(sender)) then return end
+    local rows = store()
+    local r = rows[id]
+    if r and r.status == "removed" then return end
+    if not r then
+        if not makeRoom() then return end
+        r = { id = id, character = "", at = now() }
+        rows[id] = r
+    end
+    r.status, r.removedBy, r.removedAt = "removed", text(who, WHO_MAX) or "", now()
+    changed()
+end
+
+-- A CRX: the player takes a request back. Whispered by the player it is theirs, and the name must be the sender's.
+-- Over GUILD it is an officer's client passing it on, and only an officer's word counts, as for CRR. A request this
+-- client never heard of becomes a mark, so a late copy of it cannot open a new row. Only the client that heard it
+-- straight from the player passes it on, so the copies do not go round.
+function JR:OnCRX(payload, sender, dist)
+    local _, id, character = strsplit("|", payload)
+    if not validRowId(id) or not inGuild() then return end
+    character = text(character, NAME_MAX)
+    if not character then return end
+    local direct = dist ~= "GUILD"
+    if direct then
+        if not sameName(character, sender) then dropped.name = dropped.name + 1; return end
+    else
+        local gossip = GuildOS.ChehulGossip
+        if not (gossip and gossip:IsOfficerSender(sender)) then return end
+    end
+
+    local rows = store()
+    local r = rows[id] or byGameId(id, character)
+    if r then
+        if r.status ~= "open" or not sameName(r.character, character) then return end
+        r.status, r.withdrawnAt = "withdrawn", now()
+    else
+        if not makeRoom() then return end
+        r = { id = id, character = character, at = now(), status = "withdrawn", withdrawnAt = now() }
+        rows[id] = r
+    end
+    if direct and GuildOS:IsOfficer() then toGuild(payload) end
+    changed()
 end
 
 -- Whether this character may close a request. The game's right to invite can reach below the guild's
@@ -512,13 +742,26 @@ function JR:CanDecide()
     return inGuild() and GuildOS:IsOfficer()
 end
 
+-- Whether this character may close this request. An alliance application is an ambassador's to accept
+-- or decline; every other request stays with the officers.
+function JR:CanDecideRow(r)
+    if r and r.kind == "alliance" then
+        return inGuild() and GuildOS.Alliance ~= nil and GuildOS.Alliance:IsMyAmbassador()
+    end
+    return self:CanDecide()
+end
+
 -- An officer's decision, once: the first one stands. It is told to the guild, and to the player if heard
--- just now, who would otherwise wait for the next repetition. A refusal says why: from the click on
--- Decline or from the game's line after an invite, it would otherwise be nothing happening.
-function JR:Decide(id, status)
+-- just now, who would otherwise wait for the next repetition. A refusal says why, from the click on Decline or
+-- from the game's line after an invite. A decline may carry a preset reason (JR.REASONS) and a reapply time;
+-- anything else is dropped rather than sent.
+function JR:Decide(id, status, reason, again)
     if status ~= "invited" and status ~= "declined" then return false end
-    if not self:CanDecide() then
-        GuildOS:Print(L["Only an officer can close a request: this one stays open."])
+    local heard = store()[id]
+    if not self:CanDecideRow(heard) then
+        GuildOS:Print(heard and heard.kind == "alliance"
+            and L["Only an ambassador can answer an alliance application."]
+            or L["Only an officer can close a request: this one stays open."])
         return false
     end
     expireRows()
@@ -527,24 +770,38 @@ function JR:Decide(id, status)
         GuildOS:Print(L["This request is already closed."])
         return false
     end
+    -- Accepting an alliance application grants the applicant read-only observer access. If the grant
+    -- fails (not an ambassador, the list is full) the row stays open.
+    if r.kind == "alliance" and status == "invited" then
+        local ok, err = GuildOS.AllianceObserver:Grant(r.character)
+        if not ok then
+            GuildOS:Print(err or L["Could not grant access."])
+            return false
+        end
+    end
+    local declined = status == "declined"
+    reason = declined and self.REASONS[reason] and reason or nil
+    again = declined and reapplyAt(again) or nil
     r.status, r.decidedBy, r.decidedAt = status, me(), now()
-    toGuild(table.concat({ "CRA", id, status, me() }, "|"))
+    r.reason, r.again = reason, again
+    toGuild(answerPayload(id, status, me(), reason, again))
     local gossip = GuildOS.ChehulGossip
     if gossip and (r.source == "addon" or r.gameId) and now() - (r.seen or 0) < self.ONLINE_SECONDS then
-        gossip:Whisper(r.character, table.concat({ "CRA", r.gameId or id, status, me() }, "|"))
+        gossip:Whisper(r.character, answerPayload(r.gameId or id, status, me(), reason, again))
     end
     changed()
     return true
 end
 
--- Takes a closed request off this officer's list (declined, invited or expired). An open one stays: it
--- is still waiting for an answer. Only this copy goes; the guild's other officers keep theirs.
+-- Takes a request off every officer's list, open or closed. Remove is not an answer: the player is not told,
+-- and Decline is the one that tells them. It is for a request that should not be on the list at all (a
+-- duplicate, a test, a spam line). The row stays as a mark, so a repeat of the request from the game does not
+-- make it new again; the other officers' clients take it off too, over GUILD (OnCRR).
 function JR:Remove(id)
-    if not self:CanDecide() then return false end
-    local rows = store()
-    local r = rows[id]
-    if not r or r.status == "open" then return false end
-    rows[id] = nil
+    local r = store()[id]
+    if not r or r.status == "removed" or not self:CanDecideRow(r) then return false end
+    r.status, r.removedBy, r.removedAt = "removed", me(), now()
+    toGuild(table.concat({ "CRR", id, me() }, "|"))
     changed()
     return true
 end
@@ -554,6 +811,8 @@ end
 -- offline; the site cannot know, so a request from there is always live.
 function JR:CanInvite(id)
     local r = inGuild() and store()[id] or nil
+    -- An alliance application is accepted as an observer, never invited into the guild.
+    if r and r.kind == "alliance" then return false end
     if not r or r.status ~= "open" or not CanGuildInvite() then return false end
     if r.source == "site" then return true end
     return now() - (r.seen or 0) < self.ONLINE_SECONDS
@@ -582,6 +841,8 @@ end
 -- went (onSystem), so an offline player or a refused name leaves it open. The officer gets a minute to
 -- press Enter instead of INVITE_WAIT's ten seconds (the stamp is set 50 seconds ahead).
 function JR:Approve(id)
+    local asked = store()[id]
+    if asked and asked.kind == "alliance" then return self:Decide(id, "invited") end
     if not self:CanDecide() then
         GuildOS:Print(L["Only an officer can close a request: this one stays open."])
         return false
@@ -686,8 +947,11 @@ function JR:Initialize()
     if gossip and gossip.On then
         gossip:On("CRQ", function(payload, sender, dist) JR:OnCRQ(payload, sender, dist) end)
         gossip:On("CRA", function(payload, sender, dist) JR:OnCRA(payload, sender, dist) end)
+        gossip:On("CRR", function(payload, sender, dist) JR:OnCRR(payload, sender, dist) end)
+        gossip:On("CRX", function(payload, sender, dist) JR:OnCRX(payload, sender, dist) end)
     end
     Compat.NewTicker(self.REPEAT_SECONDS, function() GuildOS:SafeCall(JR.Tick, JR) end)
+    Compat.After(3, function() GuildOS:SafeCall(JR.Greet, JR) end)
 
     -- Entering a guild ends the asking: the queue is cleared.
     local frame = CreateFrame("Frame")

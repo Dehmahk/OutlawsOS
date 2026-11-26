@@ -755,28 +755,36 @@ function GuildOS:CreateMarketPanel(parent)
         for i, r in ipairs(rowsOut) do
             local row = GetRow(i)
             row.offer, row.group = nil, nil
-            row.icon:ClearAllPoints()
-            row.icon:SetPoint("LEFT", r.child and 22 or 4, 0)
-            if r.group then
-                local title, meta = GroupText(r.group)
-                row.group = r.group
-                row.icon.icon:SetTexture(Market.Icon(r.group.items[1].o))
-                row.title:SetText((expanded[r.group.key] and "-  " or "+  ") .. title)
-                row.meta:SetText(meta)
+            -- A row that cannot be painted says why on its own line, rather than showing an empty bar.
+            local ok, err = pcall(function()
+                row.icon:ClearAllPoints()
+                row.icon:SetPoint("LEFT", r.child and 22 or 4, 0)
+                if r.group then
+                    local title, meta = GroupText(r.group)
+                    row.group = r.group
+                    row.icon.icon:SetTexture(Market.Icon(r.group.items[1].o))
+                    row.title:SetText((expanded[r.group.key] and "-  " or "+  ") .. title)
+                    row.meta:SetText(meta)
+                    row.price:SetText("")
+                    for _, b in ipairs(row.btns) do FillButton(b, nil) end
+                    row:SetAlpha(1)
+                else
+                    local e = r.e
+                    row.offer = e.o
+                    row.icon.icon:SetTexture(Market.Icon(e.o))
+                    local title, meta, price = RowText(e.o, me, e.w, e.mine, e.qty)
+                    row.title:SetText(title)
+                    row.meta:SetText(meta)
+                    row.price:SetText(price)
+                    local acts = Actions(e.o, me, e.mine)
+                    for k, b in ipairs(row.btns) do FillButton(b, acts[k], e.o) end
+                    row:SetAlpha(Market.Age(e.o) > Market.OLD_AFTER and STALE_ALPHA or 1)
+                end
+            end)
+            if not ok then
+                row.title:SetText("|cffff5555" .. tostring(err) .. "|r")
+                row.meta:SetText("")
                 row.price:SetText("")
-                for _, b in ipairs(row.btns) do FillButton(b, nil) end
-                row:SetAlpha(1)
-            else
-                local e = r.e
-                row.offer = e.o
-                row.icon.icon:SetTexture(Market.Icon(e.o))
-                local title, meta, price = RowText(e.o, me, e.w, e.mine, e.qty)
-                row.title:SetText(title)
-                row.meta:SetText(meta)
-                row.price:SetText(price)
-                local acts = Actions(e.o, me, e.mine)
-                for k, b in ipairs(row.btns) do FillButton(b, acts[k], e.o) end
-                row:SetAlpha(Market.Age(e.o) > Market.OLD_AFTER and STALE_ALPHA or 1)
             end
             row:Show()
         end

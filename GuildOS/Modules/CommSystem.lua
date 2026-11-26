@@ -16,8 +16,10 @@ CommSystem.MSG_TYPES = {
     RESPONSE  = "RS",    -- Response to a request
     PING      = "PI",    -- Presence ping
     PONG      = "PO",    -- Presence response
+    SYNC_NOW  = "SY",    -- the owner's sync button: every client refreshes its who's-online ping and sends its member data (owner only, GUILD)
     VERSION   = "VR",    -- Version check
     ALT_LINK  = "AL",    -- Alt/main link table sync (officer-authored; all members store)
+    ALT_LINK2 = "A2",    -- the same table with the time each link last changed; merged, never replaced
     SELF_ALT  = "SA",    -- member self-claim of own alts (officers replay via LinkAlt)
     RAID_DATA = "RD",    -- Raid attendance + session sync (officer only)
     RAID_DELETE = "RX",  -- Delete a raid session (officer only; sender verified)
@@ -317,6 +319,8 @@ function CommSystem:OnMessageReceived(msg, channel, sender)
         self:HandleResponse(sender, data)
     elseif msgType == CommSystem.MSG_TYPES.PING then
         self:HandlePing(sender)
+    elseif msgType == CommSystem.MSG_TYPES.SYNC_NOW then
+        self:HandleSyncNow(sender, channel)
     elseif msgType == "WL" then
         if GuildOS.Wishlist then
             GuildOS.Wishlist:HandleWishlistBroadcast(sender, data, channel)
@@ -350,18 +354,23 @@ function CommSystem:OnMessageReceived(msg, channel, sender)
     elseif msgType == CommSystem.MSG_TYPES.ALT_LINK then
         -- Officer-authored, everyone stores: members need altLinks to see
         -- alt/main grouping (True Roster, chat tags, inspector). Over GUILD only (issue #81).
+        -- A plain copy has no times, so it counts as time 0: it can add a link we lack, but it
+        -- cannot remove or replace one we have stamped. Newer officers also send ALT_LINK2.
         if channel == "GUILD" and GuildOS:IsOfficerByName(sender) then
             local ok, links = LibSerialize:Deserialize(data)
             if ok and type(links) == "table" then
-                -- Both sides keyed this client's way: on Forever the officer's keys carry its realm (#97).
-                local localized = {}
-                for alt, main in pairs(links) do
-                    local la, lm = GuildOS:LocalMemberKey(alt), GuildOS:LocalMemberKey(main)
-                    if la ~= lm then localized[la] = lm end   -- one split person is not their own alt
-                end
-                GuildOS.db.altLinks = localized
-                -- A member's own claim the list lacks goes back on top of it (#353).
-                if GuildOS.AltAutoDetect then GuildOS.AltAutoDetect:OnOfficerLinks() end
+                local stamps = {}
+                for alt in pairs(links) do stamps[alt] = 0 end
+                CommSystem.MergeAltSnapshot(links, stamps)
+            end
+        end
+    elseif msgType == CommSystem.MSG_TYPES.ALT_LINK2 then
+        -- Officer-authored snapshot with the time each link last changed. Merged per link, so a
+        -- stale officer copy cannot undo a newer change (GuildOS:MergeAltLinks).
+        if channel == "GUILD" and GuildOS:IsOfficerByName(sender) then
+            local ok, snap = LibSerialize:Deserialize(data)
+            if ok and type(snap) == "table" and type(snap.links) == "table" and type(snap.stamps) == "table" then
+                CommSystem.MergeAltSnapshot(snap.links, snap.stamps)
             end
         end
     elseif msgType == CommSystem.MSG_TYPES.SELF_ALT then
@@ -544,6 +553,9 @@ function CommSystem:_Answer()
     C_Timer.After(math.random() * 3, function()  -- Stagger responses
         self:BroadcastMyData()
 
+        -- Everyone also re-sends its own My Toon record, so a member who logged in after it was saved gets it.
+        if GuildOS.MySpecs then GuildOS:SafeCall(GuildOS.MySpecs.PublishOwn) end
+
         -- Officers also send the alt/main link table. This REQUEST handler
         -- is what a member's automatic login-time pull (and the periodic
         -- re-REQUEST ticker) lands on, so this is what lets a member who
@@ -682,6 +694,55 @@ function CommSystem:HandlePing(sender)
 end
 
 ----------------------------------------------------------------------
+-- Sync everyone now (the owner's button)
+----------------------------------------------------------------------
+-- A button only the owner's character sees: every Guild OS client refreshes its who's-online ping and
+-- sends its member data, as a /gos sync asks. Only a GUILD message from her character does this, and
+-- only once a minute, so a double press costs nothing. Each client waits a random moment within
+-- SYNC_SPREAD, so a big guild does not send all at once.
+CommSystem.SYNC_OWNER    = "Vyctoria Windwhisper"
+CommSystem.SYNC_SPREAD   = 45   -- seconds: each client answers somewhere in this window
+CommSystem.SYNC_COOLDOWN = 60   -- seconds: a press this soon after the last one is ignored
+
+-- Is this name her character? A realm suffix is ignored, as the other owner checks ignore it.
+function CommSystem:IsSyncOwner(name)
+    name = name or (GuildOS.Compat.PlayerName() or "")
+    return (name:match("^(.-)%-") or name) == self.SYNC_OWNER
+end
+
+-- This client's part: its ping (only a guild master, recruiter or officer pings) and its member data.
+-- Returns false inside the cooldown.
+function CommSystem:RunSyncNow()
+    local st = GuildOS.State.comm
+    local now = GetTime()
+    if st.syncAt and now - st.syncAt < self.SYNC_COOLDOWN then return false end
+    st.syncAt = now
+    C_Timer.After(math.random() * self.SYNC_SPREAD, function()
+        if GuildOS.OnlineLeaders then GuildOS:SafeCall(GuildOS.OnlineLeaders.Ping, GuildOS.OnlineLeaders) end
+        self:BroadcastMyData(true)
+    end)
+    return true
+end
+
+-- The owner's button. Her own client runs its part directly, since it never hears its own message.
+function CommSystem:SyncEveryone()
+    if not self:IsSyncOwner() or not IsInGuild() then return false end
+    if not self:RunSyncNow() then
+        GuildOS:Print(L["A sync was sent a moment ago. Wait a minute before another."])
+        return false
+    end
+    self:SendMessage(self.MSG_TYPES.SYNC_NOW, "", nil, "NORMAL")
+    GuildOS:Print(L["Sync sent. Every client answers within about a minute."])
+    return true
+end
+
+-- A sync from the owner: over GUILD only, and from her character. The channel and the name both count.
+function CommSystem:HandleSyncNow(sender, channel)
+    if channel ~= "GUILD" or not self:IsSyncOwner(sender) then return end
+    self:RunSyncNow()
+end
+
+----------------------------------------------------------------------
 -- A newer Guild OS in the guild (#377)
 ----------------------------------------------------------------------
 -- Every member's broadcast carries its addon version, and the newest one above this client's is said in
@@ -717,8 +778,28 @@ end
 function CommSystem:BroadcastAltLinks()
     if not GuildOS:IsOfficer() then return end
     if not IsInGuild() then return end
-    local serialized = LibSerialize:Serialize(GuildOS.db.altLinks or {})
-    self:SendMessage(self.MSG_TYPES.ALT_LINK, serialized)
+    local links = GuildOS.db.altLinks or {}
+    -- Older clients read the plain table; newer clients read the stamped one below.
+    self:SendMessage(self.MSG_TYPES.ALT_LINK, LibSerialize:Serialize(links))
+    local stamps = {}
+    for k, t in pairs(GuildOS.db.altStamps or {}) do stamps[k] = t end
+    for k in pairs(links) do stamps[k] = stamps[k] or 0 end   -- a link from before stamps: time 0
+    self:SendMessage(self.MSG_TYPES.ALT_LINK2, LibSerialize:Serialize({ links = links, stamps = stamps }))
+end
+
+-- Merge a snapshot from an officer into our link table, keyed our way (#97). A link whose two
+-- ends are one person is not kept (one split person is not their own alt); its time still is.
+-- Then a member's own claim the list lacks goes back on top of it (#353).
+function CommSystem.MergeAltSnapshot(links, stamps)
+    local inL, inS = {}, {}
+    for alt, main in pairs(links) do
+        local la, lm = GuildOS:LocalMemberKey(alt), GuildOS:LocalMemberKey(main)
+        if la ~= lm then inL[la] = lm end
+    end
+    for k, t in pairs(stamps) do inS[GuildOS:LocalMemberKey(k)] = t end
+    GuildOS.db.altLinks, GuildOS.db.altStamps =
+        GuildOS:MergeAltLinks(GuildOS.db.altLinks or {}, GuildOS.db.altStamps or {}, inL, inS)
+    if GuildOS.AltAutoDetect then GuildOS.AltAutoDetect:OnOfficerLinks() end
 end
 
 ----------------------------------------------------------------------

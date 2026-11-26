@@ -352,7 +352,7 @@ end
 -- The line in guild chat for a group: what for, how full, the spots, the note, and, when I invite
 -- whoever asks, the word that gets a guildmate with no addon an invite (#378).
 function Groups:_GuildLine(g)
-    local name = string.format("%s (%d/%d)", board():ActivityName(g.act), g.n or 1, g.max or SIZE_DEFAULT)
+    local name = string.format("%s (%d/%d)", board():ActivityLabel(g.act), g.n or 1, g.max or SIZE_DEFAULT)
     local line = string.format(L["[OutlawOS] Group for %s, looking for %s"], name, self:NeedText(g.need))
     if g.note and g.note ~= "" then line = line .. ": " .. g.note end
     local startIn = self:StartsIn(g)
