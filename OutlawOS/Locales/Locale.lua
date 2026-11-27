@@ -9,7 +9,7 @@
 --
 -- Locale data files: enUS, ptBR, esES (also esMX), deDE, frFR, ruRU, koKR, zhCN, zhTW,
 -- itIT -- every language the game runs in (#104; Italian, which only retail has, #186),
--- checked by tools/locales.lua -- populate GuildOS.L. enUS.lua loads unconditionally (the master list);
+-- checked by tools/locales.lua -- populate GuildOS.L. enUS.keys.lua is the master list and is not loaded (English keys map to themselves);
 -- every other locale file early-returns unless GetLocale() matches and
 -- then overrides only the keys it translates.
 --

@@ -2,7 +2,7 @@
 ## Title: |cffFFD700OutlawOS|r |cff888888Guild Manager|r
 ## Notes: Guild manager for WoW: Forever and Retail: roster, raid attendance, cores, recruitment and professions
 ## Author: Chehul (danielcosta42)
-## Version: 1.41.27
+## Version: 1.41.28
 ## SavedVariables: GuildOSDB
 ## DefaultState: enabled
 ## IconTexture: Interface\AddOns\OutlawOS\Media\minimap-logo
@@ -29,9 +29,8 @@ Inbox.lua
 # Core
 Core\Config.lua
 
-# Localization (Locale.lua first; enUS is the master list)
+# Localization (Locale.lua first; Locales/enUS.keys.lua is the master list, not loaded: English keys map to themselves)
 Locales\Locale.lua
-Locales\enUS.lua
 Locales\ptBR.lua
 Locales\esES.lua
 Locales\deDE.lua

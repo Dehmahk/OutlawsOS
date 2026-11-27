@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.41.28
+
+### Memory
+- English no longer loads its 1,600-line string list, which only mapped every string to itself. Saves about 150 KB for every player. The list stays in the folder as `Locales/enUS.keys.lua` for translators.
+
 ## 1.41.27
 
 ### One command name
