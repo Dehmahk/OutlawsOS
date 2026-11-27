@@ -1,0 +1,48 @@
+MIT License
+
+Copyright (c) 2026 danielcosta42
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+OutlawOS (Eastern Kingdoms Outlaws edition) modifications
+
+Copyright (c) 2026 Victoria. All rights reserved for the Outlaw modifications.
+
+This addon is built on GuildOS by danielcosta42, which is released under the MIT
+License above. That license, and its copyright notice, stay with the original
+GuildOS code and apply to it unchanged: nothing here takes away any permission
+the MIT License gives for that original code.
+
+The changes and additions made for Eastern Kingdoms Outlaws, meaning everything
+in this addon that is not part of the original GuildOS code, including the
+Outlaw features, text, artwork and the rename to OutlawOS, are not released
+under the MIT License. They may be used, unmodified, as part of this addon for
+playing World of Warcraft. Modifying, redistributing or republishing them, or
+publishing a changed copy of this addon that contains them, needs written
+permission from Victoria. Permission can be given or withdrawn at any time.
+
+Contact: Victoria, through the Eastern Kingdoms Outlaws Discord.
+
+The original copyright notice above must stay in every copy or substantial
+portion of the original GuildOS code.
+
+Third-party libraries bundled with this addon are listed in THIRD_PARTY_NOTICES.txt
+and keep their own licenses.

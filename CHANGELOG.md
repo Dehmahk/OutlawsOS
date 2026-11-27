@@ -1,5 +1,53 @@
 # Changelog
 
+## 1.41.05
+
+### The Ledger
+- The counter cards across the top no longer squish together when the window is resized. The cards with longer captions (Officer+ online, Recruiters online, Avg attendance, With OutlawOS) need more room before they show, and a caption or number that is still too long is cut at the card's edge instead of running into the next card.
+
+## 1.41.04
+
+### With OutlawOS count
+- The Roster's "With OutlawOS" number no longer depends on which check-ins your game happened to be online for. Each client now shares the list of guildmates it has heard from in the last 14 days (at login and when someone presses Check), and every client merges it, so the count converges. A newly installed client fills up within a minute or two of other players being online.
+
+## 1.41.03
+
+### Audit Log
+- Filter by action (promoted, demoted, removed, joined, left, MOTD, info), date range (24 hours, 7, 30 or 90 days), person (the one it was done to or who did it) and free text. A counter shows how many of the entries match, and Reset clears every filter.
+- Sort by clicking a column heading (When, Action, Person, Done by) or with the sort button: newest, oldest, person A-Z, action A-Z, done by A-Z. Your choices stay while the window is open.
+
+### The Office (Inner Circle, guild master / GM Alt / Co-GM only)
+- A new tab that only those ranks see.
+- Overview: members and who is online, joins, leaves and kicks, trials ready, members ready to promote, guild bank and this week's bounty clears.
+- Recruiter tracker: joined, stayed 7 days or more, promoted to Outlaw, still in the guild, pitches sent and join percentage, credited to whoever sent the invite.
+- Officer tracker: recruits, strikes issued, kicks, events run, raids led, when they were last on and their weekly goal.
+- Periods: all time, this week, this month, last 7 days, last 30 days.
+- Weekly goals per person (recruits and events) with progress.
+- Guild settings: officer line, trial length, automatic trials. A leadership-round button posts a one-line summary to officer chat. Copy for Discord opens a window with the text ready to copy.
+- Danger zone: clear the audit log, goals or pitch counts, each with a confirmation.
+- Numbers only cover what this PC and the other officers' addons saw. Pitches are counted for whispers sent from this PC.
+
+## 1.41.02 (since 1.40.01 and 1.41.00)
+
+### Web tab
+- A second column on the Web tab (under the first on a narrow window).
+- Publish tools: why the game and the site counts differ, a preview of who joined, left or changed rank since the last write, the companion's last word with a stale warning (officers also get a chat line at login), a copy-site-link box, a schedule that offers to publish every 1, 2, 4, 12 or 24 hours (ask, or auto when you are solo and out of combat), a history of the last writes, and a "Published" line after the reload.
+- Choose what this client sends: loot history, raid nights and attendance, journal, join requests, points and loot lists. Names can be kept off the roster this client sends.
+- Raid tools: load an upcoming raid from the guild calendar, see the class mix, what the raid lacks (tank, healer, buff classes), who is online and in your group, invite the maybes and standby after the confirmed raiders, post the roster to guild chat, save plans and load them again, and a raid-day checklist.
+- Every button on the tab shows a hover hint, and a greyed-out one says what turns it on.
+
+### Chat
+- Rank symbols in guild and officer chat always show, even if the chat icons and tags are off. The "Rank symbol" option is gone.
+
+## 1.41.00 (since 1.40.01)
+
+### Renamed to OutlawOS
+- The addon folder is now OutlawOS, with OutlawOS.toc, and the game's addon list, key bindings, buttons and messages say OutlawOS.
+- Update steps: close the game, delete Interface\AddOns\GuildOS, put the new OutlawOS folder in Interface\AddOns, and copy WTF\Account\<your account>\SavedVariables\GuildOS.lua to OutlawOS.lua in the same folder so your settings and guild data come across. Do this before you log in.
+- The game saves an addon's data under the addon's folder name, which is why the copy is needed. Nothing else about your data changed.
+- If the old GuildOS folder is still there next to OutlawOS, a red line in chat says so at login.
+- Under the hood the addon, its saved data name and the guild sync keep their old internal names, so members still on 1.40 keep syncing with the guild.
+
 ## 1.40.01 (since 1.40.00)
 
 ### Eastern Kingdoms Outlaws
