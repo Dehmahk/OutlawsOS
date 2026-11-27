@@ -1076,13 +1076,23 @@ function GuildOS:CreateCalendarSub(panel)
             if e.remind then facts[#facts + 1] = L["Reminder: "] .. remindText(e.remind) end
             for _, line in ipairs(facts) do
                 local factFS = UI:CreateText(child, line, 11, soft.r, soft.g, soft.b)
-                across(factFS, yy)
+                factFS:SetPoint("TOPLEFT", 0, -yy)
+                factFS:SetWidth(math.max(160, (f.detailW or 600) - 28))
+                factFS:SetJustifyH("LEFT")
+                factFS:SetWordWrap(true)
+                if factFS.SetMaxLines then factFS:SetMaxLines(0) end
                 yy = yy + math.max(14, (factFS:GetStringHeight() or 12) + 4)
             end
 
             if e.note and e.note ~= "" then
+                -- The whole description, wrapped to the list's width: it used to stop at the first line
+                -- with "...". The width is set outright so the height read below is the wrapped one.
                 local noteFS = UI:CreateText(child, e.note, 11, soft.r, soft.g, soft.b)
-                across(noteFS, yy)
+                noteFS:SetPoint("TOPLEFT", 0, -yy)
+                noteFS:SetWidth(math.max(160, (f.detailW or 600) - 28))
+                noteFS:SetJustifyH("LEFT")
+                noteFS:SetWordWrap(true)
+                if noteFS.SetMaxLines then noteFS:SetMaxLines(0) end
                 yy = yy + math.max(14, (noteFS:GetStringHeight() or 12) + 6)
             end
 

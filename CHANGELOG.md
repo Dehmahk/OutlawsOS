@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.41.30
+
+### Calendar
+- An event's full description now shows, wrapped, instead of stopping after the first line with "...". The Where, Lead and other detail lines wrap the same way.
+
 ## 1.41.29
 
 ### Fixes
