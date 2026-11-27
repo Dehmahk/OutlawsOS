@@ -2,7 +2,7 @@
 -- Guild OS - Layout primitives
 -- Container-driven geometry: how many columns fit, how many rows fit,
 -- how a button bar wraps. The three resolvers are pure functions of
--- their arguments so /gos selftest can exercise them with no frames.
+-- their arguments so /outlawos selftest can exercise them with no frames.
 ----------------------------------------------------------------------
 local UI = GuildOS.UI
 

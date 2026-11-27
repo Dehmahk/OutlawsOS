@@ -193,7 +193,7 @@ CommSystem.DROP_REASON_TEXT = {
 ----------------------------------------------------------------------
 -- Send a message to guild (with chunking for large payloads)
 ----------------------------------------------------------------------
--- `kind`, optional, names it in /gos perf (SyncService passes its domain); else the type does.
+-- `kind`, optional, names it in /outlawos perf (SyncService passes its domain); else the type does.
 function CommSystem:SendMessage(msgType, data, target, priority, kind)
     local payload = msgType .. ":" .. (data or "")
 
@@ -309,7 +309,7 @@ function CommSystem:OnMessageReceived(msg, channel, sender)
     -- Parse message type
     local msgType, data = decompressed:match("^(%w+):(.*)$")
     if not msgType then return end
-    GuildOS.State.comm.recvKind = msgType   -- for /gos perf; SyncService narrows SV to its domain
+    GuildOS.State.comm.recvKind = msgType   -- for /outlawos perf; SyncService narrows SV to its domain
 
     if msgType == CommSystem.MSG_TYPES.BROADCAST then
         self:HandleBroadcast(sender, data, channel)
@@ -503,7 +503,7 @@ end
 ----------------------------------------------------------------------
 -- Request data from all online guildies
 ----------------------------------------------------------------------
--- `now` (a /gos sync) asks to be answered within NOW_GAP rather than ANSWER_GAP.
+-- `now` (a /outlawos sync) asks to be answered within NOW_GAP rather than ANSWER_GAP.
 function CommSystem:RequestAllData(now)
     if not IsInGuild() then return end
     self:SendMessage(self.MSG_TYPES.REQUEST, now and "NOW" or "ALL")
@@ -515,7 +515,7 @@ end
 -- How often this client answers (issue #324). Every client answered every request and every officer
 -- re-sent its ~36 backfills each time, with three requests a login and one a client every ten minutes,
 -- all decoded by the whole guild, and an officer of a 700-member guild reported high CPU. A request inside
--- the window gets one answer at its end, so nothing asked goes unanswered. A /gos sync (NOW) waits
+-- the window gets one answer at its end, so nothing asked goes unanswered. A /outlawos sync (NOW) waits
 -- NOW_GAP at most, so its report still counts who answered. A client before #324 sends ALL for
 -- everything, and answers NOW as it answers ALL.
 CommSystem.ANSWER_GAP = 120
@@ -563,7 +563,7 @@ function CommSystem:_Answer()
         -- is what a member's automatic login-time pull (and the periodic
         -- re-REQUEST ticker) lands on, so this is what lets a member who
         -- logs in later actually converge on altLinks without an officer
-        -- having to run a manual /gos sync.
+        -- having to run a manual /outlawos sync.
         if GuildOS:IsOfficer() then
             C_Timer.After(0.5, function()
                 self:BroadcastAltLinks()
@@ -700,7 +700,7 @@ end
 -- Sync everyone now (the owner's button)
 ----------------------------------------------------------------------
 -- A button only the owner's character sees: every Guild OS client refreshes its who's-online ping and
--- sends its member data, as a /gos sync asks. Only a GUILD message from her character does this, and
+-- sends its member data, as a /outlawos sync asks. Only a GUILD message from her character does this, and
 -- only once a minute, so a double press costs nothing. Each client waits a random moment within
 -- SYNC_SPREAD, so a big guild does not send all at once.
 CommSystem.SYNC_OWNER    = "Vyctoria Windwhisper"
@@ -878,7 +878,7 @@ function CommSystem:ReportSync(window)
     GuildOS:Print(string.format(L["Sync: data from %d member(s) arrived; %d member(s) have OutlawOS."],
         arrived, withAddon or 0))
     if arrived == 0 then
-        GuildOS:Print(L["No member data arrived. Check that guildmates with OutlawOS are online, then type /guildos errors to see what failed."])
+        GuildOS:Print(L["No member data arrived. Check that guildmates with OutlawOS are online, then type /outlawos errors to see what failed."])
     end
     return arrived, withAddon
 end

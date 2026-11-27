@@ -10,7 +10,7 @@
 --   Fire   -> Leotheras demon phase        Arcane -> Solarian
 ----------------------------------------------------------------------
 -- Retail has no resistance gear (ADR-0026): absent there, and the scan and its sync with it
--- (DataCollector, /gos resscan; issue #184).
+-- (DataCollector, /outlawos resscan; issue #184).
 if GuildOS.Client.isRetail then return end
 
 local Resistances = {}

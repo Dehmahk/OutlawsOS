@@ -1,7 +1,7 @@
 ----------------------------------------------------------------------
 -- Guild OS - Login Digest
 -- "Since your last login: N new members, X items looted, ..." — a quick
--- catch-up shown once on login (and on demand via /guildos digest).
+-- catch-up shown once on login (and on demand via /outlawos digest).
 -- Build() is pure data; the popup uses the UI factories at runtime.
 ----------------------------------------------------------------------
 local Digest = {}

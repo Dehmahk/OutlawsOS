@@ -24,7 +24,7 @@ Mesh.TAG = "gos"
 -- Friendly labels for sibling addon tags. Unknown tags fall back to the raw
 -- tag, so a newly-added family member still shows up (just unlabelled).
 Mesh.ADDON_LABELS = {
-    gos = "Guild OS",
+    gos = "OutlawOS",
     pl  = "PartyLens",
     ph  = "ProfessionHelper",
 }

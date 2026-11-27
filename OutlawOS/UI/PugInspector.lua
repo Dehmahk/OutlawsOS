@@ -157,7 +157,7 @@ local function BuildFrame()
 end
 
 ----------------------------------------------------------------------
--- Public entry points (/gos pug + minimap menu)
+-- Public entry points (/outlawos pug + minimap menu)
 ----------------------------------------------------------------------
 function GuildOS:ShowPugInspector()
     frame = frame or BuildFrame()

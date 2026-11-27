@@ -52,7 +52,7 @@ end
 
 -- The Forever client's art (build 1.60.1.70245), by role. A nine-slice's pieces are the atlas size
 -- times `scale`; a three-slice is as tall as its frame. Candidates until beta screenshots of
--- /gos style preview confirm them (spec §4.6).
+-- /outlawos style preview confirm them (spec §4.6).
 -- A panel and a well paint flat, a thin bronze line on the palette's colour: the Settings frame's art
 -- around every card was heavier than the window it sat in, and a player asked for the line the small
 -- cards already had. The title bar has no band of its own: the metal frame's top edge is the bar, and a
@@ -273,7 +273,7 @@ GuildOS.Dialogs["GUILDOS_STYLE_RELOAD"] = {
     timeout = 0, whileDead = true, hideOnEscape = true,
 }
 
--- The picker's and /gos style's verb: save, then offer the reload.
+-- The picker's and /outlawos style's verb: save, then offer the reload.
 function Style:Apply(id)
     local ok, why = self:Choose(id)
     if not ok then

@@ -214,7 +214,7 @@ function RaidTracker:WeekStart(weekNum)
     return self:ResetOrigin() + weekNum * WEEK_SECS
 end
 
--- /gos selftest: the table against the client's own count of the seconds to the weekly reset,
+-- /outlawos selftest: the table against the client's own count of the seconds to the weekly reset,
 -- where the client has one. A cross-check, never the source: the week is the table's (guildos-web#199).
 function RaidTracker:_RegisterTests()
     if not GuildOS.SelfTest then return end

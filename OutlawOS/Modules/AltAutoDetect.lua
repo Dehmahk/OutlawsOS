@@ -28,7 +28,7 @@ function AltAutoDetect:Initialize()
 end
 
 -- Account-wide registry lives at the GuildOSDB root (shared across every
--- character on the account), NOT under the per-guild db that /gos reset wipes.
+-- character on the account), NOT under the per-guild db that /outlawos reset wipes.
 function AltAutoDetect:RecordSelf()
     if not GuildOSDB then return end
     GuildOSDB.accountChars = GuildOSDB.accountChars or {}
@@ -444,7 +444,7 @@ function AltAutoDetect:_SchedulePrompt()
     end)
 end
 
--- Manual trigger for /gos myalts: ignores the session/declined guards.
+-- Manual trigger for /outlawos myalts: ignores the session/declined guards.
 function AltAutoDetect:PromptNow()
     local r = self:DetectOwnAlts(GuildOSDB.accountChars, self:_GuildSet(), GuildOS.db.altLinks)
     if r then

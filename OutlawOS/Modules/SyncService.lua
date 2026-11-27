@@ -176,7 +176,7 @@ function SyncService:Publish(domain, action, data, opts)
     if not GuildOS.CommSystem then return nil end
 
     GuildOS.CommSystem:SendMessage(self.ENVELOPE_MSGTYPE, serialized, opts.target, opts.priority,
-        self.ENVELOPE_MSGTYPE .. " " .. tostring(domain))   -- /gos perf counts it by domain (issue #324)
+        self.ENVELOPE_MSGTYPE .. " " .. tostring(domain))   -- /outlawos perf counts it by domain (issue #324)
 
     if env.ack then
         self.pendingAcks[env.id] = {

@@ -736,7 +736,7 @@ function AllianceChat:Initialize()
 end
 
 ----------------------------------------------------------------------
--- Self tests (run with /gos selftest)
+-- Self tests (run with /outlawos selftest)
 ----------------------------------------------------------------------
 function AllianceChat:_RegisterTests()
     if not GuildOS.SelfTest then

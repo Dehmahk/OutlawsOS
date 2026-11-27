@@ -23,9 +23,9 @@ GuildOS.State = {
     raid        = {},
     consumables = {},
     raidCD      = { state = {}, members = {} },
-    errors      = {},  -- session error ring (see GuildOS:RecordError / /guildos errors)
+    errors      = {},  -- session error ring (see GuildOS:RecordError / /outlawos errors)
     -- What failed to start (GuildOS:RunStartup) and what this client lacks
-    -- (GuildOS:RecordMissing). Feeds /guildos errors and the login line.
+    -- (GuildOS:RecordMissing). Feeds /outlawos errors and the login line.
     startup     = { failed = {}, failedFeatures = {}, stacks = {} },
     missing     = {},
     perf        = { rows = {} },              -- GuildOS.Perf: calls and ms per label (issue #324)
@@ -380,7 +380,7 @@ local MODULE_START = {
     { "ReadyCheckWatch" },
     -- WoW: Forever and retail: lights the minimap button on the first guild a character with no guild hears.
     { "GuildFinder" },
-    -- Leaves the channel of a /gos probe channel that a /reload cut short, a moment after login.
+    -- Leaves the channel of a /outlawos probe channel that a /reload cut short, a moment after login.
     { "Probe" },
     { "RecruitScanner" },
     -- Recruitment participation runs for EVERY player (the officer-only
@@ -576,7 +576,7 @@ function GuildOS:FeatureStartFailed(id)
 end
 
 -- Record something this client does not have (an event, a tooltip script),
--- once per session, so /guildos errors lists it without repeating it.
+-- once per session, so /outlawos errors lists it without repeating it.
 --
 -- `expected` marks one only some clients ever had — the old craft window's
 -- event on a client that never had a craft window. It is still remembered, so
@@ -592,7 +592,7 @@ function GuildOS:RecordMissing(what, expected)
 end
 
 -- Every start-up failure and every missing capability, one line each,
--- sorted. /guildos errors prints these before the error ring, which is
+-- sorted. /outlawos errors prints these before the error ring, which is
 -- capped and shared with runtime errors and can already have lost them.
 function GuildOS:ListStartupProblems()
     local lines = {}
@@ -610,7 +610,7 @@ end
 function GuildOS:ReportStartup()
     local n = #self:ListStartupProblems()
     if n > 0 then
-        self:Print(string.format(L["%d start-up problem(s) on this client. Type /guildos errors for details."], n))
+        self:Print(string.format(L["%d start-up problem(s) on this client. Type /outlawos errors for details."], n))
     end
 end
 
@@ -802,7 +802,7 @@ end
 ----------------------------------------------------------------------
 
 -- Does the guild micro button / "J" open Guild OS? Default yes; opt-out in Settings
--- (General) or via /guildos guildbutton, so players can keep the modern Blizzard
+-- (General) or via /outlawos guildbutton, so players can keep the modern Blizzard
 -- guild UI (chat history, news) as the guild button's target and use both.
 function GuildOS:IsGuildButtonHijacked()
     return self:GetSetting("hijackGuildButton") ~= false
@@ -936,10 +936,10 @@ end
 
 ----------------------------------------------------------------------
 -- Structured logger + error resilience
--- Logger.debug gates verbose output (toggle via /guildos debug).
+-- Logger.debug gates verbose output (toggle via /outlawos debug).
 -- SafeCall pcall-wraps risky callbacks so a single failure never breaks
 -- the rest of the UI or spams the default error frame; failures land in a
--- session ring buffer viewable via /guildos errors.
+-- session ring buffer viewable via /outlawos errors.
 ----------------------------------------------------------------------
 GuildOS.Logger = { debug = false }
 
@@ -959,7 +959,7 @@ end
 
 local ERROR_RING_MAX = 50
 
--- Push one message into the session error ring shown by /guildos errors.
+-- Push one message into the session error ring shown by /outlawos errors.
 function GuildOS:RecordError(msg)
     local ring = GuildOS.State.errors
     ring[#ring + 1] = { msg = tostring(msg), when = (GetServerTime and GetServerTime()) or 0 }
@@ -1006,7 +1006,7 @@ end
 
 ----------------------------------------------------------------------
 -- Where the time goes (issue #324): calls, milliseconds and bytes per label since login or the last
--- reset, for /gos perf and Audit > Sync. A report of high CPU came with no logs, and nothing kept
+-- reset, for /outlawos perf and Audit > Sync. A report of high CPU came with no logs, and nothing kept
 -- how often the guild's traffic or the roster events arrive. Session only; two clock reads a call.
 ----------------------------------------------------------------------
 local Perf = {}
@@ -1046,7 +1046,7 @@ function Perf:Reset()
     GuildOS.State.perf = { rows = {}, since = GetTime() }
 end
 
--- What /gos perf says: the game's own profiler when this client has one, then every label by time spent.
+-- What /outlawos perf says: the game's own profiler when this client has one, then every label by time spent.
 function Perf:Lines()
     local st = GuildOS.State.perf
     local mins = math.max(1, math.floor((GetTime() - (st.since or GetTime())) / 60 + 0.5))

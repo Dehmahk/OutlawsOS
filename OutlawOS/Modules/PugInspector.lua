@@ -21,7 +21,7 @@ function PugInspector:Initialize()
 end
 
 ----------------------------------------------------------------------
--- Pure decision (deterministic; unit-tested via /gos selftest).
+-- Pure decision (deterministic; unit-tested via /outlawos selftest).
 -- Takes explicit facts so tests pin each branch with no live state.
 --   facts = {
 --     banned, reason,            -- BanList

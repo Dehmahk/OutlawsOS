@@ -2278,7 +2278,7 @@ function GuildOS:CreateGuildHub(parent, _mainFrame)
         else
             failed[key] = true
             GuildOS:RecordError("Guild hub " .. key .. ": " .. tostring(res))
-            GuildOS:Print(string.format(L["%s could not start on this client. Type /guildos errors for details."], def.label))
+            GuildOS:Print(string.format(L["%s could not start on this client. Type /outlawos errors for details."], def.label))
         end
     end
 
@@ -2297,7 +2297,7 @@ function GuildOS:CreateGuildHub(parent, _mainFrame)
         -- A deep link's filter goes to the sub-panel that takes one (the calendar: a day).
         if filter ~= nil and info and info.panel.ApplyFilter then GuildOS:SafeCall(info.panel.ApplyFilter, filter) end
     end
-    parent.SelectSub = selectSub   -- deep links: /guildos calendar, /gos open journal, the Now tab
+    parent.SelectSub = selectSub   -- deep links: /outlawos calendar, /outlawos open journal, the Now tab
 
     -- A tab is as wide as its label: five at a fixed 120px ran off a narrow window (issue #108).
     for _, t in ipairs(HUB_SUBTABS) do

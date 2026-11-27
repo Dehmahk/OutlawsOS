@@ -5,7 +5,7 @@
 -- what on it, and the loot rules. Shown out of combat only — on WoW: Forever the addon cannot read the
 -- fight (Midnight's restrictions), so this is text and never a timer:
 --
---   * the plan panel (UI/RaidPlanPanel.lua), from the Web panel and /gos roster plan;
+--   * the plan panel (UI/RaidPlanPanel.lua), from the Web panel and /outlawos roster plan;
 --   * a small window with my own task when I target a boss of the plan out of combat, once per boss
 --     per raid, and never for somebody with no task there;
 --   * the raid leader (or an assistant) can say a boss's note in raid chat with one click, out of

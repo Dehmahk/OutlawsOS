@@ -405,7 +405,7 @@ end
 function ConsumableChecker:ReportToChat(channel)
     local results = self:GetLastResults()
     if not results or not next(results) then
-        GuildOS:Print(L["No results. Use /guildos to check consumables first."])
+        GuildOS:Print(L["No results. Use /outlawos to check consumables first."])
         return
     end
     -- An encounter's chat lockdown (Midnight, Forever) drops the lines without an error (issue #187).

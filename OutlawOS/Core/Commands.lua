@@ -1,9 +1,9 @@
 ----------------------------------------------------------------------
 -- Guild OS - Slash Commands
--- /guildos and /gos dispatch table.
+-- /outlawos and /outlawos dispatch table.
 ----------------------------------------------------------------------
 
--- Primary slash command: /guildos and /gos
+-- Primary slash command: /outlawos and /outlawos
 SLASH_GUILDOS1 = "/guildos"
 SLASH_GUILDOS2 = "/gos"
 SLASH_OUTLAWSOS1 = "/outlawsos"
@@ -13,7 +13,7 @@ SLASH_OUTLAWOS1 = "/outlawos"
 local L = GuildOS.L
 
 ----------------------------------------------------------------------
--- /gos help listing
+-- /outlawos help listing
 --
 -- Lives in helpers so the command branch stays a single call. Colour
 -- escapes are built here and never stored inside an L[] key, so a
@@ -31,79 +31,79 @@ local function helpLine(verb, desc)
 end
 
 local function printHelp()
-    GuildOS:Print(HELP_CMD_COLOR .. L["OutlawOS commands (/gos or /guildos):"] .. "|r")
+    GuildOS:Print(HELP_CMD_COLOR .. L["OutlawOS commands (/outlawos or /outlawos):"] .. "|r")
 
     helpHeader(L["General"])
-    helpLine("/gos",             L["Open OutlawOS"])
-    helpLine("/gos open <feature>", L["Open a tab (roster, raids, loot, guild...)"])
-    helpLine("/gos find <text>", L["Search members by name, class, level or note"])
-    helpLine("/gos analytics",   L["Guild analytics and activity stats"])
-    helpLine("/gos map",         L["Open the live guild map"])
-    helpLine("/gos style [name]", L["List the interface styles, or switch to one"])
-    helpLine("/gos pug",         L["Check who you're grouped with"])
-    helpLine("/gos calendar",    L["Guild calendar and events"])
-    helpLine("/gos polls",       L["Guild polls"])
-    helpLine("/gos bulletin",    L["Guild bulletin board"])
-    helpLine("/gos bank [sort [all] | stop | sync | need]", L["Guild bank: open, organize the tab, ask for it, what it needs"])
-    helpLine("/gos cta [type] [message]", L["Call to Arms: rally the guild (officers)"])
-    helpLine("/gos ally",        L["Alliance status and allied guilds"])
+    helpLine("/outlawos",             L["Open OutlawOS"])
+    helpLine("/outlawos open <feature>", L["Open a tab (roster, raids, loot, guild...)"])
+    helpLine("/outlawos find <text>", L["Search members by name, class, level or note"])
+    helpLine("/outlawos analytics",   L["Guild analytics and activity stats"])
+    helpLine("/outlawos map",         L["Open the live guild map"])
+    helpLine("/outlawos style [name]", L["List the interface styles, or switch to one"])
+    helpLine("/outlawos pug",         L["Check who you're grouped with"])
+    helpLine("/outlawos calendar",    L["Guild calendar and events"])
+    helpLine("/outlawos polls",       L["Guild polls"])
+    helpLine("/outlawos bulletin",    L["Guild bulletin board"])
+    helpLine("/outlawos bank [sort [all] | stop | sync | need]", L["Guild bank: open, organize the tab, ask for it, what it needs"])
+    helpLine("/outlawos cta [type] [message]", L["Call to Arms: rally the guild (officers)"])
+    helpLine("/outlawos ally",        L["Alliance status and allied guilds"])
 
     helpHeader(L["Raid and loot"])
-    if GuildOS.LootMaster then helpLine("/gos lm", L["Master Loot helper status"]) end  -- not on retail (ADR-0026)
-    if GuildOS.Points then helpLine("/gos points", L["Points and DKP window"]) end
+    if GuildOS.LootMaster then helpLine("/outlawos lm", L["Master Loot helper status"]) end  -- not on retail (ADR-0026)
+    if GuildOS.Points then helpLine("/outlawos points", L["Points and DKP window"]) end
     if GuildOS.TradeCouncil then   -- retail's loot council by trade (issue #185)
-        helpLine("/gos offer [item]", L["Offer a tradeable item to the raid, or open the loot council"])
+        helpLine("/outlawos offer [item]", L["Offer a tradeable item to the raid, or open the loot council"])
     end
     if GuildOS.ConsumableChecker then  -- Anniversary and retail, not Forever (ADR-0014, issue #187)
-        helpLine("/gos cons",      L["Check raid consumables"])
+        helpLine("/outlawos cons",      L["Check raid consumables"])
     end
-    helpLine("/gos specs",         L["Scan group talent specs"])
-    helpLine("/gos export <what>", GuildOS.LootTracker and L["Export roster, attendance or loot"]
+    helpLine("/outlawos specs",         L["Scan group talent specs"])
+    helpLine("/outlawos export <what>", GuildOS.LootTracker and L["Export roster, attendance or loot"]
         or L["Export roster or attendance"])   -- the loot history is on retail too since issue #183
-    if GuildOS.Companion then helpLine("/gos web [on|off]", L["Copy your guild into the web companion"]) end
-    if GuildOS.CompanionImport then helpLine("/gos roster", L["Bring the raid roster in from the website"]) end
+    if GuildOS.Companion then helpLine("/outlawos web [on|off]", L["Copy your guild into the web companion"]) end
+    if GuildOS.CompanionImport then helpLine("/outlawos roster", L["Bring the raid roster in from the website"]) end
 
     helpHeader(L["Personal"])
-    helpLine("/gos avail",         L["List yourself as available for a group"])
-    helpLine("/gos signup <core>", L["Sign up for a raid core"])
-    helpLine("/gos mentions",      L["Name mention alerts"])
-    helpLine("/gos myalts",        L["Detect and link your own alts"])
+    helpLine("/outlawos avail",         L["List yourself as available for a group"])
+    helpLine("/outlawos signup <core>", L["Sign up for a raid core"])
+    helpLine("/outlawos mentions",      L["Name mention alerts"])
+    helpLine("/outlawos myalts",        L["Detect and link your own alts"])
     if GuildOS.AttunementTracker then  -- TBC content (ADR-0014)
-        helpLine("/gos attune",    L["Your attunement progress"])
+        helpLine("/outlawos attune",    L["Your attunement progress"])
     end
-    helpLine("/gos craft <item>",  L["Who can craft an item"])
-    helpLine("/gos order <item>",  L["Ask the guild's crafters to make an item"])
+    helpLine("/outlawos craft <item>",  L["Who can craft an item"])
+    helpLine("/outlawos order <item>",  L["Ask the guild's crafters to make an item"])
 
     helpHeader(L["Diagnostics"])
-    helpLine("/gos sync",     L["Force a full data sync"])
-    helpLine("/gos selftest", L["Run the built-in self test"])
-    helpLine("/gos errors",   L["Show recent errors"])
-    helpLine("/gos perf [reset]", L["Where OutlawOS spends its time since login, or zero the counters"])
-    helpLine("/gos probe",    L["Record this client's facts for support"])
-    helpLine("/gos probe chat", L["Post two test lines in guild chat to see whether an addon may post on its own"])
-    helpLine("/gos probe channel", L["Join a temporary channel to see whether an addon message may go through one"])
-    helpLine("/gos style preview", L["Show the Forever style's pieces side by side"])
-    helpLine("/gos debug",    L["Toggle debug output"])
+    helpLine("/outlawos sync",     L["Force a full data sync"])
+    helpLine("/outlawos selftest", L["Run the built-in self test"])
+    helpLine("/outlawos errors",   L["Show recent errors"])
+    helpLine("/outlawos perf [reset]", L["Where OutlawOS spends its time since login, or zero the counters"])
+    helpLine("/outlawos probe",    L["Record this client's facts for support"])
+    helpLine("/outlawos probe chat", L["Post two test lines in guild chat to see whether an addon may post on its own"])
+    helpLine("/outlawos probe channel", L["Join a temporary channel to see whether an addon message may go through one"])
+    helpLine("/outlawos style preview", L["Show the Forever style's pieces side by side"])
+    helpLine("/outlawos debug",    L["Toggle debug output"])
 
     -- These verbs are refused inside their own modules for non-officers, so
     -- showing them to a member would only advertise commands that do nothing.
     if GuildOS:IsOfficer() then
         helpHeader(L["Officers"])
-        helpLine("/gos ban <name>",            L["Ban a player from invites"])
-        helpLine("/gos tempban <name> <days>", L["Ban a player for a number of days"])
-        helpLine("/gos unban <name>",          L["Lift a ban"])
-        helpLine("/gos banlist",               L["Open the ban list"])
-        helpLine("/gos note <name> <text>",    L["Add an officer note"])
-        if GuildOS.Wishlist then helpLine("/gos wish", L["Open the loot wishlist"]) end
-        helpLine("/gos scout",                 L["Scan for unguilded recruits"])
-        helpLine("/gos ally create <tag> <name>", L["Found an alliance with other guilds"])
-        helpLine("/gos ally invite <officer>",    L["Invite a guild into the alliance"])
-        helpLine("/gos ally leave",               L["Leave the alliance"])
+        helpLine("/outlawos ban <name>",            L["Ban a player from invites"])
+        helpLine("/outlawos tempban <name> <days>", L["Ban a player for a number of days"])
+        helpLine("/outlawos unban <name>",          L["Lift a ban"])
+        helpLine("/outlawos banlist",               L["Open the ban list"])
+        helpLine("/outlawos note <name> <text>",    L["Add an officer note"])
+        if GuildOS.Wishlist then helpLine("/outlawos wish", L["Open the loot wishlist"]) end
+        helpLine("/outlawos scout",                 L["Scan for unguilded recruits"])
+        helpLine("/outlawos ally create <tag> <name>", L["Found an alliance with other guilds"])
+        helpLine("/outlawos ally invite <officer>",    L["Invite a guild into the alliance"])
+        helpLine("/outlawos ally leave",               L["Leave the alliance"])
     end
 end
 
 ----------------------------------------------------------------------
--- What a command and a button share (#142): every /gos command has a way in
+-- What a command and a button share (#142): every /outlawos command has a way in
 -- from the interface too, and both call the one function here, so the button
 -- does exactly what the command does.
 ----------------------------------------------------------------------
@@ -160,7 +160,7 @@ function GuildOS:ShowWebString()
     local C = GuildOS.Companion
     if not C then return end
     if not C:IsEnabled() then
-        GuildOS:Print(L["The web companion is off. Turn it on with /gos web on."])
+        GuildOS:Print(L["The web companion is off. Turn it on with /outlawos web on."])
         return
     end
     local text, countOrErr = C:Build()
@@ -234,7 +234,7 @@ local function handleCommand(msg)
     elseif msg == "restore" then
         if GuildOS.Backup then GuildOS.Backup:ShowRestore() end
     elseif msg == "bank" or msg:match("^bank%s") then
-        -- /gos bank [sort [all] | stop | sync | need]: the guild bank (issue #380)
+        -- /outlawos bank [sort [all] | stop | sync | need]: the guild bank (issue #380)
         if GuildOS.GuildBank then
             local a = {}
             for w in msg:gmatch("%S+") do a[#a + 1] = w end
@@ -244,7 +244,7 @@ local function handleCommand(msg)
     elseif msg == "bulletin" or msg == "board" then
         if GuildOS.Bulletin then GuildOS.Bulletin:Show() end
     elseif msg == "cta" or msg:match("^cta%s") then
-        -- /gos cta: the panel. /gos cta <type> [message]: send it (issue #108).
+        -- /outlawos cta: the panel. /outlawos cta <type> [message]: send it (issue #108).
         local rest = strtrim((msg:gsub("^cta%s*", "")))
         local kind = rest:match("^(%S+)")
         local CTA = GuildOS.CallToArms
@@ -253,7 +253,7 @@ local function handleCommand(msg)
         elseif CTA and CTA:Template(kind:lower()) then
             CTA:Send(kind:lower(), rest:match("^%S+%s+(.+)$"))
         else
-            GuildOS:Print(L["Usage: /gos cta [worldboss|pvp|defend|event|rally] [message]"])
+            GuildOS:Print(L["Usage: /outlawos cta [worldboss|pvp|defend|event|rally] [message]"])
         end
     elseif msg == "ally" or msg:match("^ally%s") or msg == "alliance" or msg:match("^alliance%s") then
         -- Cross-guild federation. Officer-only verbs refuse inside the module,
@@ -273,7 +273,7 @@ local function handleCommand(msg)
             GuildOS.Search:Show(q ~= "search" and q or "")
         end
     elseif msg:match("^order") and GuildOS.ShowCraftOrderDialog then
-        -- /guildos order [item link or id] — a craft order (issue #389); no item opens the Orders tab.
+        -- /outlawos order [item link or id] — a craft order (issue #389); no item opens the Orders tab.
         local arg = strtrim((msg:gsub("^order%s*", "")))
         local itemId = tonumber(arg:match("item:(%d+)")) or tonumber(arg:match("^(%d+)$"))
         if itemId then
@@ -282,7 +282,7 @@ local function handleCommand(msg)
             GuildOS.UI:OpenWindow("recipes", "mine")
         end
     elseif msg:match("^craft") then
-        -- /guildos craft <item link or id> — who can craft this, guild + realm.
+        -- /outlawos craft <item link or id> — who can craft this, guild + realm.
         local arg = strtrim((msg:gsub("^craft%s*", "")))
         local itemId = tonumber(arg:match("item:(%d+)")) or tonumber(arg:match("^(%d+)$"))
         if not itemId then
@@ -290,7 +290,7 @@ local function handleCommand(msg)
             if GuildOS.ShowCraftFinder then
                 GuildOS:ShowCraftFinder()
             else
-                GuildOS:Print(L["Usage: /guildos craft [item link or id]"])
+                GuildOS:Print(L["Usage: /outlawos craft [item link or id]"])
             end
         else
             local itemName = GuildOS.Compat.GetItemInfo(itemId) or ("item:" .. itemId)
@@ -441,7 +441,7 @@ local function handleCommand(msg)
         if key and GuildOS.TrialTracker then
             GuildOS.TrialTracker:AddTrial(key)
         else
-            GuildOS:Print(L["Usage: /guildos trial <PlayerName>"])
+            GuildOS:Print(L["Usage: /outlawos trial <PlayerName>"])
         end
     elseif msg == "note" or msg:match("^note%s") then
         local rest = msg:gsub("^note%s*", "")
@@ -456,10 +456,10 @@ local function handleCommand(msg)
                     or string.format(L["Note added for %s, who matches no single guild member: check the full name."], target))
             end
         else
-            GuildOS:Print(L["Usage: /guildos note <PlayerName> <text>"])
+            GuildOS:Print(L["Usage: /outlawos note <PlayerName> <text>"])
         end
     elseif msg == "offer" or msg:match("^offer%s") then
-        -- /gos offer [item link]: retail's loot council by trade (issue #185); the link keeps its case.
+        -- /outlawos offer [item link]: retail's loot council by trade (issue #185); the link keeps its case.
         local link = strtrim((msg:gsub("^offer%s*", "")))
         if not GuildOS.TradeCouncil then
             GuildOS:Print(L["Not available on this client."])
@@ -469,7 +469,7 @@ local function handleCommand(msg)
             GuildOS.TradeCouncil:Offer(link)
         end
     elseif msg == "lm undo" then
-        -- /guildos lm undo - take the last award back (issue #294), as the Master Loot window's button
+        -- /outlawos lm undo - take the last award back (issue #294), as the Master Loot window's button
         if GuildOS.LootMaster then
             local award, why = GuildOS.LootMaster:UndoLastAward()
             GuildOS:Print(award and string.format(L["|cffFFD700Undone:|r %s"], award.link) or why)
@@ -478,10 +478,10 @@ local function handleCommand(msg)
         local status = GuildOS:LootMasterStatus()
         if status then GuildOS:Print(status) end
     elseif msg:match("^lm announce") then
-        -- /guildos lm announce - manually announce item from target tooltip
+        -- /outlawos lm announce - manually announce item from target tooltip
         GuildOS:Print(L["Open loot window as Master Looter to announce items."])
     elseif msg:match("^web") or msg:match("^companion") then
-        -- /guildos web [on|off] - the string you paste into the web companion.
+        -- /outlawos web [on|off] - the string you paste into the web companion.
         local C = GuildOS.Companion
         local arg = C and msg:match("^%S+%s+(%S+)")
         if C and (arg == "on" or arg == "off") then
@@ -491,7 +491,7 @@ local function handleCommand(msg)
             GuildOS:ShowWebString()
         end
     elseif msg:match("^roster") then
-        -- /guildos roster [invite|groups|trim] — the roster the website planned.
+        -- /outlawos roster [invite|groups|trim] — the roster the website planned.
         local I = GuildOS.CompanionImport
         local sub = I and msg:match("^roster%s+(%S+)")
         if not I then
@@ -523,7 +523,7 @@ local function handleCommand(msg)
             end
         end
     elseif msg:match("^export") then
-        -- /guildos export <roster|attendance|loot|readiness|standings|equity> [csv|tsv|discord]
+        -- /outlawos export <roster|attendance|loot|readiness|standings|equity> [csv|tsv|discord]
         local rest = strtrim((msg:gsub("^export%s*", "")))
         local dataset, fmt = rest:match("^(%S*)%s*(%S*)$")
         dataset = (dataset and dataset ~= "") and dataset or "roster"
@@ -537,7 +537,7 @@ local function handleCommand(msg)
         elseif title == "absent" then
             GuildOS:Print(L["Not available on this client."])
         elseif GuildOS.Exporter then
-            GuildOS:Print(string.format(L["Usage: /guildos export <%s> [csv|tsv|discord]"], GuildOS.Exporter:Names()))
+            GuildOS:Print(string.format(L["Usage: /outlawos export <%s> [csv|tsv|discord]"], GuildOS.Exporter:Names()))
         end
     elseif msg:match("^wish") then
         if not GuildOS:IsOfficer() then
@@ -554,7 +554,7 @@ local function handleCommand(msg)
             if itemId and GuildOS.Wishlist then
                 GuildOS.Wishlist:RemoveFromWishlist(itemId)
             else
-                GuildOS:Print(L["Usage: /guildos wish remove [itemlink]"])
+                GuildOS:Print(L["Usage: /outlawos wish remove [itemlink]"])
             end
         else
             -- Treat remainder as an item link to add
@@ -562,7 +562,7 @@ local function handleCommand(msg)
             if itemId and GuildOS.Wishlist then
                 GuildOS.Wishlist:AddToWishlist(itemId, rest, false)
             else
-                GuildOS:Print(L["Usage: /guildos wish [itemlink] | /guildos wish remove [itemlink]"])
+                GuildOS:Print(L["Usage: /outlawos wish [itemlink] | /outlawos wish remove [itemlink]"])
             end
         end
     elseif msg == "mergeraids" then
@@ -653,7 +653,7 @@ local function handleCommand(msg)
             GuildOS:Print(format("|cffAAAAAA%d quests found. Run on main to compare IDs.|r", found))
         end
     elseif msg:match("^signup") then
-        -- /gos signup <CoreName> [tank|healer|melee|ranged] [note]
+        -- /outlawos signup <CoreName> [tank|healer|melee|ranged] [note]
         local rest     = strtrim((msg:gsub("^signup%s*", "")))
         local coreName = rest:match("^(%S+)")
         local note     = rest:match("^%S+%s+(.+)$") or ""
@@ -667,7 +667,7 @@ local function handleCommand(msg)
             -- Raids tab switched off (#377).
             GuildOS:ShowCoreSignupFrame()
         elseif not coreName or coreName == "" then
-            GuildOS:Print(L["Usage: /gos signup <CoreName> [tank|healer|melee|ranged] [note]"])
+            GuildOS:Print(L["Usage: /outlawos signup <CoreName> [tank|healer|melee|ranged] [note]"])
         elseif not GuildOS.CoreManager then
             GuildOS:Print(L["Core Manager not loaded."])
         elseif not GuildOS.CoreManager:Exists(coreName) then
@@ -677,17 +677,17 @@ local function handleCommand(msg)
             GuildOS:Print(string.format(L["Sign-up sent for core: %s"], coreName))
         end
     elseif msg:match("^unsignup") then
-        -- /gos unsignup <CoreName>  — withdraw your own application
+        -- /outlawos unsignup <CoreName>  — withdraw your own application
         local coreName = strtrim((msg:gsub("^unsignup%s*", "")))
         if coreName == "" then
-            GuildOS:Print(L["Usage: /gos unsignup <CoreName>"])
+            GuildOS:Print(L["Usage: /outlawos unsignup <CoreName>"])
         elseif GuildOS.CoreManager then
             local playerKey = GuildOS:GetPlayerKey(GuildOS.Compat.PlayerName(), GetRealmName())
             GuildOS.CoreManager:DeclineSignup(playerKey, coreName)
             GuildOS:Print(string.format(L["Sign-up withdrawn from core: %s"], coreName))
         end
     elseif msg:match("^tempban%s") then
-        -- /gos tempban <name> <days> [reason]  — officer-gated inside BanList:Add.
+        -- /outlawos tempban <name> <days> [reason]  — officer-gated inside BanList:Add.
         local rest = strtrim((msg:gsub("^tempban%s+", "")))
         local name, days, reason = rest:match("^(%S+)%s+(%d+)%s*(.*)$")
         local numDays = days and tonumber(days)
@@ -696,10 +696,10 @@ local function handleCommand(msg)
                 GuildOS:Print(L["Temp-banned "] .. name .. " (" .. days .. L[" days)"])
             end
         else
-            GuildOS:Print(L["Usage: /gos tempban <name> <days> [reason]"])
+            GuildOS:Print(L["Usage: /outlawos tempban <name> <days> [reason]"])
         end
     elseif msg:match("^ban%s") then
-        -- /gos ban <name> [reason]  — officer-gated inside BanList:Add.
+        -- /outlawos ban <name> [reason]  — officer-gated inside BanList:Add.
         local rest = strtrim((msg:gsub("^ban%s+", "")))
         local name, reason = rest:match("^(%S+)%s*(.*)$")
         if name then
@@ -707,10 +707,10 @@ local function handleCommand(msg)
                 GuildOS:Print(L["Banned "] .. name)
             end
         else
-            GuildOS:Print(L["Usage: /gos ban <name> [reason]"])
+            GuildOS:Print(L["Usage: /outlawos ban <name> [reason]"])
         end
     elseif msg:match("^unban%s") then
-        -- /gos unban <name>  — officer-gated inside BanList:Remove.
+        -- /outlawos unban <name>  — officer-gated inside BanList:Remove.
         local name = strtrim((msg:gsub("^unban%s+", "")))
         if name ~= "" and GuildOS.BanList and GuildOS.BanList:Remove(name) then
             GuildOS:Print(L["Unbanned "] .. name)
@@ -733,9 +733,9 @@ local function handleCommand(msg)
             GuildOS.NoteCommand:HandleCommand(a)
         end
     elseif msg == "avail" or msg:match("^avail%s") then
-        -- /gos avail [off | notify [on|off] | [tank|healer|dps|any] <text>]
+        -- /outlawos avail [off | notify [on|off] | [tank|healer|dps|any] <text>]
         -- Anchored on "^avail%s" so it can never swallow a sibling verb.
-        -- (/gos lfg is already the recruitment beacon inbox, hence "avail".)
+        -- (/outlawos lfg is already the recruitment beacon inbox, hence "avail".)
         if GuildOS.LFGBoard then
             -- gsub returns (string, count); the extra parens drop the count so it
             -- cannot reach strtrim's optional "characters to trim" argument. The
@@ -745,7 +745,7 @@ local function handleCommand(msg)
             GuildOS.LFGBoard:HandleCommand(a, rest)
         end
     elseif msg == "open" or msg:match("^open%s") then
-        -- /gos open <feature> [sub] — one uniform way to open any feature
+        -- /outlawos open <feature> [sub] — one uniform way to open any feature
         -- tab. A dedicated verb rather than a bare-id fallback: several
         -- feature ids (roster, trials, dkp, alliance) are already verbs
         -- above, and "^trial" would even prefix-match "trials" and eat the
@@ -757,11 +757,11 @@ local function handleCommand(msg)
         if def and (def.tab or def.opens) then
             GuildOS.UI:OpenWindow(id, sub)
         else
-            GuildOS:Print(L["Usage: /gos open <feature>. Try /gos open roster."])
+            GuildOS:Print(L["Usage: /outlawos open <feature>. Try /outlawos open roster."])
         end
     else
         -- Unknown verb: point at the listing, then keep the historic
-        -- behaviour of opening the roster. A bare /gos is the documented way
+        -- behaviour of opening the roster. A bare /outlawos is the documented way
         -- to open the roster and is not a typo, so it stays silent.
         if msg ~= "" then
             GuildOS:Print(string.format(L["Unknown command. Type %s for the list."], "|cffFFD700/gos help|r"))
@@ -770,6 +770,6 @@ local function handleCommand(msg)
     end
 end
 
--- Dispatch: /guildos and /gos (primary)
+-- Dispatch: /outlawos and /outlawos (primary)
 SlashCmdList["GUILDOS"] = handleCommand
 

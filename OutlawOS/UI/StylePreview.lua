@@ -1,5 +1,5 @@
 ----------------------------------------------------------------------
--- Guild OS - /gos style preview (issue #122; spec §4.6)
+-- Guild OS - /outlawos style preview (issue #122; spec §4.6)
 -- Every piece of the Forever style's art side by side, each labelled with its role and atlas name,
 -- and the ones this client lacks marked: the pieces are chosen from a beta screenshot of it.
 ----------------------------------------------------------------------

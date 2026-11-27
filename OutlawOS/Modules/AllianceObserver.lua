@@ -6,7 +6,7 @@
 -- is never given the alliance code, so nothing they send is believed by the
 -- alliance. Their client only ever changes its own copy.
 --
---   sponsor  : an ambassador who granted access (/gos ally observe <name>) or
+--   sponsor  : an ambassador who granted access (/outlawos ally observe <name>) or
 --              accepted an alliance application. It keeps the list of who it
 --              granted and whispers each one a snapshot on a timer.
 --   observer : a guildless character with a read-only copy of the alliance's
@@ -222,7 +222,7 @@ function AO:Grant(who)
         return false, L["Only an ambassador of your guild can grant observer access."]
     end
     local target = short(who)
-    if target == "" then return false, L["Usage: /gos ally observe <name>"] end
+    if target == "" then return false, L["Usage: /outlawos ally observe <name>"] end
     if target == short(me) then return false, L["You cannot observe your own alliance."] end
     local list = observers()
     if not list[target] and count(list) >= AO.MAX_OBSERVERS then

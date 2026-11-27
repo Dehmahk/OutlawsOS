@@ -2792,7 +2792,7 @@ function GuildOS:CreateGroupsPanel(parent)
         scroll:SetVerticalScroll(0)
         GuildOS:SafeCall(paint)
     end
-    parent.SelectSub = selectSub   -- deep links: /gos avail, Guild > Call to Arms
+    parent.SelectSub = selectSub   -- deep links: /outlawos avail, Guild > Call to Arms
 
     for _, t in ipairs(SUBS) do
         local btn = UI:CreateTab(bar, t.label, TAB_MIN_W, true)

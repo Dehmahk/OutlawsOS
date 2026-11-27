@@ -1,7 +1,7 @@
 ----------------------------------------------------------------------
 -- Guild OS - Guild Analytics
 -- Composition distributions (class / level / rank / zone) as pure
--- aggregation over the guild roster, shown as bars in a /gos analytics window.
+-- aggregation over the guild roster, shown as bars in a /outlawos analytics window.
 ----------------------------------------------------------------------
 local GuildAnalytics = {}
 GuildOS.GuildAnalytics = GuildAnalytics

@@ -157,7 +157,7 @@ function GuildOS:CreateWebPanel(parent, _win)
 
     local stateText = UI:CreateText(panel, "", 11, C.text.r, C.text.g, C.text.b)
     local toggleBtn = UI:CreateButton(panel, L["Turn on"], 90, BTN_H)
-    -- /gos web: the string to paste into the companion, while it is on (#142).
+    -- /outlawos web: the string to paste into the companion, while it is on (#142).
     local pasteBtn = UI:CreateButton(panel, L["Show the paste text"], 170, BTN_H)
     pasteBtn:SetScript("OnClick", function() GuildOS:ShowWebString() end)
 

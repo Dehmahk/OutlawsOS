@@ -25,7 +25,7 @@ function RosterLog:Initialize()
 end
 
 ----------------------------------------------------------------------
--- Pure helpers (deterministic; unit-tested via /gos selftest)
+-- Pure helpers (deterministic; unit-tested via /outlawos selftest)
 ----------------------------------------------------------------------
 -- Who an event is about: the short name, except on retail, where a guild spans connected realms
 -- and two members can share a name: there it is the whole key, a name without a realm on this

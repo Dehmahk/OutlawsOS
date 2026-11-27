@@ -530,7 +530,7 @@ function PopulateDetail(frame, data)
         GuildOS:ApplyFont(noSpec, 11)
         noSpec:SetPoint("TOPLEFT", 15, yOff)
         noSpec:SetTextColor(C.silver.r, C.silver.g, C.silver.b, 0.5)
-        noSpec:SetText(L["No spec data. Use /guildos specs to scan the group."])
+        noSpec:SetText(L["No spec data. Use /outlawos specs to scan the group."])
         noSpec:Show()
         yOff = yOff - 25
     end
@@ -960,7 +960,7 @@ function PopulateDetail(frame, data)
             yOff = yOff - noteLabel:GetStringHeight() - 6
         end
 
-        -- /gos myalts: on your own sheet, find your characters in the guild and offer to link them (#142).
+        -- /outlawos myalts: on your own sheet, find your characters in the guild and offer to link them (#142).
         if isSelfManage and GuildOS.AltAutoDetect then
             local detectBtn = UI:CreateButton(child, L["Detect my alts"], 140, 20)
             detectBtn:SetPoint("TOPLEFT", 12, yOff)

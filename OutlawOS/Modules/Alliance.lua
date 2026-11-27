@@ -57,7 +57,7 @@ end
 
 ----------------------------------------------------------------------
 -- Pure helpers. Everything below this line is deterministic and pinned by
--- /gos selftest, because several of these MUST agree across clients.
+-- /outlawos selftest, because several of these MUST agree across clients.
 ----------------------------------------------------------------------
 
 -- "brcore" -> "BRCORE". Returns "" when nothing usable is left, which every
@@ -2104,14 +2104,14 @@ function Alliance:BoardPosts()
 end
 
 ----------------------------------------------------------------------
--- Slash command surface (/gos ally ...)
+-- Slash command surface (/outlawos ally ...)
 ----------------------------------------------------------------------
 function Alliance:PrintStatus()
     local pact = self:Get()
     if not pact then
         GuildOS:Print(L["This guild is not in an alliance yet."])
         if GuildOS:IsOfficer() then
-            GuildOS:Print(L["Start one with: /gos ally create <tag> <name>"])
+            GuildOS:Print(L["Start one with: /outlawos ally create <tag> <name>"])
         end
         return
     end
@@ -2175,11 +2175,11 @@ function Alliance:HandleCommand(args)
     if verb == "create" then
         local tag, name = rest:match("^(%S+)%s*(.*)$")
         if not tag then
-            return GuildOS:Print(L["Usage: /gos ally create <tag> <name>"])
+            return GuildOS:Print(L["Usage: /outlawos ally create <tag> <name>"])
         end
         ok, err = self:Create(tag, name)
         if ok then
-            GuildOS:Print(string.format(L["Alliance %s created. Invite a guild with /gos ally invite <officer>"],
+            GuildOS:Print(string.format(L["Alliance %s created. Invite a guild with /outlawos ally invite <officer>"],
                 self:Get().name))
         end
     elseif verb == "invite" then
@@ -2224,7 +2224,7 @@ function Alliance:HandleCommand(args)
                 return GuildOS:Print(L["This guild is not in an alliance yet."])
             end
             GuildOS:Print(string.format(L["Ambassadors: %s"], table.concat(entry.ambassadors, ", ")))
-            return GuildOS:Print(L["Usage: /gos ally amb [add|remove|claim] <name>"])
+            return GuildOS:Print(L["Usage: /outlawos ally amb [add|remove|claim] <name>"])
         end
     elseif verb == "code" then
         -- Only ambassadors ever SEE the code. It lives in every member's saved
@@ -2282,7 +2282,7 @@ function Alliance:HandleCommand(args)
             .. " · " .. agc:StatusLine())
         return
     else
-        return GuildOS:Print(L["Usage: /gos ally [create|invite|code|join|request|amb|leave|kick|block|unblock]"])
+        return GuildOS:Print(L["Usage: /outlawos ally [create|invite|code|join|request|amb|leave|kick|block|unblock]"])
     end
 
     if not ok and err then
@@ -2350,7 +2350,7 @@ function Alliance:Initialize()
 end
 
 ----------------------------------------------------------------------
--- Self tests (run with /gos selftest)
+-- Self tests (run with /outlawos selftest)
 ----------------------------------------------------------------------
 local function samplePact()
     return {

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.41.27
+
+### One command name
+- Every message, help line and tip now says `/outlawos`, in all languages. `/gos` and `/guildos` still work behind the scenes, so old macros keep running.
+- The top bar says "OutlawOS" when you are not in a guild (it used to say "Guild OS"), and so do the mesh and network-alert labels.
+- The support probe's "saved" messages no longer show the internal data-file name.
+
 ## 1.41.26
 
 ### Now tab: Next Event card

@@ -1838,7 +1838,7 @@ local function BuildManage(panel)
     local contactBtn = UI:CreateButton(body, L["Try with this name"], 140, 24)
     contactBtn:SetPoint("LEFT", contactBox, "RIGHT", 8, 0)
 
-    -- /gos ally request: no invite in hand, ask an officer of a guild already in the alliance (#142).
+    -- /outlawos ally request: no invite in hand, ask an officer of a guild already in the alliance (#142).
     local reqHdr = sectionTitle(L["Ask to join an alliance"])
     local reqTagBox = makeInput(body, 110)
     local reqWhoBox = makeInput(body, 200)

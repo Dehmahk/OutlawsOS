@@ -345,7 +345,7 @@ end
 -- Entry points
 ----------------------------------------------------------------------
 
--- Open the loot council, on an offer when one is given (/gos offer with no item, the Settings quick
+-- Open the loot council, on an offer when one is given (/outlawos offer with no item, the Settings quick
 -- button, a new offer from the raid).
 function GuildOS:ShowTradeCouncil(offerId)
     if not TC() then

@@ -52,7 +52,7 @@ CoreManager.CLASS_ROLES = {
 }
 if GuildOS.Client.isRetail then CoreManager.CLASS_ROLES.HUNTER = { mdps=true, rdps=true } end
 
--- A role as somebody types it ("/gos signup Main healer"): its label or its key, any case.
+-- A role as somebody types it ("/outlawos signup Main healer"): its label or its key, any case.
 CoreManager.ROLE_WORDS = { tank="tank", healer="healer", heal="healer", melee="mdps", mdps="mdps",
                            ranged="rdps", rdps="rdps" }
 
@@ -2075,7 +2075,7 @@ function CoreManager:ImportInbox()
         return
     end
     if not on then
-        tellOnce("companion-off", L["Cores from Discord are waiting in the inbox: turn the web companion on with /gos web on."])
+        tellOnce("companion-off", L["Cores from Discord are waiting in the inbox: turn the web companion on with /outlawos web on."])
         return
     end
     self:ImportPackage(data, at)

@@ -22,7 +22,7 @@ function BanList:Initialize()
 end
 
 ----------------------------------------------------------------------
--- Pure helpers (deterministic, unit-tested via /gos selftest)
+-- Pure helpers (deterministic, unit-tested via /outlawos selftest)
 ----------------------------------------------------------------------
 -- The key a ban is filed under: the name alone, lower case, on WoW: Forever (no realms) and TBC
 -- Anniversary (as it always was). On retail a guild spans connected realms and two players there
@@ -143,14 +143,14 @@ function BanList:Add(name, reason, durationSec)
     return true
 end
 
--- Lift a ban by the name an officer typed (/gos unban; `_RemovalKey`). False when none stands there.
+-- Lift a ban by the name an officer typed (/outlawos unban; `_RemovalKey`). False when none stands there.
 function BanList:Remove(name)
     if not name or name == "" then return false end
     return self:RemoveKey(self:_RemovalKey(name))
 end
 
 -- Lift the ban filed under `key`, exactly that one: the ban list's own rows (issue #184). False,
--- and nothing written, when no ban stands there (none, or already lifted): `/gos unban` says so.
+-- and nothing written, when no ban stands there (none, or already lifted): `/outlawos unban` says so.
 function BanList:RemoveKey(key)
     if not GuildOS:IsOfficer() or not key or key == "" then return false end
     local existing = GuildOS.db.banList[key]

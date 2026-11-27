@@ -13,7 +13,7 @@ end
 if CN.EnableAlerts then
     CN:EnableAlerts({
         accent = { 1.0, 0.843, 0.0 },
-        title = "Guild OS",
+        title = "OutlawOS",
         priority = 2,
         store = function()
             GuildOSDB = GuildOSDB or {}

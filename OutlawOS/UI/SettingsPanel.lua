@@ -918,7 +918,7 @@ PAGES.chat = function(F, isOfficer)
                 return h
             end })
         local more = F:Note("", { indent = SUB_INDENT, shown = function() return #words() > WORD_MAX end })
-        F:Sync(function() more:SetText(string.format(L["+%d more (/gos mentions list)"], #words() - WORD_MAX)) end)
+        F:Sync(function() more:SetText(string.format(L["+%d more (/outlawos mentions list)"], #words() - WORD_MAX)) end)
 
         F:Buttons({
             { L["Add my linked alts"], function()
@@ -1621,7 +1621,7 @@ PAGES.data = function(F, isOfficer)
         F:Action(L["Sync everyone now"], L["Every OutlawOS client refreshes who is online and sends its member data. Only you see this button."], function() GuildOS.CommSystem:SyncEveryone() end)
     end
 
-    -- What /gos scan, errors, selftest, probe, probe chat and style preview do (#142).
+    -- What /outlawos scan, errors, selftest, probe, probe chat and style preview do (#142).
     F:Section(L["Diagnostics"])
     F:Buttons({
         { L["Collect my data"], function() GuildOS:CollectMyDataNow() end },
@@ -1748,7 +1748,7 @@ PAGES.data = function(F, isOfficer)
     end, w = 120 } }, { gap = 10 })
     F:Note(L["Project page, bug reports and updates"], { gap = 6 })
 
-    -- /gos reset, behind a confirmation: it cannot be undone. Last, and red.
+    -- /outlawos reset, behind a confirmation: it cannot be undone. Last, and red.
     F:Section(L["Danger zone"])
     F:Buttons({ { L["Erase guild data"], function()
         GuildOS.Dialogs["GUILDOS_ERASE_GUILD"] = GuildOS.Dialogs["GUILDOS_ERASE_GUILD"] or {
@@ -1848,7 +1848,7 @@ function GuildOS:CreateSettingsPanel(parent, _mainFrame)
             info.form = GuildOS:RefreshSettingsPanel(info.content, key)
         end)
     end
-    parent.SelectSub = selectSub   -- deep links: /gos open settings <page>
+    parent.SelectSub = selectSub   -- deep links: /outlawos open settings <page>
 
     for _, s in ipairs(SUBS) do
         local t = UI:CreateTab(bar, s.label, TAB_MIN, true)

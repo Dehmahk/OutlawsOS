@@ -111,7 +111,7 @@ local function BuildReadySub(panel)
         targetBtn:SetPoint("TOPRIGHT", -GAP, -2)
     end
 
-    -- /gos specs: the group's talent specs, read now (#142).
+    -- /outlawos specs: the group's talent specs, read now (#142).
     local specsBtn = UI:CreateButton(panel, L["Scan group talents"], 150, 20)
     if targetBtn then
         specsBtn:SetPoint("TOPRIGHT", targetBtn, "TOPLEFT", -6, 0)
@@ -121,7 +121,7 @@ local function BuildReadySub(panel)
     specsBtn:SetScript("OnClick", function()
         if GuildOS.SpecChecker then GuildOS.SpecChecker:ScanGroup() end
     end)
-    -- /gos cons: the raid's consumables, read now, with the announce (on retail the Raid HUD that
+    -- /outlawos cons: the raid's consumables, read now, with the announce (on retail the Raid HUD that
     -- holds the other way in does not exist; issue #187).
     local leftmost = specsBtn
     if hasCons then
@@ -580,7 +580,7 @@ local function BuildSyncSub(panel)
         C_Timer.After(2.5, function() if refresh then refresh() end end)
     end)
 
-    -- /gos mergeraids: the same night recorded twice becomes one (#142).
+    -- /outlawos mergeraids: the same night recorded twice becomes one (#142).
     local mergeBtn = UI:CreateButton(panel, L["Merge duplicate sessions"], 170, 20)
     mergeBtn:SetPoint("TOPRIGHT", syncBtn, "TOPLEFT", -6, 0)
     mergeBtn:SetScript("OnClick", function() GuildOS:MergeRaidSessions() end)
@@ -593,7 +593,7 @@ local function BuildSyncSub(panel)
     listHolder:SetPoint("BOTTOMRIGHT", 0, 0)
     local _, content = MakeScrollList(listHolder, "GuildOSAuditSyncScroll")
 
-    -- /gos probe channel (specs/071-o-recrutamento). Made once; the list clears its children and the
+    -- /outlawos probe channel (specs/071-o-recrutamento). Made once; the list clears its children and the
     -- refresh puts it back under the recruitment lines.
     -- Diagnostics: closed by default. The counters, the probes, the performance numbers and the
     -- alliance diagnostics show only while it is open.
@@ -610,7 +610,7 @@ local function BuildSyncSub(panel)
         C_Timer.After(GuildOS.Probe.CHANNEL_WAIT + 1, function() if refresh and panel:IsShown() then refresh() end end)
     end)
 
-    -- /gos perf and /gos perf reset (issue #324), made once like the probe's button.
+    -- /outlawos perf and /outlawos perf reset (issue #324), made once like the probe's button.
     local perfPrintBtn = UI:CreateButton(content, L["Print to chat"], 110, 20)
     perfPrintBtn:SetScript("OnClick", function() GuildOS.Perf:Print() end)
     local perfResetBtn = UI:CreateButton(content, L["Zero the counters"], 130, 20)
@@ -660,7 +660,7 @@ local function BuildSyncSub(panel)
         end
 
         ------------------------------------------------------------------
-        -- Where the time goes (issue #324): what /gos perf prints. A section, under the shared title.
+        -- Where the time goes (issue #324): what /outlawos perf prints. A section, under the shared title.
         ------------------------------------------------------------------
         if panel.diagOpen then
             yOff = SectionTitle(content, L["Performance"], yOff)

@@ -633,7 +633,7 @@ function GuildOS:CreateCoresPanel(panel)
         y = MakeSectionHeader(rightContent, string.format(L["Pending Sign-ups (%d)"], #suList), y)
         local tipLbl = MakeLabel(rightContent,
             CM:IsFromDiscord(coreName) and L["The requests for a Discord core go to Discord: its leader answers there and the answer comes back here."]
-            or L["Players apply in the Sign-up window or with: /gos signup <core> [role] [note]"], 11)
+            or L["Players apply in the Sign-up window or with: /outlawos signup <core> [role] [note]"], 11)
         tipLbl:SetPoint("TOPLEFT", 0, y)
         tipLbl:SetWidth(math.max(200, rightContent:GetWidth() or 0))
         tipLbl:SetJustifyH("LEFT")

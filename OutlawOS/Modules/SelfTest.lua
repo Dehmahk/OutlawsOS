@@ -1,8 +1,8 @@
 ----------------------------------------------------------------------
 -- Guild OS - SelfTest
 -- In-client assertion harness for pure/deterministic logic. Cases are
--- registered by modules at Initialize; nothing runs until /gos selftest.
--- Ships tiny; matches the existing /gos debug diagnostic pattern.
+-- registered by modules at Initialize; nothing runs until /outlawos selftest.
+-- Ships tiny; matches the existing /outlawos debug diagnostic pattern.
 ----------------------------------------------------------------------
 local SelfTest = {}
 GuildOS.SelfTest = SelfTest

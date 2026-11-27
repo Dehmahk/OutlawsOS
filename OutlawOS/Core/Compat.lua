@@ -459,7 +459,7 @@ end
 
 -- Register `event` on `frame`. RegisterEvent raises on an event name the
 -- client does not know, and a new client (WoW: Forever) may lack TBC-era
--- ones such as CRAFT_SHOW. The miss is recorded for /guildos errors instead
+-- ones such as CRAFT_SHOW. The miss is recorded for /outlawos errors instead
 -- of stopping the module that asked. Returns true when registered.
 --
 -- `expected` is for an event only some clients ever had: it still registers
@@ -496,7 +496,7 @@ local posted = {}
 -- caller asked for — otherwise a hook on GameTooltip alone would start writing
 -- into every tooltip in the game, Blizzard's forbidden ones included, where a
 -- line raises. A tooltip that is not built (nil) is skipped silently, and a
--- client with neither path is recorded for /guildos errors. Returns true when
+-- client with neither path is recorded for /outlawos errors. Returns true when
 -- this tooltip is covered.
 function Compat.HookTooltip(tooltip, script, fn)
     if not tooltip then return false end
@@ -1871,7 +1871,7 @@ end
 --   - a channel throttle, and an addon-message throttle on a message sent now,
 --     is retried after 1, 2, 4 and 8 seconds;
 --   - anything else, or a message the client would refuse outright, is recorded
---     once per reason for /guildos errors and dropped: never silent, never
+--     once per reason for /outlawos errors and dropped: never silent, never
 --     retried forever.
 ----------------------------------------------------------------------
 local RESULT = (Enum and Enum.SendAddonMessageResult) or {}

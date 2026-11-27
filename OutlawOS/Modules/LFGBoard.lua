@@ -623,14 +623,14 @@ function LFGBoard:Show()
 end
 
 ----------------------------------------------------------------------
--- Chat command: /gos avail [off | notify [on|off] | [role] <text>]
+-- Chat command: /outlawos avail [off | notify [on|off] | [role] <text>]
 ----------------------------------------------------------------------
 
--- Role tokens accepted as an optional LEADING word of "/gos avail ...".
+-- Role tokens accepted as an optional LEADING word of "/outlawos avail ...".
 -- Lowercased on the way in, mapped to the canonical LFGBoard.ROLES spelling.
 local ROLE_TOKENS = { tank = "TANK", healer = "HEALER", dps = "DPS", any = "ANY" }
 
--- Pure: turns the /gos avail argument list into an action plus its data.
+-- Pure: turns the /outlawos avail argument list into an action plus its data.
 -- Reads no db, sends no comm, touches no frame, so the self test can pin
 -- every branch. Inputs:
 --   args         token array built from rest
@@ -647,7 +647,7 @@ function LFGBoard:_ParseAvailArgs(args, rest, defaultRole)
     rest = strtrim(rest or "")
     local first = args[1] and args[1]:lower()
     if not first or first == "" then return "show" end
-    -- Delisting only when the token stands alone, otherwise "/gos avail stop
+    -- Delisting only when the token stands alone, otherwise "/outlawos avail stop
     -- by if you need a healer" would delist instead of post. notify keeps
     -- taking its on/off value.
     if (first == "off" or first == "stop") and #args == 1 then return "clear" end
@@ -808,7 +808,7 @@ function LFGBoard:_RegisterTests()
         if LFGBoard:_ParseAvailArgs(nil, nil) ~= "show" then return false, "nil args -> show" end
         if LFGBoard:_ParseAvailArgs({ "off" }, "off") ~= "clear" then return false, "off -> clear" end
         if LFGBoard:_ParseAvailArgs({ "stop" }, "stop") ~= "clear" then return false, "stop -> clear" end
-        -- Only the bare token delists. "/gos avail stop by if you need a
+        -- Only the bare token delists. "/outlawos avail stop by if you need a
         -- healer" is a post, not a delist.
         local action, role, note = LFGBoard:_ParseAvailArgs(
             { "stop", "by", "if", "you", "need", "a", "healer" }, "stop by if you need a healer", "DPS")

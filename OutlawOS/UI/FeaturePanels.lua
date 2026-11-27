@@ -16,7 +16,7 @@ local _raidFilter25 = true
 local _raidSearch = ""   -- the sessions list's search text, lowercased
 
 ----------------------------------------------------------------------
--- Core Sign-up Frame: the Raids tab's button and /gos signup open it, for any player (#377)
+-- Core Sign-up Frame: the Raids tab's button and /outlawos signup open it, for any player (#377)
 ----------------------------------------------------------------------
 local _coreSignupFrame = nil
 
@@ -1614,7 +1614,7 @@ end
 
 ----------------------------------------------------------------------
 -- WISHLIST FRAME — standalone frame for each member's own wishlist
--- Accessible via /gos wish  or the "My Wishlist" button in roster.
+-- Accessible via /outlawos wish  or the "My Wishlist" button in roster.
 ----------------------------------------------------------------------
 -- WISH_VISIBLE × WISH_ROW_HEIGHT must fit within the scroll area.
 -- Frame=520, title+header=66, bottom bar=50 → scroll area=404px → max rows=floor(404/28)=14

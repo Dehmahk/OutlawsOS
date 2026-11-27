@@ -1231,7 +1231,7 @@ function GuildBank:Resync(run, p)
     local s = state()
     if p then self:Problem(p.swap and "swap did not land" or "move did not land", p, GetTime() - p.at) end
     if p and p.swap and p.inHand and run.swaps then
-        run.swaps, s.noSwap = false, true   -- noSwap: what the last run found, for the tests and /gos bank debug
+        run.swaps, s.noSwap = false, true   -- noSwap: what the last run found, for the tests and /outlawos bank debug
         self:Trace("the bank refused a swap: moving through free slots from now on")
     else
         run.fails = (run.fails or 0) + 1
@@ -1506,7 +1506,7 @@ local STOP_TEXT = {
     refused = "Stopped: the bank refused the moves. Your rank may not move items in this tab.",
 }
 
--- What the organize run does, step by step, while /gos bank debug is on.
+-- What the organize run does, step by step, while /outlawos bank debug is on.
 function GuildBank:Trace(fmt, ...)
     if not state().debug then return end
     local line = string.format(fmt, ...)
@@ -1530,7 +1530,7 @@ function GuildBank:Describe(it)
         tostring(info.classID), tostring(info.subClassID), tostring(info.quality))
 end
 
--- A move that went wrong, always kept in the log (and shown while /gos bank debug is on): what it
+-- A move that went wrong, always kept in the log (and shown while /outlawos bank debug is on): what it
 -- moved, from where to where, what was there, how long it waited and what the cursor said.
 function GuildBank:Problem(what, h, waited)
     local m = h.move
@@ -1643,7 +1643,7 @@ function GuildBank:Refresh()
     if self.barRefresh then GuildOS:SafeCall(self.barRefresh) end
 end
 
--- /gos bank [sort [all] | stop | sync | need]
+-- /outlawos bank [sort [all] | stop | sync | need]
 function GuildBank:HandleCommand(args)
     local verb = args[1]
     if verb == "sort" then

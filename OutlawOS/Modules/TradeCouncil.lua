@@ -373,7 +373,7 @@ function TradeCouncil:Offer(link)
         return nil
     end
     if not itemIdOf(link) then
-        GuildOS:Print(L["Usage: /gos offer <item link>"])
+        GuildOS:Print(L["Usage: /outlawos offer <item link>"])
         return nil
     end
     local bag, slot, held = self:FindInBags(link)

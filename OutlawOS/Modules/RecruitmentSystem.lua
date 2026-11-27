@@ -424,7 +424,7 @@ function Recruitment:StartAutoRecruit()
         GuildOS:Print(L["|cffFF4444You don't have permission to use recruitment.|r"])
         return false
     end
-    -- /gos recruit on reaches here with the module switched off and its tab hidden (issue #84).
+    -- /outlawos recruit on reaches here with the module switched off and its tab hidden (issue #84).
     if not GuildOS:IsFeatureEnabled("recruitment") then
         GuildOS:Print(L["The Recruitment module is off. Turn it on in Settings > Modules."])
         return false
@@ -1195,11 +1195,11 @@ end
 
 ----------------------------------------------------------------------
 -- Right-click guild invite (slash command based - no dropdown hook to avoid taint)
--- Usage: /gos invite PlayerName
+-- Usage: /outlawos invite PlayerName
 ----------------------------------------------------------------------
 function Recruitment:HookChatInvite()
     -- No dropdown hooks - they cause taint errors.
-    -- Guild invite is available via /gos invite <name>
+    -- Guild invite is available via /outlawos invite <name>
 end
 
 ----------------------------------------------------------------------
@@ -1251,7 +1251,7 @@ function Recruitment:HandleCommand(args)
                 self:StartAutoRecruit()
             end
         else
-            GuildOS:Print(L["Usage: /guildos recruit interval <seconds> (min 60)"])
+            GuildOS:Print(L["Usage: /outlawos recruit interval <seconds> (min 60)"])
         end
     elseif cmd == "channel" then
         local action = args[2]
@@ -1272,7 +1272,7 @@ function Recruitment:HandleCommand(args)
             local list = table.concat(GuildOS.db.recruitment.channels, ", ")
             GuildOS:Print(L["Channels: |cffFFFFFF"] .. (list ~= "" and list or L["(none)"]) .. "|r")
         else
-            GuildOS:Print(L["Usage: /guildos recruit channel <add|remove|list> [name]"])
+            GuildOS:Print(L["Usage: /outlawos recruit channel <add|remove|list> [name]"])
         end
     elseif cmd == "status" then
         local s = GuildOS.db.recruitment
@@ -1308,7 +1308,7 @@ function Recruitment:HandleCommand(args)
                 GuildOS:Print(L["Current: |cffFFFFFF"] .. GuildOS.db.recruitment.welcomeMessage .. "|r")
             end
         else
-            GuildOS:Print(L["Usage: /guildos recruit welcome <on|off|msg> [text]"])
+            GuildOS:Print(L["Usage: /outlawos recruit welcome <on|off|msg> [text]"])
         end
     elseif cmd == "discord" then
         local link = args[2]
@@ -1330,18 +1330,18 @@ function Recruitment:HandleCommand(args)
                 GuildOS:Print(L["Guild invite sent to |cffFFFFFF"] .. target .. "|r.")
             end
         else
-            GuildOS:Print(L["Usage: /guildos recruit invite <PlayerName>"])
+            GuildOS:Print(L["Usage: /outlawos recruit invite <PlayerName>"])
         end
     else
         GuildOS:Print(L["|cffFFD700Recruitment commands:|r"])
-        GuildOS:Print("  /guildos recruit on/off")
-        GuildOS:Print("  /guildos recruit status")
-        GuildOS:Print("  /guildos recruit msg <text>")
-        GuildOS:Print("  /guildos recruit interval <seconds>")
-        GuildOS:Print("  /guildos recruit channel add/remove/list <name>")
-        GuildOS:Print("  /guildos recruit welcome on/off/msg <text>")
-        GuildOS:Print("  /guildos recruit discord <link>")
-        GuildOS:Print("  /guildos recruit invite <PlayerName>")
+        GuildOS:Print("  /outlawos recruit on/off")
+        GuildOS:Print("  /outlawos recruit status")
+        GuildOS:Print("  /outlawos recruit msg <text>")
+        GuildOS:Print("  /outlawos recruit interval <seconds>")
+        GuildOS:Print("  /outlawos recruit channel add/remove/list <name>")
+        GuildOS:Print("  /outlawos recruit welcome on/off/msg <text>")
+        GuildOS:Print("  /outlawos recruit discord <link>")
+        GuildOS:Print("  /outlawos recruit invite <PlayerName>")
     end
 end
 

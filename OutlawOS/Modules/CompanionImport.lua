@@ -323,7 +323,7 @@ local ROSTER_MAX = 524288   -- characters of a GOSROST1 body: ten raids with ful
 --- Returns (roster, err). roster = { title, instance, startsAt, members = {...} }
 function Import:Parse(raw)
     if not (GuildOS.Companion and GuildOS.Companion:IsEnabled()) then
-        return nil, L["The web companion is off. Turn it on with /gos web on."]
+        return nil, L["The web companion is off. Turn it on with /outlawos web on."]
     end
 
     raw = strtrim(raw or "")
@@ -438,7 +438,7 @@ end
 function Import:Load(raw)
     if Import.IsCoresCode(raw) and GuildOS.CoreManager then
         if not (GuildOS.Companion and GuildOS.Companion:IsEnabled()) then
-            return nil, L["The web companion is off. Turn it on with /gos web on."]
+            return nil, L["The web companion is off. Turn it on with /outlawos web on."]
         end
         return GuildOS.CoreManager:ImportPasted(raw)
     end
@@ -834,7 +834,7 @@ end
 function Import:CanInvite()
     if not self:Current() then return false, L["Import a roster first."] end
     if not (GuildOS.Companion and GuildOS.Companion:IsEnabled()) then
-        return false, L["The web companion is off. Turn it on with /gos web on."]
+        return false, L["The web companion is off. Turn it on with /outlawos web on."]
     end
     return true
 end
@@ -984,7 +984,7 @@ function Import:OutsideThePlan()
 end
 
 --- Ask, naming them, then take out of the group whoever is outside the plan (issue #292): what the Web
---- panel's button and `/gos roster trim` both call. Nothing to take out, or nobody allowed to, is said.
+--- panel's button and `/outlawos roster trim` both call. Nothing to take out, or nobody allowed to, is said.
 function Import:AskTrim()
     local allowed, reason = self:CanTrim()
     if not allowed then return GuildOS:Print(reason) end

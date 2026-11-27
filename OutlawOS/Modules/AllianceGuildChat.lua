@@ -465,7 +465,7 @@ function AGC:_ShowAll(guild, lines)
 end
 
 ----------------------------------------------------------------------
--- Diagnostics: /gos ally gchat
+-- Diagnostics: /outlawos ally gchat
 ----------------------------------------------------------------------
 function AGC:StatusLine()
     local s = self.stats

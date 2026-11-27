@@ -1414,7 +1414,7 @@ function GuildOS:CreateLootWindow(container, _mainFrame)
             built[key] = true
             builders[key](p)
         end
-        -- A core named by whoever opened the tab (the core's Config tab, /gos points).
+        -- A core named by whoever opened the tab (the core's Config tab, /outlawos points).
         if filter ~= nil and p.content then p.content.__lootScope = filter end
         if filter ~= nil and p.SetScope then p.SetScope(filter) end
         local was = p:IsShown()

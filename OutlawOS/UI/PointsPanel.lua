@@ -32,7 +32,7 @@ local function input(parent, width, numeric, maxLetters)
     return UI:CreateInput(parent, width, 22, { numeric = numeric and true or nil, max = maxLetters or 64 })
 end
 
--- `/gos points` and `/gos dkp` (and every button that said "Open DKP Window") open the tab.
+-- `/outlawos points` and `/outlawos dkp` (and every button that said "Open DKP Window") open the tab.
 function GuildOS:ShowPointsFrame(coreName)
     return UI:OpenWindow("loot", "accounts", coreName)
 end

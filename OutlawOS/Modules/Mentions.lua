@@ -253,7 +253,7 @@ function Mentions:_SetupHook()
         -- off switch once per session (flag set first, so later alerts stay quiet).
         if not Mentions._hinted then
             Mentions._hinted = true
-            GuildOS:Print(string.format(L["Tip: turn these off in %s > %s > %s, or with /gos mentions off."],
+            GuildOS:Print(string.format(L["Tip: turn these off in %s > %s > %s, or with /outlawos mentions off."],
                 L["Settings"], L["Chat and alerts"], L["Mentions"]))
         end
     end)
@@ -331,7 +331,7 @@ function Mentions:_RegisterTests()
     end)
 end
 
--- The last mentions, to chat: `/gos mentions` and the Mentions settings' button (#142).
+-- The last mentions, to chat: `/outlawos mentions` and the Mentions settings' button (#142).
 function Mentions:PrintLog()
     local cfg = GuildOS.db.mentions
     if not cfg then return end
@@ -382,6 +382,6 @@ function Mentions:HandleCommand(args)
     else
         -- default: print the recent log
         self:PrintLog()
-        GuildOS:Print(L["Usage: /gos mentions <on|off|add|remove|list|clearwords|ownname|sound> [word|on|off]"])
+        GuildOS:Print(L["Usage: /outlawos mentions <on|off|add|remove|list|clearwords|ownname|sound> [word|on|off]"])
     end
 end

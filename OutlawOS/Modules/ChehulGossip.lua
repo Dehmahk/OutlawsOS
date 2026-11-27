@@ -35,7 +35,7 @@ Gossip.HEARD_OF_MAX   = 10      -- names off lists held at once: what a round's 
 Gossip.PEER_FRESH     = 300     -- seconds a peer stays on the list unheard
 Gossip.BEACON_SECONDS = 180
 Gossip.CHANNEL        = false   -- the beacon's route by a created channel: only a new version turns it on
-Gossip.CHANNEL_NAME   = "GuildOSNet"   -- the channel it joins; /gos probe channel measures whether it can carry anything
+Gossip.CHANNEL_NAME   = "GuildOSNet"   -- the channel it joins; /outlawos probe channel measures whether it can carry anything
 Gossip.SENDER_MAX     = 30      -- messages heard from one sender per ROUND_SECONDS; a relayer's CR2 stays under it
 
 local PREFIX        = "ChehulRecruit"       -- RecruitBeacon registers it

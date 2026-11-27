@@ -473,7 +473,7 @@ function GuildOS:CreateRaidHubPanel(container, mainFrame)
     local function SetSubTab(key)
         -- Defence at the selection point: the button for an officer-only
         -- sub-tab is simply never drawn for non-officers, but SelectSub is
-        -- also reachable directly (deep link from /gos open raids <sub>),
+        -- also reachable directly (deep link from /outlawos open raids <sub>),
         -- so a non-officer key must be refused here too.
         for _, st in ipairs(SUBTABS) do
             if st.key == key and not canSee(st) then return end
@@ -506,7 +506,7 @@ function GuildOS:CreateRaidHubPanel(container, mainFrame)
 
     -- Core Sign-up (#377): it left the window's footer for the screen it belongs to, at the right of
     -- the sub-tab bar so every Raids sub-tab has it. Any member signs up, so no rank gate. Where the
-    -- window is too narrow for it beside the tabs it stands down; /gos signup still opens it.
+    -- window is too narrow for it beside the tabs it stands down; /outlawos signup still opens it.
     local signup = UI:CreateButton(subBar, L["Core Sign-up"], 110, 22)
     signup:SetPoint("RIGHT", subBar, "RIGHT", -UI.GAP, 0)
     signup:SetScript("OnClick", function()
@@ -528,7 +528,7 @@ function GuildOS:CreateRaidHubPanel(container, mainFrame)
 
     SetSubTab("sessions")
 
-    -- Exposed so the hub and /gos can deep-link a sub-tab (same contract as
+    -- Exposed so the hub and /outlawos can deep-link a sub-tab (same contract as
     -- CommunityPanel / AlliancePanel).
     container.SelectSub = SetSubTab
 end
@@ -697,7 +697,7 @@ function GuildOS:CreateRosterPanel(parent, host)
     searchBox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
     host.searchBox = searchBox
 
-    -- The guild's make-up by class, level, rank and zone (`/gos analytics`): every command has a
+    -- The guild's make-up by class, level, rank and zone (`/outlawos analytics`): every command has a
     -- way in here too (#137).
     local analyticsBtn = UI:CreateButton(statsBar, L["Analytics"], 90, 22)
     analyticsBtn:SetScript("OnClick", function()
@@ -3124,7 +3124,7 @@ function GuildOS:CreateRecruitmentPanel(parent, _mainFrame)
             if not ok then
                 info.failed = true
                 GuildOS:RecordError("Recruitment " .. key .. ": " .. tostring(err))
-                GuildOS:Print(string.format(L["%s could not start on this client. Type /guildos errors for details."], L["Trials"]))
+                GuildOS:Print(string.format(L["%s could not start on this client. Type /outlawos errors for details."], L["Trials"]))
                 key = "recruiting"
                 info = root.subPanels[key]
             end
@@ -3138,7 +3138,7 @@ function GuildOS:CreateRecruitmentPanel(parent, _mainFrame)
         end
         if info and info.refresh then GuildOS:SafeCall(info.refresh) end
     end
-    root.SelectSub = selectSub   -- deep links: the Now tab, /gos open recruitment <sub>, /gos open trials
+    root.SelectSub = selectSub   -- deep links: the Now tab, /outlawos open recruitment <sub>, /outlawos open trials
 
     for _, t in ipairs(RECRUIT_SUBTABS) do
         local btn = UI:CreateTab(bar, t.label, 90, true)
@@ -3338,7 +3338,7 @@ function GuildOS:CreateRecruitmentPanel(parent, _mainFrame)
         end
     end)
 
-    -- ON or OFF, the words the Welcome row and /gos recruit status use (#371), and the dot in the same
+    -- ON or OFF, the words the Welcome row and /outlawos recruit status use (#371), and the dot in the same
     -- colour (#373). The toggle says what a click does, with no red or green fill of its own.
     local function UpdateRecruitStatus()
         local on = GuildOS.db.recruitment.enabled and true or false
@@ -3591,7 +3591,7 @@ function GuildOS:CreateRecruitmentPanel(parent, _mainFrame)
         for _, ch in ipairs(GuildOS.db.recruitment.channels) do
             if not isPreset(ch) then custom = custom + 1 end
         end
-        customMore:SetText(custom > CUSTOM_MAX and string.format(L["+%d more (/gos recruit channel list)"], custom - CUSTOM_MAX) or "")
+        customMore:SetText(custom > CUSTOM_MAX and string.format(L["+%d more (/outlawos recruit channel list)"], custom - CUSTOM_MAX) or "")
         -- "Click a channel below" only with a channel below (#265).
         if chanHint then chanHint:SetShown(shown > 0) end
         -- The rows under the chips sit under the ones shown (#265), laid out again (#373).

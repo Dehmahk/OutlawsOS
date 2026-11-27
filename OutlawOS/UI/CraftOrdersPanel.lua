@@ -666,7 +666,7 @@ function GuildOS:CreateCraftsTab(container, win)
         if queue then GuildOS:SafeCall(queue.Draw, queue) end
     end)
 
-    -- /gos open recipes forme · the minimap's inbox: the queue on that view.
+    -- /outlawos open recipes forme · the minimap's inbox: the queue on that view.
     container.SelectSub = function(sub)
         if not queue then return end
         if not dock:IsShown() then drawerOpen = true; layout() end

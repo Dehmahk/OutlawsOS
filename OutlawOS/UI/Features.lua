@@ -38,7 +38,7 @@ UI:RegisterFeature({
 })
 
 -- The DKP and the guild's wishlists are the Loot window's Accounts and Lists (issue #346): their
--- switches stay in Settings, and /gos open dkp or wishlist opens the sub-tab.
+-- switches stay in Settings, and /outlawos open dkp or wishlist opens the sub-tab.
 UI:RegisterFeature({
     id = "dkp", label = L["DKP"], order = 35, tab = false, opens = { "loot", "accounts" },   -- retail too since #185
     condition = function() return GuildOS:LootSystemShowsDKP() end,
@@ -76,7 +76,7 @@ UI:RegisterFeature({
 })
 
 -- The guild's own group finder (issue #341): what is being formed, who is looking, and the game's
--- activities as tiles. /gos avail opens it.
+-- activities as tiles. /outlawos avail opens it.
 UI:RegisterFeature({
     id = "groups", label = "Ride Out", order = 52,  -- EKO patch (lore)
     subs = { "active", "dungeon", "raid", "other" },
@@ -93,7 +93,7 @@ UI:RegisterFeature({
 })
 
 -- WoW: Forever only (issue #211): the guild's journal, where the module exists. The Guild tab's
--- Journal sub-tab since issue #367: its switch stays in Settings, and /gos open journal opens it.
+-- Journal sub-tab since issue #367: its switch stays in Settings, and /outlawos open journal opens it.
 UI:RegisterFeature({
     id = "journal", label = L["Journal"], order = 55, tab = false, opens = { "guild", "journal" },
     tbc = false, retail = false, restart = true,
@@ -124,7 +124,7 @@ UI:RegisterFeature({
 })
 
 -- The Recruitment tab's Trials sub-tab since issue #367: its switch stays in Settings, and
--- /gos open trials opens it.
+-- /outlawos open trials opens it.
 UI:RegisterFeature({
     id = "trials", label = L["Trials"], order = 80, tab = false, opens = { "recruitment", "trials" },
     officerOnly = true,

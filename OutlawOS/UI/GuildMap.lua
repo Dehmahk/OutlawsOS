@@ -242,7 +242,7 @@ local function BuildListFrame()
     title:SetPoint("TOPLEFT", 12, -10)
     local close = UI:CreateCloseButton(f)
     close:SetPoint("TOPRIGHT", -6, -6)
-    -- The X dismisses the overlay for good (until /gos map re-enables it), so it
+    -- The X dismisses the overlay for good (until /outlawos map re-enables it), so it
     -- does not pop back the next time the world map is opened.
     close:SetScript("OnClick", function() overlayEnabled = false; f:Hide() end)
 
@@ -420,7 +420,7 @@ function GuildOS:GuildMapFocus(mapID)
     GuildOS:SafeCall(LayoutPins)
 end
 
--- /gos map and the minimap menu entry. Toggles the list overlay; opening it
+-- /outlawos map and the minimap menu entry. Toggles the list overlay; opening it
 -- also opens the world map and builds the pin layer.
 function GuildOS:ToggleGuildMap()
     local f = listFrame or BuildListFrame()

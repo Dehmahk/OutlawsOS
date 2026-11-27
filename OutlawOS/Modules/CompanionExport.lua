@@ -476,7 +476,7 @@ end
 -- Payload
 ----------------------------------------------------------------------
 -- A field newer than the client that tested it: if it fails it is left out, and goes to
--- /guildos errors. The roster, the raids and the loot still go up (issue #232).
+-- /outlawos errors. The roster, the raids and the loot still go up (issue #232).
 local function optional(what, fn, ...)
     local ok, value = pcall(fn, ...)
     if ok then return value end
@@ -918,7 +918,7 @@ end
 
 -- Never anything the site's door refuses (guildos-web lib/core-receipt.ts `cleanReceipt`, which reads the
 -- receipt whole or drops it): a core whose name the site would refuse, or whose name cut to the site's
--- length is one already sent, and a guest the same, are left out, and /gos errors says how many.
+-- length is one already sent, and a guest the same, are left out, and /outlawos errors says how many.
 local function coreReceipt()
     local cores = GuildOS.db.cores or {}
     local names = {}

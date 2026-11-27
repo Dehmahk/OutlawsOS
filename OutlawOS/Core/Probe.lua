@@ -1,5 +1,5 @@
 ----------------------------------------------------------------------
--- Guild OS - Probe (/guildos probe; ADR-0015)
+-- Guild OS - Probe (/outlawos probe; ADR-0015)
 -- Records which client this is and which of the APIs and events GuildOS
 -- uses exist, into GuildOSDB.probe, and prints a one-screen summary. Built
 -- for the WoW: Forever beta: a tester sends back one SavedVariables file
@@ -311,14 +311,14 @@ function Probe:PrintSummary(r)
         #r.missingApis, #self.APIS + #self.TEMPLATES + #self.SCRIPTS, #r.missingEvents, #self.EVENTS))
     if #r.missingApis > 0 then GuildOS:Print(names(r.missingApis)) end
     if #r.missingEvents > 0 then GuildOS:Print(names(r.missingEvents)) end
-    GuildOS:Print(L["Saved in GuildOSDB.probe. Type /reload to write it to disk."])
+    GuildOS:Print(L["Saved in OutlawOS probe. Type /reload to write it to disk."])
 end
 
 ----------------------------------------------------------------------
 -- Blocked actions (issue #75)
 -- When the game blocks a protected call, chat gets "Interface action failed because of an
 -- AddOn", once a session: no Lua error and no function named. These events carry the addon
--- (a macro's carry only the function) and the function, so /guildos errors can say who it
+-- (a macro's carry only the function) and the function, so /outlawos errors can say who it
 -- was. Each pair is recorded once a session: a noisy addon blocks thousands of times and the
 -- ring holds 50. A chat probe that is running keeps every one.
 ----------------------------------------------------------------------
@@ -346,7 +346,7 @@ blockedFrame:SetScript("OnEvent", function(_, event, addon, func)
 end)
 
 ----------------------------------------------------------------------
--- /guildos probe chat (issue #75)
+-- /outlawos probe chat (issue #75)
 -- Whether this client lets an addon post to guild chat from a key press and from a timer,
 -- measured instead of assumed. Two lines go to guild chat: one straight from the command (the
 -- Enter that sent it is the key press) and one from a one-second timer, the way the welcome
@@ -482,11 +482,11 @@ function Probe:FinishChat()
         GuildOS:Print(string.format(L["Chat needs a click: %s. OutlawOS assumes: %s."],
             answer(run.needsClick), answer(run.assumesClick)))
     end
-    GuildOS:Print(L["Saved in GuildOSDB.probeChat. Type /reload to write it to disk."])
+    GuildOS:Print(L["Saved in OutlawOS chat probe. Type /reload to write it to disk."])
 end
 
 ----------------------------------------------------------------------
--- /gos probe channel (specs/071-o-recrutamento in guildos-web)
+-- /outlawos probe channel (specs/071-o-recrutamento in guildos-web)
 -- Whether an addon message may go through a created channel, measured: the one thing the recruitment's
 -- beacon would use to reach past the zone and the layer that YELL stops at. The probe joins a temporary
 -- channel of its own, sends one message from the command (the Enter behind it is the key press) and one
@@ -646,5 +646,5 @@ function Probe:FinishChannel(run)
         end
         GuildOS:Print(string.format("  %s: %s", labels[how], outcome))
     end
-    GuildOS:Print(L["Saved in GuildOSDB.probeChannel. Type /reload to write it to disk."])
+    GuildOS:Print(L["Saved in OutlawOS channel probe. Type /reload to write it to disk."])
 end

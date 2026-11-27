@@ -788,7 +788,7 @@ function RecipeTracker:HookTooltips()
             more = (restOnline > 0 and string.format(L["+%d more (%d online)"], rest, restOnline)
                 or string.format(L["+%d more"], rest)) .. " · "
         end
-        local hint = GuildOS.CraftOrders and L["Alt-click to order"] or L["/gos craft for all"]
+        local hint = GuildOS.CraftOrders and L["Alt-click to order"] or L["/outlawos craft for all"]
         if rest > 0 or GuildOS.CraftOrders then
             tooltip:AddLine("  " .. more .. hint, GuildOS.Tip.textDim.r, GuildOS.Tip.textDim.g, GuildOS.Tip.textDim.b)
         end

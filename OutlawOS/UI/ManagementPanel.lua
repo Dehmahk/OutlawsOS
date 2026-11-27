@@ -1174,7 +1174,7 @@ function GuildOS:CreateManagementPanel(parent, _mainFrame)
         local info = parent.subPanels[key]
         if info and info.refresh then GuildOS:SafeCall(info.refresh) end
     end
-    parent.SelectSub = selectSub   -- deep links: /gos banlist, the Now tab
+    parent.SelectSub = selectSub   -- deep links: /outlawos banlist, the Now tab
 
     -- Refresh whatever sub-panel is currently visible (used by GuildManager).
     parent.RefreshActive = function()

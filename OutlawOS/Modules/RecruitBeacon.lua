@@ -410,7 +410,7 @@ function RB:Broadcast()
     if not mesh then return end
 
     -- The site's ad, when there is one, is what the guild spreads: a CR3 to the guild (the beacon and the
-    -- gossip carry it from there) and a CR2 of it for old clients. The /gos beacon ad is the fallback.
+    -- gossip carry it from there) and a CR2 of it for old clients. The /outlawos beacon ad is the fallback.
     local own = self:SeedOwnAd()
     if own then
         local faction = (UnitFactionGroup and UnitFactionGroup("player") == "Alliance") and "A" or "H"

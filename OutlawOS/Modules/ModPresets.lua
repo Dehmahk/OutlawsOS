@@ -121,7 +121,7 @@ function ModPresets:Summarize(preset)
 end
 
 ----------------------------------------------------------------------
--- PURE matchers (deterministic; unit-tested via /gos selftest).
+-- PURE matchers (deterministic; unit-tested via /outlawos selftest).
 -- Each takes an explicit member list + thresholds and returns the subset
 -- that matches. No roster / db access here.
 ----------------------------------------------------------------------

@@ -410,7 +410,7 @@ local function createWindow()
     metaHit:SetScript("OnDragStop", bar:GetScript("OnDragStop"))
     metaHit:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-        GameTooltip:AddLine((GetGuildInfo("player") or "Guild OS"), C.gold.r, C.gold.g, C.gold.b)
+        GameTooltip:AddLine((GetGuildInfo("player") or "OutlawOS"), C.gold.r, C.gold.g, C.gold.b)
         local A = GuildOS.Achievements
         local level, points = A and A:Renown()
         if level then
@@ -596,7 +596,7 @@ local function createWindow()
             panel.buildFailed = not GuildOS:RunStartup("Tab:" .. key, nil, def.build, panel, self)
         end
         if panel.buildFailed then
-            GuildOS:Print(string.format(L["%s could not start on this client. Type /guildos errors for details."], def.label))
+            GuildOS:Print(string.format(L["%s could not start on this client. Type /outlawos errors for details."], def.label))
             return false
         end
         self.activeTab = key
@@ -755,7 +755,7 @@ local function createWindow()
                 .. string.format(L["renown %d"], level)) or ""
             local offs = officersOnline()
             local officers = (offs > 0 and not A:RosterLoading()) and (DOT .. offs .. " officer" .. (offs == 1 and "" or "s")) or ""
-            meta:SetText((GetGuildInfo("player") or "Guild OS") .. DOT .. online .. officers .. renown)
+            meta:SetText((GetGuildInfo("player") or "OutlawOS") .. DOT .. online .. officers .. renown)
             local last = A:LastSync()
             sync:SetText(last and string.format(L["sync %s"], GuildOS:TimeAgo(last)) or L["not synced yet"])
             -- Fresh sync green, ageing amber, stale or never red.
@@ -970,7 +970,7 @@ function UI:OpenWindow(id, sub, filter)
             return false
         end
         if GuildOS:FeatureStartFailed(id) then
-            GuildOS:Print(string.format(L["%s could not start on this client. Type /guildos errors for details."], def.label))
+            GuildOS:Print(string.format(L["%s could not start on this client. Type /outlawos errors for details."], def.label))
             return false
         end
         if def.officerOnly and not GuildOS:IsOfficer() then
@@ -992,7 +992,7 @@ function UI:OpenWindow(id, sub, filter)
         return false
     end
     if GuildOS:FeatureStartFailed(id) then
-        GuildOS:Print(string.format(L["%s could not start on this client. Type /guildos errors for details."], def.label))
+        GuildOS:Print(string.format(L["%s could not start on this client. Type /outlawos errors for details."], def.label))
         return false
     end
     if not self:IsFeatureAllowed(def) then

@@ -18,7 +18,7 @@ GuildOS.ADDON_NAME        = "OutlawOS"
 GuildOS.NAMESPACE         = "GuildOS"
 
 -- ── Version ───────────────────────────────────────────────────────
-GuildOS.VERSION           = "1.41.26"  -- kept in sync with GuildOS.toc by the release workflow
+GuildOS.VERSION           = "1.41.27"  -- kept in sync with GuildOS.toc by the release workflow
 GuildOS.COMM_VERSION      = 1
 
 -- ── SavedVariables ────────────────────────────────────────────────
@@ -28,4 +28,4 @@ GuildOS.DB_GLOBAL         = "GuildOSDB"
 GuildOS.PREFIX            = "GUILDOS"
 
 -- ── Slash commands ────────────────────────────────────────────────
-GuildOS.SLASH_PRIMARY     = "/guildos"
+GuildOS.SLASH_PRIMARY     = "/outlawos"
