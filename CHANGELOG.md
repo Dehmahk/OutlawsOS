@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.41.33
+
+### Companion
+- The Guild OS companion app writes its Inbox.lua into Interface\AddOns\GuildOS, and reported "no Guild OS addon folder" once the old GuildOS addon was deleted. A small bridge folder (GuildOS, with only an Inbox.lua) now ships next to OutlawOS in the zip. Copy it into Interface\AddOns so the companion has somewhere to write. OutlawOS no longer warns about the old GuildOS folder when this bridge is the one there.
+
 ## 1.41.32
 
 ### Blank realm message

@@ -156,7 +156,7 @@ function GuildOS:Initialize()
 
     -- The old folder next to this one: both would run on the same data.
     local isLoaded = (C_AddOns and C_AddOns.IsAddOnLoaded) or IsAddOnLoaded
-    if ADDON_NAME == "OutlawOS" and type(isLoaded) == "function" and isLoaded("GuildOS") then
+    if ADDON_NAME == "OutlawOS" and type(isLoaded) == "function" and isLoaded("GuildOS") and not _G.GuildOSBridge then
         C_Timer.After(5, function()
             self:Print("|cffFF6060The old GuildOS folder is still installed next to OutlawOS.|r Log out, delete Interface\\AddOns\\GuildOS, and start the game again.")
         end)
