@@ -1365,11 +1365,11 @@ end
 ----------------------------------------------------------------------
 -- EXPORT POPUP (copyable text box)
 ----------------------------------------------------------------------
-function GuildOS:ShowExportPopup(titleStr, text)
+function GuildOS:ShowExportPopup(titleStr, text, height)
     if self.exportPopup then self.exportPopup:Hide() end
 
     local f = CreateFrame("Frame", "GuildOSExportPopup", UIParent, "BackdropTemplate")
-    f:SetSize(500, 350)
+    f:SetSize(500, height or 350)   -- a short text (the links) can ask for a short window
     f:SetPoint("CENTER")
     f:SetBackdrop({
         bgFile   = "Interface\\Buttons\\WHITE8x8",

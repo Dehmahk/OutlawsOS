@@ -1742,9 +1742,8 @@ PAGES.data = function(F, isOfficer)
         GuildOS:ShowExportPopup(L["OutlawOS Links"],
             -- The site first: it is the one link here that does something for the person reading it.
             "App:  https://guildos.me\n"
-            .. "GitHub:  https://github.com/danielcosta42/OutlawOS\n"
-            .. "CurseForge:  https://www.curseforge.com/projects/1549177\n"
-            .. "Wago:  https://addons.wago.io/addons/rNkyABKa")
+            .. "GitHub:  https://github.com/Dehmahk/OutlawsOS",
+            150)
     end, w = 120 } }, { gap = 10 })
     F:Note(L["Project page, bug reports and updates"], { gap = 6 })
 

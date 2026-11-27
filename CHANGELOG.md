@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.41.37
+
+### Links
+- The Links window pointed the GitHub, CurseForge and Wago lines at the original GuildOS project, so people following them got GuildOS, not OutlawOS. It now lists the app site and OutlawOS's own GitHub page, in a window sized to fit.
+- The addon's own info (X-Website, CurseForge and Wago ids) no longer names the GuildOS project, so addon managers cannot swap OutlawOS for it.
+
 ## 1.41.36
 
 ### Loot table
