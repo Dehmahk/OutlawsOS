@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.41.38
+
+### Recruit scanner
+- The 7-day "already whispered" list is now looked up fresh each time instead of kept from startup, so it is always the one that gets saved.
+- Any whisper that carries the recruit template now starts the 7 days, whichever window or addon sent it. Before, only the scanner's own whisper buttons did, so a prospect pitched another way could be pitched again.
+
 ## 1.41.37
 
 ### Links

@@ -7,6 +7,15 @@ local RecruitScanner = {}
 GuildOS.RecruitScanner = RecruitScanner
 local L = GuildOS.L
 
+-- Who was whispered, and until when. Looked up live, never kept: the table lives in the guild's
+-- database, and a copy taken at startup would stop being the saved one if the database changed after.
+local function cdTable()
+    local rs = GuildOS.db and GuildOS.db.recruitScanner
+    if not rs then return {} end
+    rs.contacted = rs.contacted or {}
+    return rs.contacted
+end
+
 RecruitScanner.DEFAULTS = {
     template    = "Hi [player], we're recruiting — whisper me if interested!",
     minLevel    = 0,
@@ -33,7 +42,7 @@ function RecruitScanner:Initialize()
     for k, untilTs in pairs(GuildOS.db.recruitScanner.contacted) do
         if type(untilTs) ~= "number" or untilTs <= nowTs then GuildOS.db.recruitScanner.contacted[k] = nil end
     end
-    self._contactCd = GuildOS.db.recruitScanner.contacted
+    self:_HookWhispers()
     self._RegisterEvents = self._RegisterEvents or function() end
     self:_RegisterEvents()      -- real body in Task 2 (until then, a stub below)
     self:_RegisterTests()
@@ -76,7 +85,7 @@ function RecruitScanner:_CandidateOK(cand, filters, isBannedFn)
     if isBannedFn and isBannedFn(cand.full or cand.name) then return false end   -- /who's realm too (#184)
     if RecruitScanner:_EkoRecentlyLeft(cand.name) then return false end   -- EKO patch
     -- EKO patch: hide anyone whispered in the last 7 days from the results.
-    local ekoCd = RecruitScanner._contactCd and RecruitScanner._contactCd[contactKey(cand.name)]
+    local ekoCd = cdTable()[contactKey(cand.name)]
     if ekoCd and ekoCd > GetServerTime() then return false end
     return true
 end
@@ -170,7 +179,7 @@ function RecruitScanner:WhisperSelected(names)
     local plan = {}
     for _, name in ipairs(names or {}) do
         if #plan >= (cfg.batchMax or 10) then break end
-        local cd = self._contactCd[contactKey(name)]
+        local cd = cdTable()[contactKey(name)]
         -- Banned again at the click: a ban may have arrived since the scan, and on retail a name
         -- without a realm is this realm's player, whoever the scan listed (issue #184).
         local banned = GuildOS.BanList and GuildOS.BanList:IsBanned(name)
@@ -197,13 +206,35 @@ function RecruitScanner:WhisperSelected(names)
         return
     end
     for i, w in ipairs(plan) do
-        self._contactCd[contactKey(w.name)] = now + (cfg.cooldownSec or 1800)
+        cdTable()[contactKey(w.name)] = now + (cfg.cooldownSec or 1800)
         GuildOS.Compat.After(i * 1.5, function()    -- throttle: 1.5s between whispers
             SendChatMessage(w.msg, "WHISPER", nil, w.name)
             if GuildOS.Office then GuildOS.Office:CountPitch() end   -- The Office: pitches this client sent
         end)
     end
     GuildOS:Print(string.format(GuildOS.L["Whispering %d candidate(s)…"], #plan))
+end
+
+-- Any whisper that carries the recruit template starts the cooldown, whichever window or addon sent
+-- it (the scanner, a quick reply, a macro). Before this only the scanner's own buttons did, so a
+-- prospect pitched another way could be pitched again the same day.
+function RecruitScanner:_HookWhispers()
+    if self._whisperHooked or type(hooksecurefunc) ~= "function" then return end
+    self._whisperHooked = true
+    hooksecurefunc("SendChatMessage", function(msg, chatType, _, target)
+        if chatType ~= "WHISPER" or type(msg) ~= "string" or type(target) ~= "string" or target == "" then return end
+        local ok, err = pcall(function()
+            local cfg = GuildOS.db and GuildOS.db.recruitScanner
+            local tmpl = cfg and cfg.template
+            if type(tmpl) ~= "string" or tmpl == "" then return end
+            local sent = RecruitScanner:_ExpandTemplate(tmpl, { name = target })
+            if msg:sub(1, 60) ~= sent:sub(1, 60) then return end
+            local key = contactKey(target)
+            local untilTs = GetServerTime() + (cfg.cooldownSec or 1800)
+            local t = cdTable()
+            if (t[key] or 0) < untilTs then t[key] = untilTs end
+        end)
+    end)
 end
 
 -- Whispers waiting for a click (WoW: Forever).
@@ -218,7 +249,7 @@ function RecruitScanner:WhisperNext()
     if w then
         SendChatMessage(w.msg, "WHISPER", nil, w.name)
         if GuildOS.Office then GuildOS.Office:CountPitch() end   -- The Office
-        self._contactCd[contactKey(w.name)] = GetServerTime() + ((GuildOS.db.recruitScanner or {}).cooldownSec or 1800)
+        cdTable()[contactKey(w.name)] = GetServerTime() + ((GuildOS.db.recruitScanner or {}).cooldownSec or 1800)
     end
     return self:PendingWhispers()
 end
@@ -232,7 +263,7 @@ function RecruitScanner:_RegisterEvents()
     f:SetScript("OnEvent", function(_, _, msg, author)
         if GuildOS.Compat.IsSecret(msg, author) then return end  -- chat in lockdown: nothing readable
         local short = author and (author:match("^([^-]+)") or author)
-        if short and RecruitScanner._contactCd[contactKey(author)] then
+        if short and cdTable()[contactKey(author)] then
             local inbox = GuildOS.db.recruitScanner.inbox
             table.insert(inbox, 1, { name = short, msg = msg, ts = GetServerTime() })
             while #inbox > 200 do table.remove(inbox) end
