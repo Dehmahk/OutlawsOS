@@ -56,7 +56,7 @@ local function StylePopupFrame(name, w, h)
         edgeFile = "Interface\\Buttons\\WHITE8x8",
         edgeSize = GuildOS.UI:Edge(f),
     })
-    f:SetBackdropColor(0.058, 0.058, 0.075, 0.98)
+    f:SetBackdropColor(GuildOS.Colors.bg.r, GuildOS.Colors.bg.g, GuildOS.Colors.bg.b, 0.98)
     f:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, C.border.a)
     UI:StylePopup(f)
     f:SetFrameStrata("DIALOG")

@@ -67,7 +67,7 @@ local function orderTooltip(owner, o)
     local needs = Orders():Needs(o)
     if #needs > 0 then
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(string.format(L["Materials for %d:"], o.n), C.accent.r, C.accent.g, C.accent.b)
+        GameTooltip:AddLine(string.format(L["Materials for %d:"], o.n), GuildOS.Tip.accent.r, GuildOS.Tip.accent.g, GuildOS.Tip.accent.b)
         for _, r in ipairs(needs) do
             local nm = itemInfo(r.itemID) or ("item:" .. r.itemID)
             local ok = r.have >= r.need

@@ -188,7 +188,7 @@ local function createRoleChip(parent, letter)
     local B = GuildOS.LFGBoard
     chip:HookScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine(B:RoleName(ROLE_OF[letter]), C.text.r, C.text.g, C.text.b)
+        GameTooltip:AddLine(B:RoleName(ROLE_OF[letter]), GuildOS.Tip.text.r, GuildOS.Tip.text.g, GuildOS.Tip.text.b)
         GameTooltip:Show()
     end)
     chip:HookScript("OnLeave", function() GameTooltip:Hide() end)
@@ -727,68 +727,436 @@ end
 -- which Modules/Groups.lua decides: a guildmate formed a group I fit ("group"), or somebody asks for
 -- a spot in mine and I do not invite whoever asks ("request"). One at a time: the newer replaces it.
 ----------------------------------------------------------------------
-local TOAST_W, TOAST_H = 300, 66
+local TOAST_W, TOAST_H = 330, 66
 local TOAST_SECONDS = { group = 12, request = 30, expiring = 60 }
 local toast
+-- Groups that came while a notice was up wait here instead of stacking (oldest first); the card says how many.
+local toastQueue, TOAST_QUEUE_MAX = {}, 8
+local advanceToast   -- set below: shows the next waiting notice, if any
+
+-- What the notice keeps between sessions: the sound, where I put it, and what I silenced.
+local function tstate()
+    local db = GuildOS.db
+    if not db then return { mute = {}, quietUntil = 0 } end
+    db.groupToast = db.groupToast or {}
+    local st = db.groupToast
+    if st.sound == nil then st.sound = true end
+    st.mute = st.mute or {}
+    st.quietUntil = st.quietUntil or 0
+    return st
+end
+GuildOS.GroupToastState = tstate
+local function nowSec() return (GetServerTime and GetServerTime()) or time() end
+
+-- Where the card sits: where I last dropped it, else the top middle. `slide` lifts it for the slide-in.
+local function toastPlace(t, slide)
+    local pos = tstate().pos
+    t:ClearAllPoints()
+    if pos then
+        t:SetPoint(pos[1], UIParent, pos[2], pos[3], pos[4] + 18 * (slide or 0))
+    else
+        t:SetPoint("TOP", UIParent, "TOP", 0, -110 + 18 * (slide or 0))
+    end
+end
+
+-- The roles I could ask as in this group: its open ones, among mine (any, with none set).
+local function askCandidates(n)
+    local mine = GuildOS.LFGBoard:Pref("roles") or ""
+    local out = {}
+    for _, k in ipairs(LETTERS) do
+        if ((n.need and n.need[k]) or 0) > 0 and (mine == "" or mine:find(k, 1, true)) then out[#out + 1] = k end
+    end
+    return out
+end
+
+-- Why I cannot ask for a spot in this group just now, or nil when I can.
+local function askReason(n)
+    local G, B = GuildOS.Groups, GuildOS.LFGBoard
+    local g = GuildOS.db and GuildOS.db.lfgGroups and GuildOS.db.lfgGroups[n.key]
+    if not (g and B:_IsActive(g, nowSec())) then return L["This group is gone"] end
+    if GetNumGroupMembers and (GetNumGroupMembers() or 0) > 1 then return L["You're in a group"] end
+    if G:Mine() then return L["You lead a group"] end
+    local lvl = UnitLevel and UnitLevel("player")
+    if not G:FitsLevel(n.act, lvl) then
+        local it = GuildOS.GroupActivities and GuildOS.GroupActivities.byId[n.act]
+        return (it and it.min and lvl and lvl < it.min) and L["Too low for this one"] or L["Too high for this one"]
+    end
+    local asked = G:Asked(n.key)
+    if asked then return asked.state == "declined" and L["Declined"] or L["Already asked"] end
+    if #askCandidates(n) == 0 then return L["No spot for your role"] end
+    return nil
+end
+
+-- How well a waiting group suits me, so the best ones come up first: in my level range (not just near),
+-- a role of mine, and room for more than one of me.
+local function toastScore(n)
+    local B, G = GuildOS.LFGBoard, GuildOS.Groups
+    local score = 0
+    local it = GuildOS.GroupActivities and GuildOS.GroupActivities.byId[n.act]
+    local lvl = UnitLevel and UnitLevel("player")
+    if it and it.min and lvl and lvl >= it.min and lvl <= (it.max or it.min) then score = score + 2 end
+    local mine = B:Pref("roles") or ""
+    local role = G:BestRole(n.need, mine)
+    if mine ~= "" and role then score = score + 2 end
+    if role and ((n.need and n.need[role]) or 0) >= 2 then score = score + 1 end
+    return score
+end
 
 local function buildToast()
     local t = CreateFrame("Button", "GuildOSGroupsToast", UIParent, "BackdropTemplate")
     t:SetSize(TOAST_W, TOAST_H)
-    t:SetPoint("TOP", 0, -110)
+    toastPlace(t, 0)
     t:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = UI:Edge(t) })
     t:SetBackdropColor(C.popup.r, C.popup.g, C.popup.b, 0.96)
     t:SetBackdropBorderColor(C.line.r, C.line.g, C.line.b, 1)
     t:SetFrameStrata("DIALOG")
     t:SetMovable(true)
     t:RegisterForDrag("LeftButton")
-    t:SetScript("OnDragStart", function(self) self:StartMoving() end)
-    t:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+    t:SetScript("OnDragStart", function(self) self.moving = true; self:StartMoving() end)
+    t:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        self.moving = false
+        local point, rel, relPoint, x, y = self:GetPoint()
+        if point and (rel == nil or rel == UIParent) then tstate().pos = { point, relPoint, x, y } end
+    end)
     t.title = UI:CreateTitle(t, "", 12)
-    t.title:SetPoint("TOPLEFT", 10, -8)
+    t.title:SetPoint("TOPLEFT", 12, -8)
     t.title:SetWidth(TOAST_W - 40)
     t.title:SetJustifyH("LEFT")
     t.title:SetWordWrap(false)
     t.body = UI:CreateText(t, "", 11)
-    t.body:SetPoint("TOPLEFT", 10, -26)
-    t.body:SetWidth(TOAST_W - 20)
+    t.body:SetPoint("TOPLEFT", 12, -26)
+    t.body:SetWidth(TOAST_W - 24)
     t.body:SetJustifyH("LEFT")
     t.body:SetWordWrap(false)
     local close = UI:CreateCloseButton(t)
     close:SetPoint("TOPRIGHT", -4, -4)
-    close:SetScript("OnClick", function() t:Hide() end)
+    close:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    close:SetScript("OnClick", function(_, button)
+        if button == "RightButton" and t.current and t.current.kind == "group" then
+            t.menu:SetShown(not t.menu:IsShown())
+            return
+        end
+        t.dismissed = true
+        t:Hide()
+    end)
+    close:HookScript("OnEnter", function(self)
+        if not (t.current and t.current.kind == "group") then return end
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOMRIGHT")
+        GameTooltip:AddLine(L["Close"], 1, 1, 1)
+        GameTooltip:AddLine(L["Right-click: mute or move"], 0.6, 0.6, 0.6)
+        GameTooltip:Show()
+    end)
+    close:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    -- A group's card: a gold edge, the open roles as icons with counts, a pip for each place, and a thin
+    -- bar that runs down as the card's time does. Only the "group" kind uses the roles and the pips.
+    t.edge = t:CreateTexture(nil, "ARTWORK")
+    t.edge:SetColorTexture(C.gold.r, C.gold.g, C.gold.b, 1)
+    t.edge:SetPoint("TOPLEFT", 0, 0)
+    t.edge:SetPoint("BOTTOMLEFT", 0, 0)
+    t.edge:SetWidth(3)
+    t.timer = t:CreateTexture(nil, "ARTWORK")
+    t.timer:SetColorTexture(C.gold.r, C.gold.g, C.gold.b, 0.55)
+    t.timer:SetHeight(2)
+    t.timer:SetPoint("BOTTOMLEFT", 3, 0)
+    t.roleRow = {}
+    for i, letter in ipairs(LETTERS) do
+        local r = { letter = letter }
+        r.icon = t:CreateTexture(nil, "ARTWORK")
+        r.icon:SetSize(16, 16)
+        r.count = UI:CreateText(t, "", 11, C.text.r, C.text.g, C.text.b)
+        r.count:SetPoint("LEFT", r.icon, "RIGHT", 3, 0)
+        t.roleRow[i] = r
+    end
+    t.roleText = UI:CreateText(t, "", 11, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+    t.roleText:SetPoint("TOPLEFT", 12, -46)
+    t.pips = {}
+    t.pipText = UI:CreateText(t, "", 10, C.label.r, C.label.g, C.label.b)
     t.primary = UI:SetButtonVariant(UI:CreateButton(t, "", 110, 20), "primary")
     t.primary:SetPoint("BOTTOMRIGHT", -8, 8)
     t.secondary = UI:CreateButton(t, "", 90, 20)
     t.secondary:SetPoint("RIGHT", t.primary, "LEFT", -6, 0)
     -- The card itself opens the tab, where the rest is.
     t:SetScript("OnClick", function(self)
+        self.dismissed = true
         self:Hide()
         GuildOS.LFGBoard:Show()
     end)
+    -- "+2 more groups >" : the next waiting group, the one on show going to the back of the line.
+    t.more = CreateFrame("Button", nil, t)
+    t.more:SetSize(120, 16)
+    t.more:SetPoint("BOTTOMLEFT", 12, 10)
+    t.more.text = UI:CreateText(t.more, "", 10, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+    t.more.text:SetPoint("LEFT", 0, 0)
+    t.more:SetScript("OnEnter", function(self) self.text:SetTextColor(C.gold.r, C.gold.g, C.gold.b) end)
+    t.more:SetScript("OnLeave", function(self) self.text:SetTextColor(C.textSoft.r, C.textSoft.g, C.textSoft.b) end)
+    t.more:SetScript("OnClick", function()
+        if t.current and #toastQueue > 0 then
+            toastQueue[#toastQueue + 1] = t.current
+            local nxt = table.remove(toastQueue, 1)
+            t.showNext(nxt)
+        end
+    end)
+    t.more:Hide()
+    -- Right-click on the X: silence this activity for a day, go quiet for half an hour, or put the card back.
+    t.menu = CreateFrame("Frame", nil, t, "BackdropTemplate")
+    t.menu:SetSize(176, 3 * 24 + 8)
+    t.menu:SetPoint("TOPRIGHT", t, "BOTTOMRIGHT", 0, -2)
+    t.menu:SetFrameStrata("DIALOG")
+    t.menu:SetFrameLevel(t:GetFrameLevel() + 10)
+    t.menu:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = UI:Edge(t.menu) })
+    t.menu:SetBackdropColor(C.popup.r, C.popup.g, C.popup.b, 0.98)
+    t.menu:SetBackdropBorderColor(C.line.r, C.line.g, C.line.b, 1)
+    local function menuButton(i, onClick)
+        local b = UI:CreateButton(t.menu, "", 168, 20)
+        b:SetPoint("TOP", 0, -4 - (i - 1) * 24)
+        b:SetScript("OnClick", function() t.menu:Hide(); onClick() end)
+        return b
+    end
+    t.menuMute = menuButton(1, function()
+        local n = t.current
+        if not n then return end
+        tstate().mute[n.act] = nowSec() + 86400
+        for i = #toastQueue, 1, -1 do
+            if toastQueue[i].act == n.act then table.remove(toastQueue, i) end
+        end
+        t:Hide()   -- the next waiting group comes in
+    end)
+    t.menuQuiet = menuButton(2, function()
+        tstate().quietUntil = nowSec() + 1800
+        t.dismissed = true
+        t:Hide()
+    end)
+    t.menuReset = menuButton(3, function()
+        tstate().pos = nil
+        toastPlace(t, 0)
+    end)
+    t.menuQuiet.label:SetText(L["Quiet for 30 minutes"])
+    t.menuReset.label:SetText(L["Put the card back"])
+    t.menu:Hide()
+    -- Click the icon on the Ask button to ask as another of the open roles.
+    t.roleBtn = CreateFrame("Button", nil, t.primary)
+    t.roleBtn:SetSize(22, 20)
+    t.roleBtn:SetPoint("LEFT", 4, 0)
+    t.roleBtn:SetFrameLevel(t.primary:GetFrameLevel() + 3)
+    t.roleBtn:SetScript("OnClick", function()
+        local n = t.current
+        if not (n and n.kind == "group") then return end
+        local list = askCandidates(n)
+        if #list < 2 then return end
+        local at = 1
+        for i, k in ipairs(list) do if k == t.askRole then at = i end end
+        t.askRole = list[at % #list + 1]
+        t.paintAsk()
+    end)
+    t.roleBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine(L["Click to ask as another role"], 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    t.roleBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    t.roleBtn:Hide()
+    -- What the card does not have room for: the note, levels, how long ago it was listed.
+    t:SetScript("OnEnter", function(self)
+        local n = self.current
+        if not (n and n.kind == "group") then return end
+        local B, G = GuildOS.LFGBoard, GuildOS.Groups
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine(n.name .. " - " .. B:ActivityName(n.act), 1, 0.82, 0)
+        local it = GuildOS.GroupActivities and GuildOS.GroupActivities.byId[n.act]
+        if it and it.min then
+            GameTooltip:AddLine(string.format(L["Levels %d-%d"], it.min, it.max or it.min), 0.8, 0.8, 0.8)
+        end
+        local rec = GuildOS.GetMemberRecord and GuildOS:GetMemberRecord(n.name)
+        if rec and (rec.level or 0) > 0 then
+            GameTooltip:AddLine(string.format(L["Leader is level %d"], rec.level), 0.8, 0.8, 0.8)
+        end
+        GameTooltip:AddLine(string.format(L["open: %s"], G:NeedText(n.need)), 0.8, 0.8, 0.8)
+        local g = GuildOS.db and GuildOS.db.lfgGroups and GuildOS.db.lfgGroups[n.key]
+        if g and g.ts then
+            local mins = math.max(0, math.floor((nowSec() - g.ts) / 60))
+            GameTooltip:AddLine(mins == 0 and L["Listed just now"] or string.format(L["Listed %d min ago"], mins), 0.6, 0.6, 0.6)
+        end
+        local note = n.note or (g and g.note)
+        if note and note ~= "" then GameTooltip:AddLine(note, 1, 1, 1, true) end
+        GameTooltip:AddLine(L["Click to open the Groups tab"], 0.6, 0.6, 0.6)
+        GameTooltip:Show()
+    end)
+    t:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    -- A notice that goes (time, a button) lets the next one in; the X, or opening the tab, drops the rest.
+    t:SetScript("OnHide", function(self)
+        self.menu:Hide()
+        GameTooltip:Hide()
+        if self.dismissed then
+            self.dismissed = nil
+            wipe(toastQueue)
+        else
+            GuildOS.Compat.After(0.4, function() advanceToast() end)
+        end
+    end)
+    -- the button that asks, with my role's icon on it
+    t.primary.roleIcon = t.primary:CreateTexture(nil, "OVERLAY")
+    t.primary.roleIcon:SetSize(14, 14)
+    t.primary.roleIcon:SetPoint("LEFT", 8, 0)
+    t.primary.roleIcon:Hide()
     t:Hide()
     return t
 end
 
-local function fitButton(b, text)
+local function fitButton(b, text, letter)
     b.label:SetText(text)
-    b:SetWidth(math.max(70, math.ceil(b.label:GetStringWidth()) + 20))
+    local extra = 0
+    local shown = false
+    if b.roleIcon then
+        shown = letter and setRoleIcon(b.roleIcon, letter) or false
+        if not shown then b.roleIcon:Hide() end
+        extra = shown and 18 or 0
+    end
+    b.label:ClearAllPoints()
+    b.label:SetPoint("CENTER", extra / 2, 0)
+    b:SetWidth(math.max(70, math.ceil(b.label:GetStringWidth()) + 20 + extra))
 end
 
--- n = { kind, key, name, act?, need?, note?, role? }, from Modules/Groups.lua.
-function GuildOS:GroupsToast(n)
-    if not (n and n.kind and TOAST_SECONDS[n.kind]) then return end
+-- Slide in and fade, a bar that runs down with the card's time, and a fade before it goes.
+local TOAST_IN, TOAST_OUT = 0.25, 0.5
+local function toastAnimate(t, seconds)
+    t.born, t.life, t.placed, t.nextCheck = GetTime(), seconds, false, 0
+    t:SetScript("OnUpdate", function(self)
+        local age = GetTime() - self.born
+        local alpha = math.min(1, age / TOAST_IN)
+        local left = self.life - age
+        if left < TOAST_OUT then alpha = math.min(alpha, math.max(0, left / TOAST_OUT)) end
+        self:SetAlpha(alpha)
+        local slide = math.max(0, 1 - age / TOAST_IN)
+        if not self.moving then
+            if slide > 0 then
+                toastPlace(self, slide)
+                self.placed = false
+            elseif not self.placed then
+                toastPlace(self, 0)
+                self.placed = true
+            end
+        end
+        -- The Ask button follows what is true now: a group joined, a level gained, a listing ended.
+        if self.paintAsk and self.current and self.current.kind == "group" and GetTime() >= (self.nextCheck or 0) then
+            self.nextCheck = GetTime() + 1
+            self.paintAsk()
+        end
+        self.timer:SetWidth(math.max(1, (self:GetWidth() - 3) * math.max(0, left) / self.life))
+        if left <= 0 then self:SetScript("OnUpdate", nil) end
+    end)
+end
+
+-- The group card's second line: each open role as its icon and a count (or its words where the client has
+-- no icons), and a pip for every place in the group, gold for the ones taken.
+local function paintGroupCard(t, n, B, G)
+    local roleCount, openTotal = 0, 0
+    for _, k in ipairs(LETTERS) do openTotal = openTotal + ((n.need and n.need[k]) or 0) end
+    local x = 12
+    local art = roleArtKind()
+    t.roleText:SetShown(not art)
+    if art then
+        for _, r in ipairs(t.roleRow) do
+            local c = (n.need and n.need[r.letter]) or 0
+            if c > 0 and setRoleIcon(r.icon, r.letter) then
+                r.icon:ClearAllPoints()
+                r.icon:SetPoint("TOPLEFT", x, -45)
+                r.icon:Show()
+                r.count:SetText("x" .. c)
+                r.count:Show()
+                x = x + 16 + 3 + math.ceil(r.count:GetStringWidth() or 12) + 10
+            else
+                r.icon:Hide()
+                r.count:Hide()
+            end
+        end
+    else
+        for _, r in ipairs(t.roleRow) do r.icon:Hide(); r.count:Hide() end
+        t.roleText:SetText(string.format(L["open: %s"], G:NeedText(n.need)))
+    end
+    -- The places: the group's size, the leader and whoever joined are taken, the open roles are not.
+    local size = G:SizeOf(n.act)
+    local open = math.min(openTotal, size)
+    for _, pip in ipairs(t.pips) do pip:Hide() end
+    t.pipText:ClearAllPoints()
+    if size <= 10 then
+        for i = 1, size do
+            local pip = t.pips[i]
+            if not pip then
+                pip = t:CreateTexture(nil, "ARTWORK")
+                pip:SetSize(8, 8)
+                t.pips[i] = pip
+            end
+            local taken = i <= size - open
+            pip:SetColorTexture(taken and C.gold.r or C.line.r, taken and C.gold.g or C.line.g, taken and C.gold.b or C.line.b, taken and 1 or 0.9)
+            pip:ClearAllPoints()
+            pip:SetPoint("TOPRIGHT", -12 - (size - i) * 11, -49)
+            pip:Show()
+        end
+        t.pipText:SetText("")
+    else
+        t.pipText:SetText((size - open) .. "/" .. size)
+        t.pipText:SetPoint("TOPRIGHT", -12, -47)
+    end
+end
+
+local function showToast(n)
     local B, G = GuildOS.LFGBoard, GuildOS.Groups
     toast = toast or buildToast()
+    toast.showNext = showToast
+    toast.current = n
+    toast.dismissed = nil
+    toast.primary.roleIcon:Hide()
+    toast.roleBtn:Hide()
+    toast.menu:Hide()
+    toast.primary:Enable()
+    toast.paintAsk = nil
+    toast.primary.label:ClearAllPoints()
+    toast.primary.label:SetPoint("CENTER", 0, 0)
     local key = n.key
+    local isGroup = n.kind == "group"
+    toast:SetHeight(isGroup and 96 or TOAST_H)
+    toast.edge:SetColorTexture(C.gold.r, C.gold.g, C.gold.b, 1)
+    for _, r in ipairs(toast.roleRow) do r.icon:Hide(); r.count:Hide() end
+    for _, pip in ipairs(toast.pips) do pip:Hide() end
+    toast.roleText:Hide()
+    toast.pipText:SetText("")
     if n.kind == "group" then
-        local role = G:BestRole(n.need, B:Pref("roles") or "")
         toast.title:SetText(L["Groups being formed"])
-        local body = string.format("%s: %s", n.name, B:ActivityName(n.act)) .. DOT ..
-            string.format(L["open: %s"], G:NeedText(n.need))
-        toast.body:SetText(body)
-        fitButton(toast.primary, string.format(L["Ask as %s"], B:RoleName(ROLE_OF[role] or "ANY")))
-        toast.primary:SetShown(role ~= nil)
+        toast.askRole = nil
+        -- The leader in their class colour, the activity in gold.
+        local who = n.name
+        local rec = GuildOS.GetMemberRecord and GuildOS:GetMemberRecord(n.name)
+        local classFile = rec and (rec.classFile or rec.class)
+        if classFile and GuildOS.ClassColors and GuildOS.ClassColors[classFile] then
+            who = "|cff" .. GuildOS:GetClassColorHex(classFile) .. n.name .. "|r"
+        end
+        toast.body:SetText(who .. "  " .. GuildOS.GoldEsc() .. B:ActivityName(n.act) .. "|r")
+        paintGroupCard(toast, n, B, G)
+        -- The Ask button: my role's icon on it (click the icon for another open role of mine), greyed
+        -- with the reason when I cannot ask. Repainted every second while it is up.
+        toast.paintAsk = function()
+            local cur = toast.current
+            if not (cur and cur.kind == "group") then return end
+            local reason = askReason(cur)
+            toast.primary:Show()
+            if reason then
+                fitButton(toast.primary, reason)
+                toast.primary:Disable()
+                toast.roleBtn:Hide()
+                return
+            end
+            local list = askCandidates(cur)
+            local ok = false
+            for _, k in ipairs(list) do if k == toast.askRole then ok = true end end
+            if not ok then toast.askRole = G:BestRole(cur.need, B:Pref("roles") or "") end
+            fitButton(toast.primary, string.format(L["Ask as %s"], B:RoleName(ROLE_OF[toast.askRole] or "ANY")), toast.askRole)
+            toast.primary:Enable()
+            toast.roleBtn:SetShown(#list > 1)
+        end
+        toast.paintAsk()
         toast.primary:SetScript("OnClick", function()
+            local role = toast.askRole
             toast:Hide()
             if role then G:RequestSpot(key, role) end
         end)
@@ -829,12 +1197,73 @@ function GuildOS:GroupsToast(n)
             G:Decline(key)
         end)
     end
+    local waiting = (n.kind == "group") and #toastQueue or 0
+    toast.more:SetShown(waiting > 0)
+    if waiting > 0 then
+        toast.more.text:SetText(string.format(waiting == 1 and L["+%d more group >"] or L["+%d more groups >"], waiting))
+    end
     local shownAt = GetTime()
     toast.shownAt = shownAt
     toast:Show()
+    toastAnimate(toast, TOAST_SECONDS[n.kind])
     GuildOS.Compat.After(TOAST_SECONDS[n.kind], function()
         if toast and toast.shownAt == shownAt then toast:Hide() end
     end)
+end
+
+advanceToast = function()
+    if toast and toast:IsShown() then return end
+    -- In a group of my own now, or leading one: what waits is no use to me.
+    if (GetNumGroupMembers and (GetNumGroupMembers() or 0) > 1) or GuildOS.Groups:Mine() then
+        wipe(toastQueue)
+        return
+    end
+    local B = GuildOS.LFGBoard
+    while #toastQueue > 0 do
+        local nxt = table.remove(toastQueue, 1)
+        local g = GuildOS.db and GuildOS.db.lfgGroups and GuildOS.db.lfgGroups[nxt.key]
+        if g and B:_IsActive(g, nowSec()) then return showToast(nxt) end   -- one that ended is skipped
+    end
+end
+
+-- n = { kind, key, name, act?, need?, note?, role? }, from Modules/Groups.lua.
+-- Groups that come while a notice is up wait their turn; a request or a warning goes first.
+function GuildOS:GroupsToast(n)
+    if not (n and n.kind and TOAST_SECONDS[n.kind]) then return end
+    local st = tstate()
+    if n.kind == "group" and (nowSec() < st.quietUntil or (st.mute[n.act] or 0) > nowSec()) then return end
+    local up = toast and toast:IsShown() and toast.current
+    -- A soft chime for a new group or a request, with the notice (Settings turns it off).
+    local function chime()
+        if st.sound ~= false and (n.kind == "group" or n.kind == "request") and PlaySound then
+            pcall(PlaySound, (SOUNDKIT and (SOUNDKIT.UI_BNET_TOAST or SOUNDKIT.TELL_MESSAGE)) or 3081)
+        end
+    end
+    if not up then chime(); return showToast(n) end
+    if n.kind == "group" then
+        if up.kind == "group" and up.key == n.key then return showToast(n) end
+        local replaced = false
+        for i, q in ipairs(toastQueue) do
+            if q.key == n.key and q.kind == "group" then toastQueue[i] = n; replaced = true; break end
+        end
+        if not replaced and #toastQueue < TOAST_QUEUE_MAX then
+            -- Best fit first, the older one ahead among equals.
+            local score, at = toastScore(n), #toastQueue + 1
+            for i, q in ipairs(toastQueue) do
+                if toastScore(q) < score then at = i; break end
+            end
+            table.insert(toastQueue, at, n)
+        end
+        if up.kind == "group" then
+            toast.more:Show()
+            local w = #toastQueue
+            toast.more.text:SetText(string.format(w == 1 and L["+%d more group >"] or L["+%d more groups >"], w))
+        end
+        return
+    end
+    chime()
+    if up.kind == "group" then table.insert(toastQueue, 1, up) end
+    showToast(n)
 end
 
 ----------------------------------------------------------------------
@@ -1845,16 +2274,16 @@ function GuildOS:CreateGroupsPanel(parent)
         t:SetScript("OnEnter", function(self)
             self:SetBackdropBorderColor(C.label.r, C.label.g, C.label.b, 1)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:AddLine(self.title, C.text.r, C.text.g, C.text.b)
+            GameTooltip:AddLine(self.title, GuildOS.Tip.text.r, GuildOS.Tip.text.g, GuildOS.Tip.text.b)
             if self.detail then GameTooltip:AddLine(self.detail, 1, 1, 1) end
             for _, txt in ipairs(self.lines or {}) do GameTooltip:AddLine(txt, 0.8, 0.8, 0.8) end
             if self.isGroup then
-                GameTooltip:AddLine(L["Click to see its wings."], C.label.r, C.label.g, C.label.b, true)
+                GameTooltip:AddLine(L["Click to see its wings."], GuildOS.Tip.label.r, GuildOS.Tip.label.g, GuildOS.Tip.label.b, true)
             else
-                GameTooltip:AddLine(L["Click for its description, bosses and loot. Form starts yours."], C.label.r, C.label.g, C.label.b, true)
+                GameTooltip:AddLine(L["Click for its description, bosses and loot. Form starts yours."], GuildOS.Tip.label.r, GuildOS.Tip.label.g, GuildOS.Tip.label.b, true)
             end
             if self.first then
-                GameTooltip:AddLine(L["Right-click to whisper the first leader."], C.label.r, C.label.g, C.label.b, true)
+                GameTooltip:AddLine(L["Right-click to whisper the first leader."], GuildOS.Tip.label.r, GuildOS.Tip.label.g, GuildOS.Tip.label.b, true)
             end
             GameTooltip:Show()
         end)

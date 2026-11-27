@@ -705,7 +705,9 @@ function GuildOS:EKOActivityAverage(count)
     for i = 0, (count or 7) - 1 do
         local rec = days[date("!%Y-%m-%d", now - i * 86400)]
         if rec and rec.total > 0 then
-            sum = sum + (rec.active / rec.total)
+            -- `shared`: the most any guildmate's client counted that day (see EKO:ShareList), so a client that
+            -- only started recording recently still reads the guild's real number for the days it missed.
+            sum = sum + (math.min(rec.total, math.max(rec.active, rec.shared or 0)) / rec.total)
             n = n + 1
         end
     end

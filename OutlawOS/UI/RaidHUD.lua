@@ -284,7 +284,7 @@ local function BuildHUDRows(f)
             row:SetScript("OnEnter", function(self)
                 GameTooltip:SetOwner(self, "ANCHOR_LEFT")
                 GameTooltip:ClearLines()
-                GameTooltip:AddLine(cd.label, C.gold.r, C.gold.g, C.gold.b)
+                GameTooltip:AddLine(cd.label, GuildOS.Tip.gold.r, GuildOS.Tip.gold.g, GuildOS.Tip.gold.b)
                 local now2 = GetTime()
                 for _, p in ipairs(self.players) do
                     local st = _cdState[p.name] and _cdState[p.name][self.cdKey]

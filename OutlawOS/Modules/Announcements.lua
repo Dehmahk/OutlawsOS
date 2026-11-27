@@ -245,7 +245,7 @@ local function ensureBox()
         edgeFile = "Interface\\Buttons\\WHITE8x8",
         edgeSize = GuildOS.UI:Edge(f),
     })
-    f:SetBackdropColor(0.063, 0.059, 0.086, 0.95)
+    f:SetBackdropColor(GuildOS.Colors.bg.r, GuildOS.Colors.bg.g, GuildOS.Colors.bg.b, 0.95)
     f:SetBackdropBorderColor(C.gold.r, C.gold.g, C.gold.b, 0.9)
     f:SetMovable(true)
     f:EnableMouse(true)

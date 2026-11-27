@@ -188,7 +188,7 @@ local function RowText(o, me, wants, mine, qty)
     if have > 0 then meta[#meta + 1] = "|cff40ff40" .. L["You have %d of it"]:format(have) .. "|r"
     elseif not mine and Market.SeekForMe(o) then meta[#meta + 1] = "|cff40ff40" .. L["You can do this"] .. "|r" end
     if o.note then meta[#meta + 1] = "|cffffffff\"" .. o.note .. "\"|r" end
-    local price = o.pr and ("|cffffd100" .. o.pr .. "|r") or ""
+    local price = o.pr and (GuildOS.GoldEsc() .. o.pr .. "|r") or ""
     return title, table.concat(meta, "  ·  "), price
 end
 

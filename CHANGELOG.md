@@ -1,5 +1,152 @@
 # Changelog
 
+## 1.41.26
+
+### Now tab: Next Event card
+- The card fills its space. It keeps the event's title, date and kind, and adds:
+  - a large countdown (gold in the last 3 hours);
+  - who hosts it, and where to meet;
+  - your answer in words ("You: going · DPS", or "You have not answered yet");
+  - a bar per role against the spots the event asks for (the plain counts when it names none);
+  - who is going, in class colours with their role, and who is tentative;
+  - the organizer's notes;
+  - the next three events under "Later". Click one to open it in the calendar;
+  - a coloured edge bar by the event's colour or kind.
+- Along the foot, next to Going / Tentative / Absent: Discord (the invite), Copy location (when the event names one), and for officers Remind (N), which posts a short reminder in guild chat (at most once every 30 minutes per event). N is how many online members have not answered.
+- Each block shows only if it fits, so a short card keeps the essentials and a tall one shows more. Events planned on the website keep their "Sign up in Discord or on the website" line.
+
+## 1.41.25
+
+### Top bar
+- The Wind & Blade emblem sits before the OutlawOS wordmark on every style (the leather theme keeps its own larger one).
+- A thin gold rule under the top bar, and the bottom bar's rule is the same gold.
+- The guild line shows how many officers are online (Guild Master, Co-Guild Master, Officer, Raid Marshal). Hover it for the guild's renown, the achievements closest to earned, and the names of the officers online.
+- A "next event" chip shows the next calendar event and when ("Fish Camp · 1d3h"). Click it to open the calendar on that day.
+- A gold dot and a count show when something needs you (join requests, trials, RSVPs). Click it for the Now tab; hover it for the first few.
+- The sync time is green when fresh, grey, then amber as it ages, and red when stale or never synced.
+- A Discord button opens the copy box with the Outlaw invite.
+- A bell quiets the group notices and their sound for an hour; click it again to turn them back on.
+- As the window narrows, the new buttons drop out first, lowest priority first, so nothing runs under the close button.
+
+## 1.41.24
+
+### Bottom bar
+- The window's bottom bar now matches the Outlaws: the left link is the Outlaw Discord (click it for a copy box with the invite), the help link says /outlawos help, the version reads "OutlawOS v...", and the rule, links and version are brass instead of grey-blue.
+
+## 1.41.23
+
+### Now tab
+- The top of the Now tab says "Next event" instead of "Next raid", since it shows the next calendar event whatever it is (Fish Camp is not a raid). With nothing planned it says "No event scheduled."
+
+## 1.41.22
+
+### Now tab
+- The Outlaw Gazette card showed only three lines and a "..." even with plenty of empty room below. It now measures the room the card really has, refits when the window is resized, and when a long line (like the list of promotions) does not fit it cuts that line where it stops fitting, so the lines after it still show.
+
+## 1.41.21
+
+### Alliance style
+- The Alliance style now has the gold trim its description promises: window borders, dividers, pop-up borders and hover edges are antique gold on the royal blue. Before, they were blue-grey and only the title, active tab and primary buttons were gold.
+
+## 1.41.20
+
+### Styles
+- The Parchment style is gone from the style picker, the welcome screen and /gos style. If you had it selected, OutlawOS goes back to the default style on your next reload, with no message.
+
+## 1.41.19
+
+### Parchment theme
+- Coloured text made for dark windows (lime green, pale yellow, white, orange) is brought down to a darker shade on Parchment, so the item level column, "Now", "Solved", the Bounty Board counts and the rest read on cream. The dark themes are unchanged.
+- Hover tooltips stay dark on every theme, and now use light text on Parchment (before, the lines were dark brown on a dark tooltip and could not be read).
+
+## 1.41.18
+
+### Parchment theme
+- The pop-up windows (Welcome back, Recruitment, join requests, the calendar, settings pop-ups, search and about forty others) had a fixed near-black background, so on Parchment their dark text could not be read. They now take their colours from the theme, and look the same as before on the dark themes.
+- Class colours are darkened on Parchment, so priests, rogues, hunters and mages can be read on cream.
+- Level numbers and "Now" in the Ledger no longer use white and bright green on cream. They follow the theme.
+- Gold text (the Bounty Board tiers, guild bank goal, About links, group notice, market prices) uses a deep amber on Parchment instead of pale yellow.
+
+## 1.41.17
+
+### Wanted (Gilded Feather)
+- Verified clears typed in by hand have no limit now. "+ Add clear" is always there, however many clears a dungeon has.
+- Saving verified clears sends them to the guild at normal speed (it used to go in the slow lane), and says so in chat with the count. Every member's Bounty Board, on the Desk and on the home page, repaints as soon as the clears arrive instead of at the next time it is opened. Officers who are offline get them when they next log in, as before.
+
+## 1.41.16
+
+### Groups notice
+- The Ask button checks that you can actually ask. If you're in a group, leading one, too low or too high for the activity, already asked, or the group has ended, the button is greyed and says why. It re-checks every second while the notice is up.
+- Click the role icon on the Ask button to ask as another open role of yours (a healer main can ask as DPS without opening the tab).
+- Right-click the X for a small menu: mute that activity for a day, go quiet for 30 minutes, or put the card back in its default spot.
+- A soft sound plays with a new group or a spot request. Turn it off in Settings (Groups).
+- Hover the notice for the details: level range, the leader's level, open roles, how long ago it was listed, and the leader's note.
+- When groups are waiting, the best fit comes up first (in your level range, one of your roles, room for more than one of you). Groups that have ended are skipped, and the waiting ones are dropped once you're in a group yourself.
+- The notice remembers where you drag it, even through the slide-in.
+
+## 1.41.15
+
+### Groups
+- The "Ask as ..." button on the group notice now carries your role's icon, so it is clear which role you are asking as. Whisper stays the quieter button.
+- Several groups at once no longer stack or replace each other. The first stays up, and the card says "+2 more groups >". Click it to move to the next group; the one you leave goes to the back of the line. When a notice ends, the next one comes in.
+- A request for a spot in your group, or a warning that your listing is ending, still goes first. The X on the notice, or opening the tab from it, clears the waiting ones.
+- The notice is a little wider (330px) to fit the new line.
+
+## 1.41.14
+
+### Groups
+- The "Groups being formed" notice is redesigned. Nothing is cut off any more: the leader's name (in their class colour) and the activity (in gold) sit on the first line, and the open roles show as role icons with counts on the second. Without role art you get the words instead.
+- A row of pips shows how full the group is, gold for places taken. Groups bigger than ten show a count like 3/25.
+- A gold bar runs down the left edge, and a thin gold bar along the bottom runs out as the notice's time does.
+- The notice slides in, and fades out before it goes.
+
+## 1.41.13
+
+### Web tab
+- The names kept off the site and the "what goes on the site" switches are now shared between officers. Change them on one officer's PC and every officer's roster follows, so another officer's publish can no longer put a hidden name back. The newest change wins, and only an officer's change is taken.
+
+### Companion
+- OutlawOS ships an empty placeholder Inbox.lua that never overwrites the real one. While the companion app still writes to the old GuildOS folder, a small GuildOS bridge addon there loads that Inbox.lua for OutlawOS.
+
+### Alliance
+- A slot request that gets no answer used to vanish silently. If nothing comes back within three minutes you now get a message saying so. An answer (yes or no) clears it.
+
+## 1.41.12
+
+Release that rolls up 1.41.06 to 1.41.11 (below). No other changes.
+
+## 1.41.11
+
+### Sync at login
+- When a member logs in, the guild already answered their request with member data, trials, raid data and more. It now also answers with the leaders' shared records (the About page, bounty board, Gazette, strikes and other officer settings, sent only by someone allowed to send them), each member's check-in, the list of who has OutlawOS, and the daily activity counts. Answers stay limited to one every two minutes per client, so a busy login hour does not flood the guild channel.
+
+## 1.41.10
+
+### The Ledger
+- A member's tooltip showed the OutlawOS version up to three times (one in red, one grey for officers, one from the check-in). It now shows one line, from the member's check-in, and only falls back to the older sources when there is no check-in. "Not installed" is said once.
+
+## 1.41.09
+
+### Interface styles
+- Three new options in Settings, Interface style: GuildOS (the original flat dark look, without the Outlaw leather, brass emblem and western fonts), Alliance (deep royal blue with silver and gold trim) and Parchment (light cream and tan with dark brown text). Pick one, press Apply and reload. OutlawOS (leather and brass) stays the default.
+- Parchment is a light theme, so some class colours (yellow, white) are hard to read on it.
+- The first-run screen still offers only OutlawOS and WoW: Forever.
+
+## 1.41.08
+
+### Audit Log and The Office
+- The filter and sort buttons on the Audit Log showed no text, so you could not tell which filter was on. They now show their names, and a filter that is switched on is marked in gold. The period button in The Office had the same blank caption and is fixed too.
+
+## 1.41.07
+
+### The Ledger
+- "Avg activity" now reads the same for everyone. A client only knew about the days it was running (and only counted a member on the last day they were seen), so a newly installed client read far lower than an older one. Clients now share each day's login count (at login and on Check) and keep the highest, so the number catches up within a login or two.
+
+## 1.41.06
+
+### The Ledger
+- The counter cards now wrap onto more rows when the window gets small instead of dropping off or squeezing. Every card stays visible with its text readable, the card band grows taller as needed, and the member list below moves down and shows fewer rows. At full width it is still one row.
+
 ## 1.41.05
 
 ### The Ledger

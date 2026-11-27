@@ -358,7 +358,7 @@ function SoftRes:HookTooltips()
         if #reserves == 0 then return end
 
         tt:AddLine(" ")
-        tt:AddLine(L["Soft Reserves:"], C.gold.r, C.gold.g, C.gold.b)
+        tt:AddLine(L["Soft Reserves:"], GuildOS.Tip.gold.r, GuildOS.Tip.gold.g, GuildOS.Tip.gold.b)
         for i, e in ipairs(reserves) do
             if i > 5 then
                 tt:AddLine(string.format("  ... +%d %s", #reserves - 5, L["more"]),

@@ -419,7 +419,7 @@ function EKO:Roster()
 end
 
 local function hoursText(m)
-    if m.online then return "|cff66dd66online|r" end
+    if m.online then return GuildOS.Esc("66dd66") .. "online|r" end
     local h = m.hoursOff or 0
     if h < 1 then return "<1h ago" end
     if h < 48 then return h .. "h ago" end
@@ -479,7 +479,7 @@ function EKO:BuildBankGoal(parent)
         local money, ts = EKO:BankMoney()
         local goalCopper = (tonumber(g.gold) or 100) * 10000
         if not money then
-            label:SetText("|cffE8C266" .. (g.name or "Guild bank goal") .. "|r  ·  open the guild bank once to read its gold")
+            label:SetText(GuildOS.GoldEsc() .. (g.name or "Guild bank goal") .. "|r  ·  open the guild bank once to read its gold")
             info:SetText("")
             fill:SetWidth(1)
             return
@@ -487,7 +487,7 @@ function EKO:BuildBankGoal(parent)
         local pct = goalCopper > 0 and math.min(1, money / goalCopper) or 0
         local gold = math.floor(money / 10000)
         local left = math.max(0, (tonumber(g.gold) or 100) - gold)
-        label:SetText(string.format("|cffE8C266%s|r  ·  %dg / %dg (%d%%)%s", g.name or "Guild bank goal", gold,
+        label:SetText(string.format(GuildOS.GoldEsc() .. "%s|r  ·  %dg / %dg (%d%%)%s", g.name or "Guild bank goal", gold,
             tonumber(g.gold) or 100, math.floor(pct * 100), left > 0 and ("  ·  " .. left .. "g to go") or "  ·  goal reached!"))
         local age = ts and (now() - ts) or nil
         info:SetText(age and ("updated " .. (age < 3600 and (math.floor(age / 60) .. "m") or age < 2 * DAY and (math.floor(age / 3600) .. "h") or (math.floor(age / DAY) .. "d")) .. " ago") or "")
@@ -604,9 +604,9 @@ function EKO:BuildCircleSub(panel)
             cell(row, ldr.role, 180, 125, C.textDim.r, C.textDim.g, C.textDim.b)
             local want = EKO.ROLE_RANK[ldr.role]
             local rankText
-            if not m then rankText = "|cffff6666not in guild|r"
-            elseif m.rank == want then rankText = "|cff66dd66" .. m.rank .. "|r"
-            else rankText = "|cffffcc33! " .. (m.rank or "?") .. "|r (" .. want .. ")" end
+            if not m then rankText = GuildOS.Esc("ff6666") .. "not in guild|r"
+            elseif m.rank == want then rankText = GuildOS.Esc("66dd66") .. m.rank .. "|r"
+            else rankText = GuildOS.Esc("ffcc33") .. "! " .. (m.rank or "?") .. "|r (" .. want .. ")" end
             cell(row, rankText, 310, 135)
             cell(row, m and hoursText(m) or "-", 450, 105, C.textDim.r, C.textDim.g, C.textDim.b)
             local cbw = UI:CreateCheckbox(row, "", 18)
@@ -621,7 +621,7 @@ function EKO:BuildCircleSub(panel)
             note:SetScript("OnEditFocusLost", function(self) st.note = self:GetText() end)
             if t > EKO.TRIAL_END - DAY then
                 if st.result then
-                    cell(row, st.result == "confirmed" and "|cff66dd66Confirmed|r" or "|cffff9966Back to Outlaw|r", 880, 140)
+                    cell(row, st.result == "confirmed" and GuildOS.Esc("66dd66") .. "Confirmed|r" or GuildOS.Esc("ff9966") .. "Back to Outlaw|r", 880, 140)
                 else
                     local ok = UI:CreateButton(row, "Confirm", 70, 22)
                     ok:SetPoint("LEFT", 880, 0)
@@ -854,7 +854,7 @@ function EKO:BuildReadySub(panel)
             cell(row, tostring(c.days), 190, 45)
             cell(row, string.format("%d > %d (+%d)", c.first or m.level, m.level, c.gained), 240, 85)
             cell(row, hoursText(m), 330, 95, C.textDim.r, C.textDim.g, C.textDim.b)
-            cell(row, c.gos and "|cff66dd66yes|r" or "|cff888888no|r", 430, 60)
+            cell(row, c.gos and GuildOS.Esc("66dd66") .. "yes|r" or GuildOS.Esc("888888") .. "no|r", 430, 60)
             cell(row, tostring(c.clears), 500, 50)
             local promo = UI:CreateButton(row, inWave[m.name] and "In wave" or "Promote", 80, 22)
             promo:SetPoint("LEFT", 560, 0)
@@ -1012,8 +1012,8 @@ function EKO:JoinCounts()
 end
 
 local function leftText(s)
-    if s <= 0 then return "|cffff6060ready to review|r" end
-    if s < DAY then return "|cffffd060today|r" end
+    if s <= 0 then return GuildOS.Esc("ff6060") .. "ready to review|r" end
+    if s < DAY then return GuildOS.Esc("ffd060") .. "today|r" end
     return math.ceil(s / DAY) .. "d left"
 end
 
@@ -1113,7 +1113,7 @@ function EKO:BuildSuggestSub(panel)
                 cell(row, (s.gained >= 0 and "+" or "") .. s.gained, 260, 60)
                 cell(row, hoursText(s.m), 330, 95, C.textDim.r, C.textDim.g, C.textDim.b)
                 cell(row, leftText(s.left), 430, 105)
-                cell(row, s.meets and "|cff66dd66meets|r" or "|cff888888not yet|r", 540, 60)
+                cell(row, s.meets and GuildOS.Esc("66dd66") .. "meets|r" or GuildOS.Esc("888888") .. "not yet|r", 540, 60)
                 local x = UI:CreateButton(row, "X", 24, 20)
                 x:SetPoint("RIGHT", -8, 0)
                 x:SetScript("OnClick", function() setTrial(s.key, "denied"); refresh() end)
@@ -1191,7 +1191,7 @@ end
 -- catches up then.
 ----------------------------------------------------------------------
 EKO.ABOUT_EDITORS = { ["Guild Master"] = true, ["Co-Guild Master"] = true }
-local ABOUT_GOLD = "|cffe6b84a"
+local ABOUT_GOLD = GuildOS.GoldEsc()
 
 local function rankOf(name)
     local s = short(name)
@@ -1747,15 +1747,15 @@ function EKO:JournalBlock(key, content, y, width)
             for i, bnt in ipairs(list) do
                 local row = newRow(b, by, i, 26)
                 local done = self:BountyClaims(bnt.name)
-                cell(row, bnt.tier and ("|cffe6b84a" .. bnt.tier .. "|r") or "", 8, 50)
+                cell(row, bnt.tier and (GuildOS.GoldEsc() .. bnt.tier .. "|r") or "", 8, 50)
                 cell(row, bnt.name, 60, 220)
                 if #done > 0 then
                     local names = {}
                     for _, s in ipairs(done[#done].who) do names[#names + 1] = nameColored(s, nil, classes) end
-                    cell(row, string.format("|cff66dd66cleared %dx|r", #done), 290, 90)
+                    cell(row, string.format(GuildOS.Esc("66dd66") .. "cleared %dx|r", #done), 290, 90)
                     cell(row, table.concat(names, ", ") .. (#done > 1 and string.format("  (+%d more group%s)", #done - 1, #done > 2 and "s" or "") or ""), 385, math.max(100, width - 390))
                 else
-                    cell(row, "|cff888888not cleared yet|r", 290, 120)
+                    cell(row, GuildOS.Esc("888888") .. "not cleared yet|r", 290, 120)
                 end
                 by = by + 28
             end
@@ -1807,7 +1807,7 @@ function EKO:JournalBlock(key, content, y, width)
         for _, lvl in ipairs(self.LEVEL_FIRSTS) do
             local f = firstAt[lvl]
             txt(b, "FIRST TO " .. lvl, x, by, 150, 10, C.label)
-            txt(b, f and nameColored(f.name, nil, classes) or "|cff888888no one yet|r", x, by + 14, 150, 12)
+            txt(b, f and nameColored(f.name, nil, classes) or GuildOS.Esc("888888") .. "no one yet|r", x, by + 14, 150, 12)
             if f then txt(b, date("%Y-%m-%d", f.at), x, by + 30, 150, 10, C.textSoft) end
             x = x + 160
             if x + 150 > width then x = 0; by = by + 52 end
@@ -1820,7 +1820,7 @@ function EKO:JournalBlock(key, content, y, width)
             local f = classMax[cls]
             local label = (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[cls]) or cls
             local hex = GuildOS.GetClassColorHex and GuildOS:GetClassColorHex(cls) or "ffffff"
-            parts[#parts + 1] = "|cff" .. hex .. label .. "|r: " .. (f and f.name or "|cff888888open|r")
+            parts[#parts + 1] = "|cff" .. hex .. label .. "|r: " .. (f and f.name or GuildOS.Esc("888888") .. "open|r")
         end
         txt(b, table.concat(parts, "   ·   "), 0, by, width, 12)
         by = by + 40
@@ -1855,9 +1855,9 @@ end
 -- Quote the Code, the Outlaw Gazette, the recruit ad rotator, Ride Out, Safehouses, the Tavern and
 -- Campfire nights. Shared state goes out on one sync domain, "ekomisc", accepted only from officers.
 ----------------------------------------------------------------------
-local GOLDC = "|cffe6b84a"
-local GREY = "|cff888888"
-local GREEN = "|cff66dd66"
+local GOLDC = GuildOS.GoldEsc()
+local GREY = GuildOS.Esc("888888")
+local GREEN = GuildOS.Esc("66dd66")
 
 -- Rank lore (roster tooltips).
 EKO.RANK_LORE = {
@@ -1931,16 +1931,19 @@ end
 local refreshers = {}
 local function refreshAll()
     for _, fn in pairs(refreshers) do GuildOS:SafeCall(fn) end
+    -- The Bounty Board on the Desk and the home page read the same shared data: repaint them too.
+    if EKO.journalRefresh then GuildOS:SafeCall(EKO.journalRefresh) end
+    if GuildOS.DashboardRefresh then GuildOS:SafeCall(GuildOS.DashboardRefresh) end
 end
 
-function EKO:SetShared(kind, data)
+function EKO:SetShared(kind, data, priority)
     if not GuildOS:IsOfficer() then GuildOS:Print("Only officers can change that.") return false end
     local db = self:DB()
     db.shared = db.shared or {}
     local rec = { rev = now(), by = meName(), data = data }
     db.shared[kind] = rec
     if GuildOS.SyncService then
-        GuildOS.SyncService:Publish("ekomisc", "set", { kind = kind, rev = rec.rev, by = rec.by, data = data }, { priority = "BULK" })
+        GuildOS.SyncService:Publish("ekomisc", "set", { kind = kind, rev = rec.rev, by = rec.by, data = data }, { priority = priority or "BULK" })
     end
     refreshAll()
     return true
@@ -1973,6 +1976,7 @@ miscEv:SetScript("OnEvent", function()
     C_Timer.After(35, function()
         GuildOS:SafeCall(function()
             if not GuildOS:IsOfficer() or not GuildOS.SyncService then return end
+            if GuildOS.WebExtras and GuildOS.WebExtras.PublishCfg then GuildOS.WebExtras.PublishCfg() end
             local db = EKO:DB()
             for kind, rec in pairs(db and db.shared or {}) do
                 GuildOS.SyncService:Publish("ekomisc", "set", { kind = kind, rev = rec.rev, by = rec.by, data = rec.data }, { priority = "BULK" })
@@ -2584,7 +2588,7 @@ end
 -- The Gazette as a styled page: gold headings, no emoji codes or ** markers. Copy for Discord gives the raw text.
 local function gazetteLine(raw)
     local s = raw:gsub(":%w+:", ""):gsub("^%s+", ""):gsub("%s+$", "")
-    s = s:gsub("%*%*(.-)%*%*", "|cffffd100%1|r")
+    s = s:gsub("%*%*(.-)%*%*", GuildOS.GoldEsc() .. "%1|r")
     s = s:gsub("%*(.-)%*", "%1")
     return s
 end
@@ -2752,7 +2756,7 @@ end
 -- The Gilded Feather > Wanted: posters, the Hunter, Most Wanted, Location of the Week
 ----------------------------------------------------------------------
 -- Clears typed in on the Wanted page: { week, clears = { [dungeon] = { { names = {...}, full = bool }, ... } } }.
-EKO.CLEARS_MAX = 3   -- clears per dungeon on one board
+-- No limit per dungeon: an officer types in as many as the week had.
 local function formClears()
     local s = shared("bountyclearsform")
     if type(s) ~= "table" or s.week ~= EKO:WeekStart() then return {} end
@@ -2868,7 +2872,7 @@ function EKO:BuildWantedSub(panel)
             y = y + (math.floor((#list - 1) / cols) + 1) * (ch + 12)
         end
 
-        -- Verified clears, typed in: one block per dungeon on the board, up to CLEARS_MAX clears each.
+        -- Verified clears, typed in: one block per dungeon on the board.
         if GuildOS:IsOfficer() and #list > 0 then
             formSync(EKO:WeekStart())
             y = y + 12
@@ -2908,15 +2912,14 @@ function EKO:BuildWantedSub(panel)
                     rm:SetPoint("LEFT", cbl, "RIGHT", 6, 0)
                     y = y + 28
                 end
-                if #rows < EKO.CLEARS_MAX then
-                    local add = btn(child, "+ Add clear", 100, function()
-                        captureForm()
-                        table.insert(formState.rows[bnt.name], { names = { "", "", "", "", "" }, full = false })
-                        refresh()
-                    end)
-                    add:SetPoint("TOPLEFT", 0, -y)
-                    y = y + 26
-                end
+                -- Typed in by hand, so no limit on how many clears a dungeon can have.
+                local add = btn(child, "+ Add clear", 100, function()
+                    captureForm()
+                    table.insert(formState.rows[bnt.name], { names = { "", "", "", "", "" }, full = false })
+                    refresh()
+                end)
+                add:SetPoint("TOPLEFT", 0, -y)
+                y = y + 26
                 y = y + 8
             end
             local sv = btn(child, "Save verified clears", 160, function()
@@ -2935,7 +2938,13 @@ function EKO:BuildWantedSub(panel)
                         end
                     end
                 end
-                EKO:SetShared("bountyclearsform", { week = EKO:WeekStart(), clears = clears })
+                -- Out at normal priority (not the slow bulk lane), so every member's board follows within moments.
+                local total, dungeons = 0, 0
+                for _, list in pairs(clears) do dungeons = dungeons + 1; total = total + #list end
+                if EKO:SetShared("bountyclearsform", { week = EKO:WeekStart(), clears = clears }, "NORMAL") then
+                    GuildOS:Print(string.format("Verified clears saved: %d across %d dungeon%s. Sent to the guild, every member's Bounty Board updates.",
+                        total, dungeons, dungeons == 1 and "" or "s"))
+                end
             end)
             sv:SetPoint("TOPLEFT", 0, -y)
             if UI.SetButtonVariant then UI:SetButtonVariant(sv, "primary") end
@@ -2987,7 +2996,7 @@ function EKO:BuildWantedSub(panel)
                     cell(row, GOLDC .. t:sub(1, 1):upper() .. t:sub(2) .. "|r", 8, 70)
                     -- The finders/prizes column sits at rightX; the hint stops 14px short of it so the two never overlap
                     local rightX = math.max(250, width - (canEdit and 430 or 330))
-                    local hint = txt(row, (s.hint ~= "" and ("|cffdddddd" .. s.hint .. "|r") or GREY .. "(no hint)|r"), 80, 6, math.max(160, rightX - 80 - 14), 11)
+                    local hint = txt(row, (s.hint ~= "" and (GuildOS.Esc("dddddd") .. s.hint .. "|r") or GREY .. "(no hint)|r"), 80, 6, math.max(160, rightX - 80 - 14), 11)
                     local f = {}
                     for _, n in ipairs(s.finders) do f[#f + 1] = nameColored(n, nil, classes) end
                     local found = #f > 0 and ("Found: " .. table.concat(f, ", ")) or (GREY .. "not found yet|r")
@@ -3384,11 +3393,11 @@ function EKO:BuildDeskSub(panel)
             cell(r, u.rank or (GREY .. "not in roster|r"), 215, 140, C.textSoft.r, C.textSoft.g, C.textSoft.b)
             cell(r, u.online and (GREEN .. "online|r") or (GREY .. "offline|r"), 360, 70)
             if not u.v then
-                cell(r, "|cffff6060NOT INSTALLED|r", 435, 150)
+                cell(r, GuildOS.Esc("ff6060") .. "NOT INSTALLED|r", 435, 150)
             elseif u.v == CURRENT then
                 cell(r, GREEN .. "current|r", 435, 150)
             else
-                cell(r, "|cffff6060UPDATE OutlawOS|r", 435, 150)
+                cell(r, GuildOS.Esc("ff6060") .. "UPDATE OutlawOS|r", 435, 150)
             end
             cell(r, u.v and ("v" .. tostring(u.v)) or "", 590, 200, C.textSoft.r, C.textSoft.g, C.textSoft.b)
             y = y + 24
@@ -3463,7 +3472,7 @@ function EKO:BuildDeskSub(panel)
                 for i, u in ipairs(still) do
                     local r = newRow(child, y, i, 22)
                     cell(r, u.m and classColored(u.m) or u.name, 8, 200)
-                    cell(r, "|cffff6060GuildOS|r  v" .. tostring(u.v), 215, 200)
+                    cell(r, GuildOS.Esc("ff6060") .. "GuildOS|r  v" .. tostring(u.v), 215, 200)
                     cell(r, u.online and (GREEN .. "online|r") or (GREY .. "offline|r"), 430, 70)
                     y = y + 24
                 end
@@ -3561,7 +3570,7 @@ function EKO:BuildDeskSub(panel)
                     i = i + 1
                     local r = newRow(child, y, i, 24)
                     cell(r, si == 1 and n or "", 8, 170)
-                    local col = s.level >= 3 and "|cffff6060" or s.level == 2 and "|cffffd060" or GREY
+                    local col = s.level >= 3 and GuildOS.Esc("ff6060") or s.level == 2 and GuildOS.Esc("ffd060") or GREY
                     cell(r, col .. (EKO.STRIKE_LEVELS[s.level] or "?") .. "|r", 185, 130)
                     cell(r, s.reason ~= "" and s.reason or GREY .. "(no reason)|r", 320, math.max(100, width - 560))
                     cell(r, (s.by or "?") .. ", " .. date("%b %d", s.at or 0), math.max(330, width - 230), 150, C.textSoft.r, C.textSoft.g, C.textSoft.b)
@@ -3826,6 +3835,16 @@ function EKO:ShareList()
             items[#items + 1] = string.format("%s=%d|%s", short(name), math.floor((now() - rec.at) / 3600), tostring(rec.v or "?"))
         end
     end
+    -- The daily activity counts, so the Ledger's Avg activity card reads the same on every client.
+    local dayItems = {}
+    for key, rec in pairs(GuildOS.db.ekoDaily or {}) do
+        if rec.total and rec.total > 0 then
+            dayItems[#dayItems + 1] = string.format("%s=%d/%d", key, math.max(rec.active or 0, rec.shared or 0), rec.total)
+        end
+    end
+    if #dayItems > 0 then
+        GuildOS.SyncService:Publish("ekoactive", "days", { d = table.concat(dayItems, ",") }, { priority = "BULK" })
+    end
     table.sort(items)
     local i = 1
     while i <= #items and i <= 300 do
@@ -3879,6 +3898,59 @@ if GuildOS.SyncService then
             end
         end
         if refreshers.desk then GuildOS:SafeCall(refreshers.desk) end
+    end)
+end
+
+if GuildOS.SyncService then
+    GuildOS.SyncService.GUILD_ONLY_DOMAINS.ekoactive = true
+    GuildOS.SyncService:On("ekoactive", function(env, sender)
+        local d = env and env.data
+        if type(d) ~= "table" or type(d.d) ~= "string" then return end
+        local days = GuildOS.db.ekoDaily
+        if not days then days = {}; GuildOS.db.ekoDaily = days end
+        local cutoff = date("!%Y-%m-%d", now() - 30 * 86400)
+        for key, a, t in d.d:gmatch("(%d%d%d%d%-%d%d%-%d%d)=(%d+)/(%d+)") do
+            a, t = tonumber(a), tonumber(t)
+            if key >= cutoff and t > 0 and a <= t then
+                local rec = days[key] or { active = 0, total = 0, who = {} }
+                days[key] = rec
+                rec.shared = math.max(rec.shared or 0, a)
+                rec.total = math.max(rec.total, t)
+            end
+        end
+        if GuildOS.RefreshRosterUI then GuildOS:RefreshRosterUI() end
+    end)
+end
+
+-- Answer to a guildmate's login request (CommSystem:_Answer, itself held to one answer every two minutes):
+-- hand on what only this client may be holding. The leaders' shared records were only sent when the
+-- leader logged in, so a member who logged in later waited for the next login of each of them.
+-- Everyone sends their check-in and the lists of who has OutlawOS and the daily activity; those who may
+-- edit a record send it again, and a receiver keeps it only if the sender has the right to send it.
+function EKO:AnswerRequest()
+    C_Timer.After(5 + math.random() * 15, function()
+        GuildOS:SafeCall(function()
+            EKO:SayHello("hello")
+            EKO:ShareList()
+            if not GuildOS.SyncService then return end
+            local db = EKO:DB()
+            if GuildOS:IsOfficer() then
+                if GuildOS.WebExtras and GuildOS.WebExtras.PublishCfg then GuildOS.WebExtras.PublishCfg() end   -- what goes on the site
+                for kind, rec in pairs(db and db.shared or {}) do
+                    GuildOS.SyncService:Publish("ekomisc", "set", { kind = kind, rev = rec.rev, by = rec.by, data = rec.data }, { priority = "BULK" })
+                end
+                local b = EKO:Bounties()
+                if b then sendBounty(b) end
+            end
+            if EKO:CanEditAbout() then
+                local a = EKO:AboutStored()
+                if a then sendAbout(a) end
+                local g = db and db.gazette
+                if g and g.text then
+                    GuildOS.SyncService:Publish("ekogazette", "set", { week = g.week, text = g.text, rev = g.rev, by = g.by }, { priority = "BULK" })
+                end
+            end
+        end)
     end)
 end
 

@@ -58,6 +58,47 @@ local function W()
 end
 WE.Data = W
 
+----------------------------------------------------------------------
+-- What goes on the site, shared among officers (domain "webcfg"): the share switches and the hidden names
+-- are the guild's, so whichever officer publishes sends the same roster. The newest change wins.
+----------------------------------------------------------------------
+function WE.PublishCfg()
+    local w = W()
+    if not w or not GuildOS.SyncService or not GuildOS:IsOfficer() then return end
+    local hidden = {}
+    for n in pairs(w.hidden) do hidden[#hidden + 1] = n end
+    table.sort(hidden)
+    local share = {}
+    for k, v in pairs(w.share) do if v == false then share[#share + 1] = k end end   -- the ones left out
+    table.sort(share)
+    GuildOS.SyncService:Publish("webcfg", "set", { rev = w.cfgRev or 0, hidden = hidden, off = share }, { priority = "BULK" })
+end
+
+-- A change made here: stamp it and send it.
+local function cfgChanged()
+    local w = W()
+    if not w then return end
+    w.cfgRev = math.max(now(), (w.cfgRev or 0) + 1)
+    WE.PublishCfg()
+end
+
+if GuildOS.SyncService then
+    GuildOS.SyncService.GUILD_ONLY_DOMAINS.webcfg = true
+    GuildOS.SyncService:On("webcfg", function(env, sender)
+        local d = env and env.data
+        if type(d) ~= "table" or type(d.rev) ~= "number" or type(d.hidden) ~= "table" or type(d.off) ~= "table" then return end
+        if not GuildOS:IsOfficerByName(sender) then return end
+        local w = W()
+        if not w or d.rev <= (w.cfgRev or 0) then return end
+        w.cfgRev = d.rev
+        w.hidden = {}
+        for _, n in ipairs(d.hidden) do if type(n) == "string" and #n < 40 then w.hidden[n] = true end end
+        for k in pairs(w.share) do w.share[k] = nil end
+        for _, k in ipairs(d.off) do if type(k) == "string" and #k < 40 then w.share[k] = false end end
+        if GuildOS.WebPanelRefresh then GuildOS:SafeCall(GuildOS.WebPanelRefresh) end
+    end)
+end
+
 local function companionOn()
     local co = GuildOS.Companion
     return (co and co:IsEnabled()) and true or false
@@ -619,9 +660,10 @@ function WE.Build(panel, parent)
     shareBtns[#shareBtns + 1] = rosterBtn
     for _, spec in ipairs(SHARE_ITEMS) do
         local key, label = spec[1], spec[2]
-        local b = mkButton("", 190, L["Click to include or leave out of what this client publishes."], function()
+        local b = mkButton("", 190, L["Click to include or leave out of what officers publish. The choice is shared between officers."], function()
             local w = W(); if not w then return end
             w.share[key] = (w.share[key] == false) and true or false
+            cfgChanged()
             panel:Refresh()
         end)
         b.shareKey, b.shareLabel = key, label
@@ -633,12 +675,13 @@ function WE.Build(panel, parent)
     -- Kept off the site
     titleItem(L["KEPT OFF THE SITE"])
     local hideBox = UI:CreateInput(ex, 160, 20)
-    local hideBtn = mkButton(L["Hide name"], 90, L["Leaves this name out of the roster this client publishes."], function()
+    local hideBtn = mkButton(L["Hide name"], 90, L["Leaves this name out of the roster every officer publishes."], function()
         local w = W(); if not w then return end
         local name = strtrim(hideBox:GetText() or "")
         name = shortName(name)
         if name == "" then return end
         w.hidden[name] = true
+        cfgChanged()
         hideBox:SetText("")
         panel:Refresh()
     end)
@@ -653,7 +696,7 @@ function WE.Build(panel, parent)
     })
     local _, hiddenPool = poolItem(HIDDEN_ROWS, true)
     local _, hiddenNote = textItem(9)
-    hiddenNote:SetText(L["Hides a name from the roster this client sends. Another officer's publish can still include them."])
+    hiddenNote:SetText(L["Hides a name from the roster every officer sends. The list is shared between officers."])
 
     ----------------------------------------------------------------
     -- RAID TOOLS
@@ -854,7 +897,7 @@ function WE.Build(panel, parent)
                 row.b1.wanted = false
                 row.b2.wanted = true
                 row.b2.label:SetText("x")
-                row.b2:SetScript("OnClick", function() w.hidden[n] = nil; panel:Refresh() end)
+                row.b2:SetScript("OnClick", function() w.hidden[n] = nil; cfgChanged(); panel:Refresh() end)
             else
                 row.fs:SetText("")
             end

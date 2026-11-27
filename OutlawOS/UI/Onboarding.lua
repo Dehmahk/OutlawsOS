@@ -104,7 +104,12 @@ local function BuildFrame()
     -- the game's red button) and what it is; the chosen one marked as every selection is.
     local CARD_W, CARD_H, CARD_GAP = 188, 112, 16
     local cards = {}
-    for i, id in ipairs(Style.ORDER) do
+    -- The first-run screen offers the two looks; the flat themes are picked later in Settings.
+    local onboardIds = {}
+    for _, sid in ipairs(Style.ORDER) do
+        if not (Style.THEMES and Style.THEMES[sid]) then onboardIds[#onboardIds + 1] = sid end
+    end
+    for i, id in ipairs(onboardIds) do
         local card = UI:CreateButton(f, "", CARD_W, CARD_H)
         card:SetPoint("TOPLEFT", 24 + (i - 1) * (CARD_W + CARD_GAP), -118)
         card.id = id

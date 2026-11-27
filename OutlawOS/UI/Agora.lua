@@ -442,8 +442,8 @@ function GuildOS:CreateNowPanel(panel, win)
     end)
     updTitle:Hide(); updText:Hide(); updBtn:Hide()
 
-    -- Next raid: its name, when and who is going, the countdown, the way to the calendar.
-    local raidTitle = UI:CreateSectionTitle(column, L["Next raid"], true)
+    -- Next event (any calendar event, not only raids): its name, when and who is going, the countdown, the way to the calendar.
+    local raidTitle = UI:CreateSectionTitle(column, L["Next event"], true)
     raidTitle:SetPoint("TOPLEFT", 0, 0)
     local raidName = newText(column, nil, "memberName", C.text)
     local raidMeta = newText(column, nil, "caption", C.label)
@@ -519,7 +519,7 @@ function GuildOS:CreateNowPanel(panel, win)
             raidMeta:SetText(GuildOS:LocalDate(L["%a %d %b, %H:%M"], raid.when) .. DOT
                 .. string.format(L["%d going"], comp.yes))
         else
-            raidMeta:SetText(L["No raid scheduled."])
+            raidMeta:SetText(L["No event scheduled."])
         end
         place(raidMeta, y, true)
         y = y + lineH(raidMeta, 10) + LINE_GAP + 4

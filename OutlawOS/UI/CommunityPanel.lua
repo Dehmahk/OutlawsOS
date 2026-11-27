@@ -116,7 +116,7 @@ local function showCopy(text)
         f:SetPoint("CENTER")
         f:SetFrameStrata("DIALOG")
         f:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = UI:Edge(f) })
-        f:SetBackdropColor(0.058, 0.058, 0.075, 0.98)
+        f:SetBackdropColor(GuildOS.Colors.bg.r, GuildOS.Colors.bg.g, GuildOS.Colors.bg.b, 0.98)
         f:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, C.border.a)
         f:EnableMouse(true)
         f:SetMovable(true)
@@ -514,7 +514,7 @@ local function tipOn(frame, text)
     frame:HookScript("OnEnter", function(self)
         if not GameTooltip then return end
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine(text, C.text.r, C.text.g, C.text.b, true)
+        GameTooltip:AddLine(text, GuildOS.Tip.text.r, GuildOS.Tip.text.g, GuildOS.Tip.text.b, true)
         GameTooltip:Show()
     end)
     frame:HookScript("OnLeave", function()
@@ -1195,7 +1195,7 @@ local function BuildPollsSub(panel)
         frame:HookScript("OnEnter", function(self)
             if not GameTooltip then return end
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine(title, C.text.r, C.text.g, C.text.b, true)
+            GameTooltip:AddLine(title, GuildOS.Tip.text.r, GuildOS.Tip.text.g, GuildOS.Tip.text.b, true)
             for _, line in ipairs(lines) do
                 GameTooltip:AddLine(line, soft.r, soft.g, soft.b, true)
             end
@@ -1588,7 +1588,7 @@ local function markName(line, first)
         local s, e = low:find(needle, pos, true)
         if not s then break end
         out[#out + 1] = line:sub(pos, s - 1)
-        out[#out + 1] = "|cffe6b84a" .. line:sub(s, e) .. "|r"
+        out[#out + 1] = GuildOS.GoldEsc() .. line:sub(s, e) .. "|r"
         pos = e + 1
     end
     out[#out + 1] = line:sub(pos)
@@ -1600,7 +1600,7 @@ local function memberTip(frame, name)
     if not GameTooltip or not name then return end
     local soft = C.textSoft
     GameTooltip:SetOwner(frame, "ANCHOR_TOP")
-    GameTooltip:AddLine(name, C.text.r, C.text.g, C.text.b)
+    GameTooltip:AddLine(name, GuildOS.Tip.text.r, GuildOS.Tip.text.g, GuildOS.Tip.text.b)
     local m = GuildOS.db and GuildOS.db.members and GuildOS.db.members[GuildOS:LocalMemberKey(name)]
     if type(m) == "table" then
         if m.level then GameTooltip:AddLine(string.format(L["Level %d"], m.level), soft.r, soft.g, soft.b) end
@@ -2102,7 +2102,7 @@ end
 ----------------------------------------------------------------------
 -- EKO patch: ABOUT THE OUTLAWS sub-panel (static guild info, this client only)
 ----------------------------------------------------------------------
-local EKO_GOLD = "|cffe6b84a"
+local EKO_GOLD = GuildOS.GoldEsc()
 local ABOUT_SECTIONS = {
     { title = "Who We Are", lines = {
         "Eastern Kingdoms Outlaws is a casual, 21+ Alliance guild on WoW: Forever. We're here for leveling, questing, dungeons, raids and just hanging out. Casual at heart, but hardcore players are welcome too.",

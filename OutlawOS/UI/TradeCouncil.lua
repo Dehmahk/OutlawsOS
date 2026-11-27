@@ -283,7 +283,7 @@ local function fillDetail(o)
     elseif o.closed then
         status = "|cff999999" .. L["Withdrawn."] .. "|r"
     elseif o.award then
-        status = "|cffffd100" .. string.format(L["Awarded to %s: waiting for the trade."], o.award.winner) .. "|r"
+        status = GuildOS.GoldEsc() .. string.format(L["Awarded to %s: waiting for the trade."], o.award.winner) .. "|r"
     else
         status = o.free and L["Free roll: the holder or an officer awards it."] or L["An officer awards it."]
     end

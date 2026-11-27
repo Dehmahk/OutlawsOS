@@ -181,7 +181,7 @@ function Helpers:CreateDialogFrame(name, width, height)
         edgeFile = WHITE,
         edgeSize = self:Edge(f),
     })
-    f:SetBackdropColor(0.058, 0.058, 0.075, 0.98)
+    f:SetBackdropColor(GuildOS.Colors.bg.r, GuildOS.Colors.bg.g, GuildOS.Colors.bg.b, 0.98)
     f:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, C.border.a)
     self:StylePopup(f)
     f:SetFrameStrata("DIALOG")
@@ -1154,7 +1154,7 @@ function Helpers:AddTooltip(frame, title, lines)
     frame:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         if title then
-            GameTooltip:AddLine(title, C.text.r, C.text.g, C.text.b)
+            GameTooltip:AddLine(title, GuildOS.Tip.text.r, GuildOS.Tip.text.g, GuildOS.Tip.text.b)
         end
         if lines then
             for _, line in ipairs(lines) do
@@ -1268,7 +1268,7 @@ local function newDialog(i)
     f:EnableMouse(true)
     -- EKO patch: a solid backdrop, so the popup never blends into whatever sits under it.
     f:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = GuildOS.UI:Edge(f) })
-    f:SetBackdropColor(0.058, 0.058, 0.075, 0.98)
+    f:SetBackdropColor(GuildOS.Colors.bg.r, GuildOS.Colors.bg.g, GuildOS.Colors.bg.b, 0.98)
     f:SetClampedToScreen(true)
     Helpers:StylePopup(f)
     f:Hide()

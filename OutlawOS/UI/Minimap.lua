@@ -193,12 +193,12 @@ function GuildOS:CreateMinimapButton()
         local ok, pending = false, 0
         if orders and IsInGuild() then ok, pending = pcall(orders.InboxCount, orders) end
         if ok and (pending or 0) > 0 then
-            GameTooltip:AddLine(string.format(L["Craft orders waiting for you: %d (right-click)"], pending), C.ok.r, C.ok.g, C.ok.b)
+            GameTooltip:AddLine(string.format(L["Craft orders waiting for you: %d (right-click)"], pending), GuildOS.Tip.ok.r, GuildOS.Tip.ok.g, GuildOS.Tip.ok.b)
         end
         if GuildOS.minimapAlert and IsInGuild() then
-            GameTooltip:AddLine(L["Somebody asked to join the guild: right-click for the list"], C.ok.r, C.ok.g, C.ok.b)
+            GameTooltip:AddLine(L["Somebody asked to join the guild: right-click for the list"], GuildOS.Tip.ok.r, GuildOS.Tip.ok.g, GuildOS.Tip.ok.b)
         elseif GuildOS.minimapAlert then
-            GameTooltip:AddLine(L["A guild is recruiting nearby: left-click to look"], C.ok.r, C.ok.g, C.ok.b)
+            GameTooltip:AddLine(L["A guild is recruiting nearby: left-click to look"], GuildOS.Tip.ok.r, GuildOS.Tip.ok.g, GuildOS.Tip.ok.b)
         end
         GameTooltip:Show()
     end)

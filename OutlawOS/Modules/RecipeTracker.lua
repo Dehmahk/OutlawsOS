@@ -775,7 +775,7 @@ function RecipeTracker:HookTooltips()
         local shown, rest, restOnline = RecipeTracker.TooltipPick(crafters, presence)
 
         tooltip:AddLine(" ")
-        tooltip:AddLine(label or L["Crafted by:"], C.accent.r, C.accent.g, C.accent.b)
+        tooltip:AddLine(label or L["Crafted by:"], GuildOS.Tip.accent.r, GuildOS.Tip.accent.g, GuildOS.Tip.accent.b)
         for _, c in ipairs(shown) do
             local cc = c.class and GuildOS.ClassColors[c.class] or C.white
             local p = presence[c.playerName]
@@ -790,7 +790,7 @@ function RecipeTracker:HookTooltips()
         end
         local hint = GuildOS.CraftOrders and L["Alt-click to order"] or L["/gos craft for all"]
         if rest > 0 or GuildOS.CraftOrders then
-            tooltip:AddLine("  " .. more .. hint, C.textDim.r, C.textDim.g, C.textDim.b)
+            tooltip:AddLine("  " .. more .. hint, GuildOS.Tip.textDim.r, GuildOS.Tip.textDim.g, GuildOS.Tip.textDim.b)
         end
 
         tooltip:Show()
@@ -812,7 +812,7 @@ function RecipeTracker:HookTooltips()
         -- WoW: Forever knows every recipe, so it can say when nobody in the guild makes this (issue #33).
         if not crafters and GuildOS.ProfDirectory and #GuildOS.ProfDirectory.ItemRecipes(itemId) > 0 then
             tooltip:AddLine(" ")
-            tooltip:AddLine(L["Nobody in the guild crafts this"], C.textDim.r, C.textDim.g, C.textDim.b)
+            tooltip:AddLine(L["Nobody in the guild crafts this"], GuildOS.Tip.textDim.r, GuildOS.Tip.textDim.g, GuildOS.Tip.textDim.b)
             tooltip:Show()
         end
     end

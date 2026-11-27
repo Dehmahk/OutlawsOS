@@ -166,10 +166,10 @@ end
 -- field to the Members bar, Core Sign-up to the Raids screen. The links drop
 -- lowest priority first as the window narrows; the version stays.
 ----------------------------------------------------------------------
-local SITE = "https://guildos.me"
+local SITE = "https://discord.gg/AdD9kFnQWu"   -- the Outlaws' Discord invite
 local FOOTER = {
-    { key = "site",     label = "guildos.me", priority = 100 },   -- its click is the copy box, below
-    { key = "help",     label = "/gos help",  priority = 80,
+    { key = "site",     label = "Discord", priority = 100 },   -- its click is the copy box, below
+    { key = "help",     label = "/outlawos help", priority = 80,
       run = function() if SlashCmdList.GUILDOS then SlashCmdList.GUILDOS("help") end end },
     { key = "blizzard", label = L["Blizzard"], priority = 50,
       run = function() if GuildOS.OpenBlizzardGuildUI then GuildOS:OpenBlizzardGuildUI() end end },
@@ -230,6 +230,7 @@ local function createWindow()
     barLine:SetPoint("BOTTOMRIGHT", 0, 0)
     -- On the game's metal frame the bar is the frame's own top edge; a line across it crossed the metal
     -- sides (#148).
+    barLine:SetVertexColor(C.gold.r, C.gold.g, C.gold.b, 0.6)   -- the Outlaw brass rule
     barLine:SetShown(barLook ~= "none")
     f.titleBar = bar
 
@@ -245,6 +246,22 @@ local function createWindow()
     local wordmark = text(18, "wordmark", C.gold)
     wordmark:SetPoint("LEFT", (GuildOS.EKO and GuildOS.EKO.WordmarkX and GuildOS.EKO:WordmarkX()) or 10, 0)  -- EKO patch: room for the emblem
     wordmark:SetText("OutlawOS")  -- EKO patch
+
+    -- The Wind & Blade emblem by the wordmark on every style. The leather theme brings its own, larger one.
+    local EMBLEM_W = 22
+    local emblem = bar:CreateTexture(nil, "ARTWORK")
+    emblem:SetSize(EMBLEM_W, EMBLEM_W)
+    emblem:SetPoint("LEFT", 8, 0)
+    emblem:SetTexture("Interface\\AddOns\\OutlawOS\\Media\\emblem")
+    f.barEmblem = emblem
+    local function wordX()
+        local own = GuildOS.EKO and GuildOS.EKO.WordmarkX and GuildOS.EKO:WordmarkX()
+        if GuildOS.EKO and GuildOS.EKO.themeOn and own then emblem:Hide(); return own end
+        emblem:Show()
+        return 8 + EMBLEM_W + 6
+    end
+    wordmark:ClearAllPoints()
+    wordmark:SetPoint("LEFT", wordX(), 0)
 
     local close = UI:TitleBarButton(bar, "close")
     close:SetScript("OnClick", function() f:Hide() end)
@@ -270,6 +287,95 @@ local function createWindow()
     local syncBtn = barButton(L["Sync"], function() if GuildOS.CommSystem then GuildOS.CommSystem:FullSync() end end)
     f.searchButton, f.syncButton = searchBtn, syncBtn
 
+    -- A bar button's caption and width together.
+    local function setCaption(btn, s)
+        btn.label:SetText(s)
+        btn:SetWidth(math.max(24, math.ceil(btn.label:GetStringWidth()) + 12))
+    end
+    -- Brass: the caption (and its underline) rests in gold, lights up on hover as every ghost does.
+    local function brass(btn)
+        local function paint()
+            btn.label:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
+            if btn.underline then btn.underline:SetVertexColor(C.gold.r, C.gold.g, C.gold.b, 1) end
+        end
+        paint()
+        btn:HookScript("OnLeave", paint)
+        btn:HookScript("OnShow", paint)
+    end
+    local function tip(btn, build)
+        btn:HookScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+            build(GameTooltip)
+            GameTooltip:Show()
+        end)
+        btn:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+    local function nowSec() return (GetServerTime and GetServerTime()) or time() end
+
+    -- What needs me: a gold dot and the count, opening the Now tab. Hover lists the first few.
+    local needsList, needsAt = {}, -100
+    local needsBtn = barButton("", function() f:SetActiveTab(HOME, true) end)
+    brass(needsBtn)
+    needsBtn:Hide()
+    tip(needsBtn, function(t)
+        t:AddLine(L["Needs me"], C.gold.r, C.gold.g, C.gold.b)
+        for i = 1, math.min(6, #needsList) do t:AddLine(needsList[i].text, 1, 1, 1, true) end
+        if #needsList > 6 then t:AddLine("+" .. (#needsList - 6), 0.7, 0.7, 0.7) end
+    end)
+    f.needsButton = needsBtn
+
+    -- The next calendar event and when: opens the calendar on it.
+    local nextEv
+    local evBtn = barButton("", function() UI:OpenWindow("guild", "calendar", nextEv and nextEv.when) end)
+    evBtn:Hide()
+    tip(evBtn, function(t)
+        if not nextEv then return end
+        t:AddLine(nextEv.title or "?", C.gold.r, C.gold.g, C.gold.b)
+        t:AddLine(GuildOS:LocalDate(L["%a %d %b, %H:%M"], nextEv.when), 0.8, 0.8, 0.8)
+    end)
+    f.nextEventButton = evBtn
+
+    -- The Outlaw Discord, as in the footer: a copy box with the invite.
+    local discordBtn = barButton("Discord", function() GuildOS:ShowExportPopup(L["Discord invite"], "https://discord.gg/AdD9kFnQWu") end)
+    f.discordButton = discordBtn
+
+    -- A bell: group notices (and their sound) quiet for an hour, or back on.
+    local bellBtn = UI:SetButtonVariant(UI:TitleBarButton(bar, "text", "", 26, BAR_BTN_H), "ghost")
+    local bellIcon = bellBtn:CreateTexture(nil, "OVERLAY")
+    bellIcon:SetSize(14, 14)
+    bellIcon:SetPoint("CENTER")
+    bellIcon:SetTexture("Interface\\Icons\\INV_Misc_Bell_01")
+    bellIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    local function quietEnd()
+        local st = GuildOS.GroupToastState and GuildOS.GroupToastState()
+        local q = st and st.quietUntil or 0
+        return q > nowSec() and q or nil
+    end
+    local function paintBell()
+        local q = quietEnd()
+        bellIcon:SetDesaturated(not q)
+        bellIcon:SetAlpha(q and 1 or 0.55)
+    end
+    bellBtn:SetScript("OnClick", function()
+        local st = GuildOS.GroupToastState and GuildOS.GroupToastState()
+        if not st then return end
+        st.quietUntil = quietEnd() and 0 or (nowSec() + 3600)
+        paintBell()
+        if GameTooltip:IsOwned(bellBtn) then GameTooltip:ClearLines(); f.bellTip(GameTooltip); GameTooltip:Show() end
+    end)
+    f.bellTip = function(t)
+        local q = quietEnd()
+        t:AddLine(L["Group notices"], C.gold.r, C.gold.g, C.gold.b)
+        if q then
+            t:AddLine("Quiet until " .. date("%H:%M", q) .. ". Click to turn them back on.", 1, 1, 1, true)
+        else
+            t:AddLine("On. Click to quiet them (and their sound) for an hour.", 1, 1, 1, true)
+        end
+    end
+    tip(bellBtn, f.bellTip)
+    paintBell()
+    f.bellButton = bellBtn
+
     local sync = text(10, "caption", C.label)
     sync:SetJustifyH("RIGHT")
     f.syncText = sync
@@ -277,6 +383,56 @@ local function createWindow()
     local meta = text(10, "caption", C.label)
     meta:SetJustifyH("LEFT")
     f.metaText = meta
+
+    -- Officer+ online (Guild Master, Co-Guild Master, Officer, Raid Marshal): how many, and who.
+    local OFFICER_RANKS = { ["Guild Master"] = true, ["Co-Guild Master"] = true, ["Officer"] = true, ["Raid Marshal"] = true }
+    local function officersOnline()
+        local n, names = 0, {}
+        for i = 1, GetNumGuildMembers() or 0 do
+            local name, rank, _, _, _, _, _, _, isOnline = GetGuildRosterInfo(i)
+            if isOnline and rank and OFFICER_RANKS[rank] then
+                n = n + 1
+                names[#names + 1] = name and (name:match("^([^-]+)") or name) or "?"
+            end
+        end
+        return n, names
+    end
+
+    -- Hover the guild line: the guild's renown (and what is nearest to earned) and the officers online.
+    -- It forwards the drag, so the bar still moves the window from here.
+    local metaHit = CreateFrame("Frame", nil, bar)
+    metaHit:SetFrameLevel(bar:GetFrameLevel() + 2)
+    metaHit:SetPoint("TOPLEFT", meta, "TOPLEFT", 0, 4)
+    metaHit:SetPoint("BOTTOMRIGHT", meta, "BOTTOMRIGHT", 0, -4)
+    metaHit:EnableMouse(true)
+    metaHit:RegisterForDrag("LeftButton")
+    metaHit:SetScript("OnDragStart", bar:GetScript("OnDragStart"))
+    metaHit:SetScript("OnDragStop", bar:GetScript("OnDragStop"))
+    metaHit:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine((GetGuildInfo("player") or "Guild OS"), C.gold.r, C.gold.g, C.gold.b)
+        local A = GuildOS.Achievements
+        local level, points = A and A:Renown()
+        if level then
+            local _, title = A:Insignia()
+            GameTooltip:AddLine(string.format(L["renown %d"], level) .. (title and (" · " .. title) or ""), 1, 1, 1)
+            if points and points > 0 then GameTooltip:AddLine(points .. " renown", 0.7, 0.7, 0.7) end
+            local nxt = A:Next()
+            if #nxt > 0 then
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine("Closest to earned", 0.7, 0.7, 0.7)
+                for i = 1, math.min(3, #nxt) do
+                    GameTooltip:AddDoubleLine(nxt[i].title, nxt[i].current .. "/" .. nxt[i].target, 1, 1, 1, C.gold.r, C.gold.g, C.gold.b)
+                end
+            end
+        end
+        local n, names = officersOnline()
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine(n .. " officer" .. (n == 1 and "" or "s") .. " online", C.ok.r, C.ok.g, C.ok.b)
+        for i = 1, math.min(8, #names) do GameTooltip:AddLine(names[i], 0.85, 0.85, 0.85) end
+        GameTooltip:Show()
+    end)
+    metaHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     local summary = text(11, nil, C.text)
     summary:SetPoint("LEFT", wordmark, "RIGHT", 10, 0)
@@ -345,6 +501,7 @@ local function createWindow()
     foot:SetPoint("BOTTOMRIGHT", 0, footLift)
     foot:SetHeight(FOOT_H)
     local footLine = UI:CreateSeparator(foot)
+    footLine:SetVertexColor(C.gold.r, C.gold.g, C.gold.b, 0.6)   -- the Outlaw brass rule
     footLine:SetPoint("TOPLEFT", sideL, 0)
     footLine:SetPoint("TOPRIGHT", -sideR, 0)
     f.footer = foot
@@ -356,9 +513,9 @@ local function createWindow()
         f.ekoMotto = motto
     end
 
-    -- WoW opens no browser: guildos.me puts the address in a read-only box over the links, selected
+    -- WoW opens no browser: the Discord link puts the address in a read-only box over the links, selected
     -- for Ctrl+C, until it lets go (the Web tab's idiom).
-    local siteBox = UI:CreateInput(foot, 150, 18)
+    local siteBox = UI:CreateInput(foot, 230, 18)
     siteBox:SetFrameLevel(foot:GetFrameLevel() + 5)
     siteBox:SetPoint("LEFT", foot, "LEFT", FOOT_PAD - LINK_PAD, 0)
     siteBox:SetScript("OnEnterPressed", function(s) s:ClearFocus() end)
@@ -383,6 +540,14 @@ local function createWindow()
         local link = UI:SetButtonVariant(UI:CreateButton(foot, item.label, 40, 18), "ghost")
         link:SetWidth(math.ceil(link.label:GetStringWidth()) + 2 * LINK_PAD)
         link:SetScript("OnClick", item.run or showSite)
+        -- Outlaw brass: the link and its underline rest in gold, and light up on hover as before.
+        local function brass()
+            link.label:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
+            if link.underline then link.underline:SetVertexColor(C.gold.r, C.gold.g, C.gold.b, 1) end
+        end
+        brass()
+        link:HookScript("OnLeave", brass)
+        link:HookScript("OnShow", brass)
         link:Hide()
         f.footItems[item.key] = link
     end
@@ -390,8 +555,9 @@ local function createWindow()
     local version = foot:CreateFontString(nil, "OVERLAY")
     GuildOS:ApplyFont(version, 10, "caption")
     version:SetShadowOffset(0, 0)
-    version:SetTextColor(C.label.r, C.label.g, C.label.b)
-    version:SetText("v" .. tostring(GuildOS.VERSION or ""))
+    version:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
+    version:SetAlpha(0.8)
+    version:SetText("OutlawOS v" .. tostring(GuildOS.VERSION or ""))
     version:SetPoint("RIGHT", foot, "RIGHT", -(FOOT_PAD + GRIP), 0)   -- the grip keeps the corner
     f.versionText = version
 
@@ -529,7 +695,11 @@ local function createWindow()
     -- came and went with the countdown's width would jump on every tick.
     local TITLE_ITEMS = {
         { key = "meta",   frame = meta,      priority = 100, required = true, weight = 1 },
+        { key = "needs",  frame = needsBtn,  priority = 90 },
+        { key = "event",  frame = evBtn,     priority = 65 },
         { key = "time",   frame = sync,      priority = 40,  text = true },
+        { key = "discord", frame = discordBtn, priority = 35 },
+        { key = "bell",   frame = bellBtn,   priority = 50 },
         { key = "search", frame = searchBtn, priority = 60 },
         { key = "sync",   frame = syncBtn,   priority = 80 },
     }
@@ -541,10 +711,20 @@ local function createWindow()
             for _, item in ipairs(TITLE_ITEMS) do item.frame:Hide() end
             return
         end
-        local left = ((GuildOS.EKO and GuildOS.EKO.WordmarkX and GuildOS.EKO:WordmarkX()) or 10) + math.ceil(wordmark:GetStringWidth()) + 10
+        wordmark:ClearAllPoints()
+        wordmark:SetPoint("LEFT", wordX(), 0)
+        local left = wordX() + math.ceil(wordmark:GetStringWidth()) + 10
         local right = CLOSE_X + close:GetWidth() + 2 + minimise:GetWidth() + TITLE_GAP
+        -- Items with nothing to say (no event, nothing needing me) take no room and stay hidden.
+        local active = {}
+        for _, item in ipairs(TITLE_ITEMS) do
+            local on = true
+            if item.key == "needs" then on = item.frame.hasNeeds == true
+            elseif item.key == "event" then on = f.hasNextEvent == true end
+            if on then active[#active + 1] = item else item.frame:Hide() end
+        end
         local spec = {}
-        for i, item in ipairs(TITLE_ITEMS) do
+        for i, item in ipairs(active) do
             local min = (item.key == "meta" and META_MIN)
                 or (item.text and math.ceil(item.frame:GetStringWidth())) or item.frame:GetWidth()
             spec[i] = { key = item.key, min = min, weight = item.weight or 0, priority = item.priority,
@@ -553,7 +733,7 @@ local function createWindow()
         -- Shown or not, never hidden and shown again: this runs on the 10s tick and every roster update,
         -- and a button hidden mid-press loses its click (#377).
         for i, col in ipairs(UI:ResolveColumns(spec, w - left - right, TITLE_GAP)) do
-            local item = TITLE_ITEMS[i]
+            local item = active[i]
             item.frame:SetShown(col.shown)
             if col.shown then
                 item.frame:ClearAllPoints()
@@ -573,9 +753,33 @@ local function createWindow()
             local badge = level and GuildOS.Achievements:Insignia()
             local renown = level and (DOT .. (badge and ("|T" .. badge .. ":14:14|t ") or "")
                 .. string.format(L["renown %d"], level)) or ""
-            meta:SetText((GetGuildInfo("player") or "Guild OS") .. DOT .. online .. renown)
+            local offs = officersOnline()
+            local officers = (offs > 0 and not A:RosterLoading()) and (DOT .. offs .. " officer" .. (offs == 1 and "" or "s")) or ""
+            meta:SetText((GetGuildInfo("player") or "Guild OS") .. DOT .. online .. officers .. renown)
             local last = A:LastSync()
             sync:SetText(last and string.format(L["sync %s"], GuildOS:TimeAgo(last)) or L["not synced yet"])
+            -- Fresh sync green, ageing amber, stale or never red.
+            local age = last and (nowSec() - last)
+            local sc = (not last and C.danger) or (age <= 900 and C.ok) or (age <= 7200 and C.label)
+                or (age <= 43200 and C.warn) or C.danger
+            sync:SetTextColor(sc.r, sc.g, sc.b)
+            -- What needs me, the walk done at most once a minute.
+            if GetTime() - needsAt > 60 then needsAt = GetTime(); needsList = A:NeedsMe() or {} end
+            if #needsList > 0 then
+                setCaption(needsBtn, "\226\128\162 " .. #needsList)   -- a gold dot and the count
+            end
+            needsBtn.hasNeeds = #needsList > 0
+            -- The next event and when.
+            local cal = GuildOS.Calendar
+            nextEv = nil
+            if cal and cal.GetUpcoming and GuildOS.db and GuildOS.db.calendar then nextEv = cal:GetUpcoming(false)[1] end
+            if nextEv then
+                local title = GuildOS.SanitizeUserText and GuildOS:SanitizeUserText(nextEv.title or "?") or (nextEv.title or "?")
+                if GuildOS:Utf8Len(title) > 18 then title = GuildOS:Utf8Head(title, 17) .. "..." end
+                setCaption(evBtn, title .. DOT .. A.Short((nextEv.when or 0) - nowSec()))
+            end
+            self.hasNextEvent = nextEv ~= nil
+            paintBell()
             -- The three numbers walk the officer work, so only while they show.
             if self.band == "bar" then summary:SetText(A:BarText()) end
             self:LayoutTitle()   -- the sync time's width changes with its text (#377)

@@ -1578,7 +1578,7 @@ local function addTooltipLines(tt)
     local need = self:NeedOf(id)
     if have == 0 and not need then return end
     local C = GuildOS.Colors
-    tt:AddDoubleLine(L["Guild bank"], tostring(have), C.gold.r, C.gold.g, C.gold.b, C.text.r, C.text.g, C.text.b)
+    tt:AddDoubleLine(L["Guild bank"], tostring(have), GuildOS.Tip.gold.r, GuildOS.Tip.gold.g, GuildOS.Tip.gold.b, GuildOS.Tip.text.r, GuildOS.Tip.text.g, GuildOS.Tip.text.b)
     local e
     for _, x in ipairs(self:Index().list) do if x.id == id then e = x; break end end
     if e then
@@ -1588,7 +1588,7 @@ local function addTooltipLines(tt)
         table.sort(tabs)
         for _, tab in ipairs(tabs) do parts[#parts + 1] = string.format(L["Tab %d: %d"], tab, e.tabs[tab]) end
         local ts = self:Newest()
-        tt:AddLine(table.concat(parts, " · ") .. " · " .. GuildOS:TimeAgo(ts), C.textSoft.r, C.textSoft.g, C.textSoft.b)
+        tt:AddLine(table.concat(parts, " · ") .. " · " .. GuildOS:TimeAgo(ts), GuildOS.Tip.textSoft.r, GuildOS.Tip.textSoft.g, GuildOS.Tip.textSoft.b)
     end
     if need then
         local col = have >= need and C.ok or C.warn

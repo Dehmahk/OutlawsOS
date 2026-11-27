@@ -169,53 +169,290 @@ function GuildOS:CreateDashboardPanel(panel)
     ------------------------------------------------------------------
     -- Card fills (each clears its body and rebuilds from live data)
     ------------------------------------------------------------------
+    -- The Next Event card (OutlawOS): what the event is, when, who is going and what it still needs, in
+    -- two columns when the card is wide, with the answer along its foot. A block that has no room is left
+    -- out, never squeezed.
+    local KIND_COLOR = {
+        RAID = { 0.85, 0.35, 0.30 }, DUNGEON = { 0.38, 0.58, 0.92 }, PVP = { 0.90, 0.50, 0.18 },
+        FARM = { 0.45, 0.78, 0.38 }, SOCIAL = { 0.90, 0.74, 0.30 }, OTHER = { 0.62, 0.64, 0.74 },
+    }
+    local PALETTE_RGB = {
+        RED = { 0.85, 0.35, 0.30 }, ORANGE = { 0.90, 0.50, 0.18 }, GOLD = { 0.90, 0.74, 0.30 },
+        GREEN = { 0.45, 0.78, 0.38 }, BLUE = { 0.38, 0.58, 0.92 }, PURPLE = { 0.66, 0.48, 0.88 },
+    }
+    local ROLE_NAME = { TANK = "Tank", HEALER = "Healer", DPS = "DPS" }
+    local ROLE_LETTER = { TANK = "T", HEALER = "H", DPS = "D" }
+    local DISCORD_URL = "https://discord.gg/AdD9kFnQWu"
+    local remindedAt = {}   -- event id -> when this client last reminded the guild
+
+    local function bigClock(dt)
+        if dt <= 0 then return L["now"] end
+        local d = math.floor(dt / 86400)
+        local h = math.floor((dt % 86400) / 3600)
+        local m = math.floor((dt % 3600) / 60)
+        if d > 0 then return string.format("%dd %dh", d, h) end
+        if h > 0 then return string.format("%dh %dm", h, m) end
+        return string.format("%dm", math.max(1, m))
+    end
+
+    local function shortName(n) return (tostring(n or "?"):match("^([^-]+)")) or tostring(n or "?") end
+
+    -- Online guild members who have not answered this event (what a reminder reaches).
+    local function unansweredOnline(e)
+        local n = 0
+        for i = 1, GetNumGuildMembers() or 0 do
+            local name, _, _, _, _, _, _, _, isOnline = GetGuildRosterInfo(i)
+            if isOnline and name then
+                local key = GuildOS:GetPlayerKey(shortName(name), GetRealmName())
+                if not (e.rsvps and e.rsvps[key]) then n = n + 1 end
+            end
+        end
+        return n
+    end
+
     local function fillNext(card)
         local body, w = card.body, card.innerW
         clearBody(body)
         local cal = CAL()
         local e = cal and cal:NextEvent()
+        if card.kindBar then card.kindBar:Hide() end
         if not e then
             text(body, L["No upcoming events scheduled."], 0, 0, w, C.textSoft, nil, true)
             return
         end
+        local H = card.innerH or 150
+        local web = cal:IsWebEvent(e)
+        local FOOT = web and 20 or 34          -- the answer's row, kept clear
+        local ROW = 16
+        local function fits(y, h) return y + h <= H - FOOT end
+
+        -- The kind's (or the event's own) colour: an edge bar down the card and a square by the title.
+        local rgb = (e.color and PALETTE_RGB[e.color]) or KIND_COLOR[e.kind or "RAID"] or KIND_COLOR.OTHER
+        if not card.kindBar then
+            card.kindBar = card:CreateTexture(nil, "ARTWORK")
+            card.kindBar:SetPoint("TOPLEFT", 1, -1)
+            card.kindBar:SetPoint("BOTTOMLEFT", 1, 1)
+            card.kindBar:SetWidth(3)
+        end
+        card.kindBar:SetColorTexture(rgb[1], rgb[2], rgb[3], 1)
+        card.kindBar:Show()
+
+        local two = w >= 440
+        local colW = two and (math.floor(w * 0.52) - 10) or w
+        local rx = two and (math.floor(w * 0.52) + 6) or 0
+        local rw = two and (w - rx) or w
         local kindTxt = (cal.KindLabel and cal:KindLabel(e.kind)) or ""
-        -- An officer typed it, and it may have come over the wire (#377).
-        text(body, truncate(GuildOS:SanitizeUserText(e.title or "?"), 34), 0, 0, w, C.text, "sectionTitle")
-        local when = GuildOS:LocalDate(L["%a %d %b, %H:%M"], e.when) .. DOT .. fmtCountdown((e.when or 0) - nowT())
-        if kindTxt ~= "" then when = when .. DOT .. kindTxt end
-        text(body, when, 0, 18, w, C.label, "caption")
         local comp = cal:GetComposition(e)
-        text(body, string.format(L["%d going · %d tentative  |  %dT %dH %dD"],
-            comp.yes, comp.tentative, comp.roles.TANK, comp.roles.HEALER, comp.roles.DPS), 0, 38, w, C.textSoft, "tableNum")
+        local dt = (e.when or 0) - nowT()
+        local safe = GuildOS.SanitizeUserText and function(s2, n) return GuildOS:SanitizeUserText(s2, n) end or function(s2) return s2 end
+
+        ---------------- left column ----------------
+        local y = 0
+        local sq = body:CreateTexture(nil, "ARTWORK")
+        sq:SetTexture("Interface\\Buttons\\WHITE8x8")
+        sq:SetSize(8, 8)
+        sq:SetPoint("TOPLEFT", 0, -5)
+        sq:SetVertexColor(rgb[1], rgb[2], rgb[3], 1)
+        text(body, truncate(safe(e.title or "?"), 30), 14, 0, colW - 14, C.text, "sectionTitle")
+        y = 20
+        local when = GuildOS:LocalDate(L["%a %d %b, %H:%M"], e.when)
+        if kindTxt ~= "" then when = when .. DOT .. kindTxt end
+        text(body, when, 0, y, colW, C.label, "caption")
+        y = y + 18
+        -- The countdown, large: the number members check most.
+        local mono = fits(y, 44) and H >= 150
+        if mono then
+            local big = text(body, bigClock(dt), 0, y, colW, dt <= 3 * 3600 and C.gold or C.text, "countdown")
+            y = y + math.max(40, math.ceil(big:GetStringHeight() or 40)) + 4
+        else
+            text(body, fmtCountdown(dt), 0, y, colW, C.text, "memberName")
+            y = y + ROW + 2
+        end
+        -- Who hosts it, and where to meet.
+        local lead = (e.lead and e.lead ~= "" and e.lead) or e.author
+        if lead and fits(y, ROW) then
+            local hosted = L["Hosted by"] .. " " .. safe(shortName(lead), 32)
+            if e.coHost and e.coHost ~= "" then hosted = hosted .. " + " .. safe(shortName(e.coHost), 32) end
+            text(body, truncate(hosted, 44), 0, y, colW, C.textSoft, "caption")
+            y = y + ROW
+        end
+        if e.location and e.location ~= "" and fits(y, ROW) then
+            text(body, truncate(L["Meet at"] .. ": " .. safe(e.location, 48), 46), 0, y, colW, C.textSoft, "caption")
+            y = y + ROW
+        end
+        -- Your answer in words, so it reads without looking at the buttons.
+        local mine = cal:MyRsvp(e)
+        if fits(y, ROW) then
+            local line, col
+            if web then line, col = nil, nil
+            elseif not mine then line, col = L["You have not answered yet."], C.warn
+            elseif mine.status == "yes" then line, col = L["You: going"] .. (mine.role and (" · " .. (ROLE_NAME[mine.role] or mine.role)) or ""), C.ok
+            elseif mine.status == "tentative" then line, col = L["You: tentative"], C.textSoft
+            elseif mine.status == "wait" then line, col = L["You: on standby"], C.warn
+            else line, col = L["You: absent"], C.textSoft end
+            if line then text(body, line, 0, y, colW, col, "caption"); y = y + ROW end
+        end
+        -- Roles against the spots the event asks for: a bar each when it names spots, else the plain counts.
+        local leftEnd = y
+        local slots = e.slots
+        if fits(y + 4, 3 * ROW) and not web then
+            y = y + 4
+            for _, role in ipairs({ "TANK", "HEALER", "DPS" }) do
+                local have, need = comp.roles[role] or 0, slots and slots[role] or nil
+                text(body, ROLE_NAME[role], 0, y, 52, C.label, "caption")
+                if need then
+                    local bar = UI:CreateProgressBar(body, math.max(20, colW - 52 - 52), 6)
+                    bar:SetPoint("TOPLEFT", 52, -(y + 4))
+                    bar:SetProgress(math.min(1, have / need))
+                    text(body, have .. "/" .. need, colW - 44, y, 44, have >= need and C.ok or C.textSoft, "tableNum")
+                else
+                    text(body, tostring(have), 52, y, 40, C.textSoft, "tableNum")
+                end
+                y = y + ROW
+            end
+            leftEnd = y
+        elseif not web and fits(y, ROW) then
+            text(body, string.format("%dT %dH %dD", comp.roles.TANK, comp.roles.HEALER, comp.roles.DPS), 0, y, colW, C.textSoft, "tableNum")
+            leftEnd = y + ROW
+        end
+
+        ---------------- right column ----------------
+        local ry = 0
+        local rcol = two and rx or 0
+        if not two then ry = leftEnd + 4 end
+        local going, maybe = {}, {}
+        for _, r in pairs(web and cal:WebSignups(e) or e.rsvps or {}) do
+            if r.status == "yes" then going[#going + 1] = r elseif r.status == "tentative" then maybe[#maybe + 1] = r end
+        end
+        local function byTime(a, b) return (a.ts or 0) < (b.ts or 0) end
+        table.sort(going, byTime); table.sort(maybe, byTime)
+        if fits(ry, ROW) then
+            text(body, string.format(L["%d going · %d tentative"], comp.yes, comp.tentative):upper(), rcol, ry, rw, C.label, "caption")
+            ry = ry + ROW + 2
+        end
+        local descReserve = (e.note and e.note ~= "") and (3 * 14 + 4) or 0
+        local function nameLine(r, dim)
+            local cc = r.class and GuildOS.ClassColors and GuildOS.ClassColors[r.class]
+            local col = dim and C.textSoft or (cc or C.text)
+            local label = safe(shortName(r.name), 24) .. (r.role and ("  " .. (ROLE_LETTER[r.role] or "")) or "")
+            text(body, label, rcol, ry, rw, col, "caption")
+            ry = ry + 14
+        end
+        if #going == 0 and #maybe == 0 and fits(ry, ROW) then
+            text(body, L["No one yet. Be the first."], rcol, ry, rw, C.textSoft, "caption")
+            ry = ry + ROW
+        end
+        local shown, total = 0, #going + #maybe
+        for _, list in ipairs({ going, maybe }) do
+            for _, r in ipairs(list) do
+                if fits(ry, 14 + descReserve) and (two or ry < leftEnd + 4 + 14 * 5) then
+                    nameLine(r, list == maybe); shown = shown + 1
+                end
+            end
+        end
+        if shown > 0 and shown < total and fits(ry, 14) then
+            text(body, "+" .. (total - shown), rcol, ry, rw, C.label, "caption")
+            ry = ry + 14
+        end
+        -- The organizer's notes: where to meet, what to bring.
+        local note = e.note and strtrim(e.note) or ""
+        if note ~= "" and fits(ry + 4, 28) then
+            ry = ry + 4
+            local d = text(body, safe(note, 200), rcol, ry, rw, C.textSoft, "caption", true)
+            if d.SetMaxLines then d:SetMaxLines(math.max(2, math.min(3, math.floor((H - FOOT - ry) / 14)))) end
+            ry = ry + math.ceil(d:GetStringHeight() or 28) + 2
+        end
+
+        ---------------- later this week ----------------
+        local ly = math.max(leftEnd, ry) + 8
+        local later = {}
+        for _, ev in ipairs(cal:GetUpcoming(false)) do
+            if ev.id ~= e.id and (ev.when or 0) > nowT() and #later < 3 then later[#later + 1] = ev end
+        end
+        if #later > 0 and fits(ly, ROW + #later * 14) then
+            text(body, L["LATER"], 0, ly, w, C.label, "caption")
+            ly = ly + ROW
+            for _, ev in ipairs(later) do
+                local b = CreateFrame("Button", nil, body)
+                b:SetPoint("TOPLEFT", 0, -ly)
+                b:SetSize(w, 14)
+                local fs = text(b, GuildOS:LocalDate(L["%a %d %b %H:%M"], ev.when) .. DOT .. truncate(safe(ev.title or "?"), 30), 0, 0, w, C.textSoft, "caption")
+                b:SetScript("OnClick", function() UI:OpenWindow("guild", "calendar", ev.when) end)
+                b:SetScript("OnEnter", function() fs:SetTextColor(C.text.r, C.text.g, C.text.b) end)
+                b:SetScript("OnLeave", function() fs:SetTextColor(C.textSoft.r, C.textSoft.g, C.textSoft.b) end)
+                ly = ly + 14
+            end
+        end
+
+        ---------------- the foot: answer on the left, tools on the right ----------------
+        local tools = {}
+        local function tool(label, run)
+            local b = ghost(body, label)
+            b:SetScript("OnClick", run)
+            tools[#tools + 1] = b
+        end
+        if GuildOS:IsOfficer() and not e.canceled and dt > 0 and not web then
+            local n = unansweredOnline(e)
+            if n > 0 then
+                tool(string.format(L["Remind (%d)"], n), function()
+                    if (remindedAt[e.id] or 0) > nowT() - 1800 then
+                        GuildOS:Print(L["The guild was reminded in the last 30 minutes."])
+                        return
+                    end
+                    remindedAt[e.id] = nowT()
+                    local msg = string.format("Reminder: %s is %s. If you haven't signed up yet, open OutlawOS (Now tab) and tap Going, Tentative or Absent.",
+                        truncate(safe(e.title or "?"), 40), GuildOS:LocalDate("%a %d %b at %H:%M", e.when))
+                    SendChatMessage(msg, "GUILD")
+                end)
+            end
+        end
+        if e.location and e.location ~= "" then
+            tool(L["Copy location"], function() GuildOS:ShowExportPopup(L["Meeting point"], safe(e.location, 48)) end)
+        end
+        tool("Discord", function() GuildOS:ShowExportPopup(L["Discord invite"], DISCORD_URL) end)
 
         -- A raid planned on the site is answered there: no buttons of the game's own (#146).
-        if cal:IsWebEvent(e) then
+        local answerW = 0
+        if web then
             local where = text(body, L["Sign up in Discord or on the website."], 0, 0, w, C.textSoft, nil, true)
             where:ClearAllPoints()
-            where:SetPoint("BOTTOMLEFT", 0, 0)
-            return
+            where:SetPoint("BOTTOMLEFT", 0, 4)
+            answerW = math.ceil(where:GetStringWidth() or 0)
+        else
+            -- The answer, along the card's foot (keeps the player's current role). Until it is given,
+            -- "Going" is the screen's one primary (the sketch); once given, that answer is the selected one.
+            local role = (mine and mine.role) or "DPS"
+            local bar = CreateFrame("Frame", nil, body)
+            bar:SetPoint("BOTTOMLEFT", 0, 0)
+            bar:SetWidth(math.max(1, w))
+            local buttons = {}
+            for _, opt in ipairs(RSVP) do
+                local b = UI:CreateButton(bar, opt[1], 40, 26)
+                if not mine and opt[2] == "yes" then UI:SetButtonVariant(b, "primary") end
+                fit(b, 12)
+                UI:SetSelected(b, mine ~= nil and mine.status == opt[2])
+                b:SetScript("OnClick", function() cal:Rsvp(e.id, opt[2], role); f.Refresh() end)
+                b.status = opt[2]
+                buttons[#buttons + 1] = b
+                answerW = answerW + b:GetWidth() + STACK
+            end
+            -- A translation too long for one row wraps the buttons rather than running out of the card.
+            UI:FlowBar(bar, buttons, { gap = STACK, rowGap = 4, rowH = 26 })
+            card.rsvp = buttons
         end
-
-        -- The answer, along the card's foot (keeps the player's current role). Until it is given,
-        -- "Going" is the screen's one primary (the sketch); once given, that answer is the selected one.
-        local mine = cal:MyRsvp(e)
-        local role = (mine and mine.role) or "DPS"
-        local bar = CreateFrame("Frame", nil, body)
-        bar:SetPoint("BOTTOMLEFT", 0, 0)
-        bar:SetWidth(math.max(1, w))
-        local buttons = {}
-        for _, opt in ipairs(RSVP) do
-            local b = UI:CreateButton(bar, opt[1], 40, 26)
-            if not mine and opt[2] == "yes" then UI:SetButtonVariant(b, "primary") end
-            fit(b, 12)
-            UI:SetSelected(b, mine ~= nil and mine.status == opt[2])
-            b:SetScript("OnClick", function() cal:Rsvp(e.id, opt[2], role); f.Refresh() end)
-            b.status = opt[2]
-            buttons[#buttons + 1] = b
+        -- The tools sit at the right of the same row, lowest priority dropped first when it is full.
+        local used = answerW + 12
+        local shownTools = {}
+        for _, b in ipairs(tools) do
+            if used + b:GetWidth() + 4 <= w then used = used + b:GetWidth() + 4; shownTools[#shownTools + 1] = b else b:Hide() end
         end
-        -- A translation too long for one row wraps the buttons rather than running out of the card.
-        UI:FlowBar(bar, buttons, { gap = STACK, rowGap = 4, rowH = 26 })
-        card.rsvp = buttons
+        local prev
+        for i = #shownTools, 1, -1 do
+            local b = shownTools[i]
+            b:ClearAllPoints()
+            if prev then b:SetPoint("RIGHT", prev, "LEFT", -4, 0) else b:SetPoint("BOTTOMRIGHT", 0, 0) end
+            prev = b
+        end
     end
 
     local function fillReady(card, myRow)
@@ -590,9 +827,9 @@ function GuildOS:CreateDashboardPanel(panel)
             if found >= 3 then
                 status = "|cff66dd66" .. L["Solved"] .. "|r  " .. names
             elseif found > 0 then
-                status = "|cffe6b84a" .. string.format(L["%d of 3 found"], found) .. "|r  " .. names
+                status = GuildOS.GoldEsc() .. string.format(L["%d of 3 found"], found) .. "|r  " .. names
             else
-                status = "|cffe6b84a" .. L["Available"] .. "|r"
+                status = GuildOS.GoldEsc() .. L["Available"] .. "|r"
             end
             line(tierName .. "  " .. status, 0, C.text, "caption")
             local hint = truncate(GuildOS:SanitizeUserText(spot.hint or ""), 52)
@@ -615,8 +852,8 @@ function GuildOS:CreateDashboardPanel(panel)
                     local b = list[i + k]
                     if b then
                         local done = EKO:BountyClaims(b.name)
-                        local st = #done > 0 and ("|cff66dd66" .. #done .. "x|r") or "|cff888888-|r"
-                        local str = (b.tier and ("|cffe6b84a" .. b.tier .. "|r  ") or "") .. truncate(b.name, 20) .. "  " .. st
+                        local st = #done > 0 and (GuildOS.Esc("66dd66") .. #done .. "x|r") or GuildOS.Esc("888888") .. "-|r"
+                        local str = (b.tier and (GuildOS.GoldEsc() .. b.tier .. "|r  ") or "") .. truncate(b.name, 20) .. "  " .. st
                         local fs = text(body, str, k * (colW + 12), y, colW, C.text, "caption")
                         cells[#cells + 1] = fs
                         rowH = math.max(rowH, fs:GetStringHeight() or 0)
@@ -659,8 +896,9 @@ function GuildOS:CreateDashboardPanel(panel)
             text(body, "The Gazette is empty this week.", 0, 0, w, C.textSoft, nil, true)
             return
         end
-        -- Preview: as many lines of the Gazette as the card has room for above the Open button.
-        -- Height is measured, so wrapped lines count and nothing runs under the button.
+        -- Preview: as much of the Gazette as the card has room for above the Open button. The room is the
+        -- body's real height (the card can be taller than its last Layout said), and a line too long for
+        -- what is left is cut where it stops fitting, so one long line never hides the ones after it.
         local lines = {}
         local style = GuildOS.EKO and GuildOS.EKO.GazetteLine
         for raw in (gz .. "\n"):gmatch("([^\n]*)\n") do
@@ -673,25 +911,59 @@ function GuildOS:CreateDashboardPanel(panel)
             end
             if s ~= "" then
                 -- A gap before each labelled item, as the popup spaces them.
-                if #lines > 0 and s:find("^|cffffd100") then s = "\n" .. s end
+                if #lines > 0 and s:find("^|c%x%x%x%x%x%x%x%x") then s = "\n" .. s end
                 lines[#lines + 1] = s
             end
         end
         local BUTTON_H, GAP = 22, STACK
-        local avail = (card.innerH or (CARD_H - BUTTON_H - BODY_TOP)) - BUTTON_H - GAP
+        local room = card.innerH or (CARD_H - BUTTON_H - BODY_TOP)
+        local real = body:GetHeight()
+        if real and real > 1 then room = math.max(room, real) end
+        local avail = room - BUTTON_H - GAP
         local fs = text(body, "", 0, 0, w, C.text, nil, true)
-        local n = #lines
-        local function build(k)
-            return table.concat(lines, "\n", 1, k) .. (k < #lines and "..." or "")
+        local total = #lines
+        local function build(k, tail)
+            return table.concat(lines, "\n", 1, k) .. (tail or "")
         end
-        fs:SetText(build(n))
-        while n > 1 and fs:GetStringHeight() > avail do
-            n = n - 1
-            fs:SetText(build(n))
+        fs:SetText(build(total))
+        if fs:GetStringHeight() > avail then
+            local n = total
+            repeat
+                n = n - 1
+                fs:SetText(build(n, "..."))
+            until n <= 1 or fs:GetStringHeight() <= avail
+            -- Fill what is left of the room with the start of the next line.
+            local nxt = lines[n + 1]
+            if nxt and n < total then
+                local plain = nxt:gsub("^\n", "")
+                local lo, hi, best = 1, GuildOS:Utf8Len(plain), 0
+                local function try(k)
+                    local head = GuildOS:Utf8Head(plain, k)
+                    head = head:gsub("|c%x*$", ""):gsub("|$", "")
+                    return build(n) .. "\n" .. head .. "|r..."
+                end
+                while lo <= hi do
+                    local mid = math.floor((lo + hi) / 2)
+                    fs:SetText(try(mid))
+                    if fs:GetStringHeight() <= avail then best = mid; lo = mid + 1 else hi = mid - 1 end
+                end
+                if best >= 12 then fs:SetText(try(best)) else fs:SetText(build(n, "...")) end
+            end
         end
         local open = UI:CreateButton(body, "Open the Gazette", 150, 22)
         open:SetPoint("BOTTOMLEFT", 0, 0)
         open:SetScript("OnClick", function() GuildOS.EKO:ShowGazettePopup(gz) end)
+        -- Refit when the card's size changes (a bigger window, a new layout).
+        if not body.gazetteSized then
+            body.gazetteSized = true
+            local lastH = body:GetHeight()
+            body:SetScript("OnSizeChanged", function(_, _, h)
+                if h and math.abs(h - (lastH or 0)) > 1 then
+                    lastH = h
+                    GuildOS:SafeCall(fillGazette, card)
+                end
+            end)
+        end
     end
 
     -- Each step, and the tab that helps with it; the line under them says what the site asks for.
@@ -835,6 +1107,8 @@ function GuildOS:CreateDashboardPanel(panel)
 
     -- Refresh whenever the tab becomes visible.
     panel:HookScript("OnShow", function() GuildOS:SafeCall(f.Refresh) end)
+    -- Shared data that arrives while the page is open (the Bounty Board) repaints it.
+    GuildOS.DashboardRefresh = function() if panel:IsVisible() then f.Refresh() end end
 
     -- ...and when Agora resizes the grid, because the fills size their text to the cards. A fill
     -- runs a readiness scan, far too heavy for the once-per-frame rate a grip drag produces, so

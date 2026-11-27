@@ -552,9 +552,14 @@ local function BuildLogSub(panel)
     local _, content = MakeScrollList(listHolder, "GuildOSMgmtLogScroll")
 
     local function setLabels()
-        actBtn:SetText(L["Action: "] .. (st.action == 1 and L["All"] or (ACTION_LABELS[LOG_ACTIONS[st.action]] or {}).txt or LOG_ACTIONS[st.action]))
-        perBtn:SetText(LOG_PERIODS[st.period][2])
-        sortBtn:SetText(LOG_SORTS[st.sort][2])
+        -- The shared button draws its caption on `label`; the frame's own SetText does not reach it.
+        actBtn.label:SetText(L["Action: "] .. (st.action == 1 and L["All"] or (ACTION_LABELS[LOG_ACTIONS[st.action]] or {}).txt or LOG_ACTIONS[st.action]))
+        perBtn.label:SetText(LOG_PERIODS[st.period][2])
+        sortBtn.label:SetText(LOG_SORTS[st.sort][2])
+        -- A filter that is on is marked, so a list that looks short is never a mystery.
+        UI:SetSelected(actBtn, st.action ~= 1)
+        UI:SetSelected(perBtn, st.period ~= 1)
+        UI:SetSelected(sortBtn, st.sort ~= 1)
     end
 
     refresh = function()

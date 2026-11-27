@@ -175,9 +175,9 @@ end
 local function showTip(owner, e)
     if not (GameTooltip and type(e) == "table") then return end
     GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
-    GameTooltip:AddLine(e.title or "", C.text.r, C.text.g, C.text.b)
+    GameTooltip:AddLine(e.title or "", GuildOS.Tip.text.r, GuildOS.Tip.text.g, GuildOS.Tip.text.b)
     if type(e.rule) == "string" and e.rule ~= "" then
-        GameTooltip:AddLine(e.rule, C.textSoft.r, C.textSoft.g, C.textSoft.b, true)
+        GameTooltip:AddLine(e.rule, GuildOS.Tip.textSoft.r, GuildOS.Tip.textSoft.g, GuildOS.Tip.textSoft.b, true)
     end
     local target = tonumber(e.target)
     if target and target > 0 then
@@ -187,8 +187,8 @@ local function showTip(owner, e)
             C.text.r, C.text.g, C.text.b)
     elseif (tonumber(e.at) or 0) > 0 then
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(string.format(L["Earned %s"], day(e.at)), C.label.r, C.label.g, C.label.b)
-        if e.key then GameTooltip:AddLine(string.format(L["by %s"], memberName(e.key)), C.label.r, C.label.g, C.label.b) end
+        GameTooltip:AddLine(string.format(L["Earned %s"], day(e.at)), GuildOS.Tip.label.r, GuildOS.Tip.label.g, GuildOS.Tip.label.b)
+        if e.key then GameTooltip:AddLine(string.format(L["by %s"], memberName(e.key)), GuildOS.Tip.label.r, GuildOS.Tip.label.g, GuildOS.Tip.label.b) end
     end
     GameTooltip:Show()
 end
@@ -197,11 +197,11 @@ end
 local function showGroupTip(owner, row)
     if not GameTooltip then return end
     GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
-    GameTooltip:AddLine(row.name or "", C.text.r, C.text.g, C.text.b)
+    GameTooltip:AddLine(row.name or "", GuildOS.Tip.text.r, GuildOS.Tip.text.g, GuildOS.Tip.text.b)
     for i, part in ipairs(row.parts or {}) do
         local e = row.partEntries and row.partEntries[i]
         local at = e and tonumber(e.at) or 0
-        GameTooltip:AddDoubleLine(part, at > 0 and day(at) or "", C.textSoft.r, C.textSoft.g, C.textSoft.b,
+        GameTooltip:AddDoubleLine(part, at > 0 and day(at) or "", GuildOS.Tip.textSoft.r, GuildOS.Tip.textSoft.g, GuildOS.Tip.textSoft.b,
             C.label.r, C.label.g, C.label.b)
     end
     GameTooltip:Show()
@@ -268,7 +268,7 @@ function GuildOS:CreateAchievementsPanel(parent)
     chip:SetScript("OnEnter", function(self)
         if not GameTooltip then return end
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:AddLine(L["Points earned from achievements."], C.textSoft.r, C.textSoft.g, C.textSoft.b, true)
+        GameTooltip:AddLine(L["Points earned from achievements."], GuildOS.Tip.textSoft.r, GuildOS.Tip.textSoft.g, GuildOS.Tip.textSoft.b, true)
         GameTooltip:Show()
     end)
     chip:SetScript("OnLeave", hideTip)

@@ -12,11 +12,16 @@ GuildOS.Style = Style
 local L = GuildOS.L
 
 Style.DEFAULT = "guildos"
-Style.ORDER = { "guildos", "forever" }
+Style.ORDER = { "guildos", "classic", "alliance", "forever" }
+-- Styles taken out of the picker. An account that had one saved quietly goes back to the default.
+Style.RETIRED = { parchment = true }
 Style.current = Style.DEFAULT
 
 local INFO = {
     guildos = { name = "OutlawOS", desc = L["Flat and dark: the classic look."] },
+    classic = { name = "GuildOS", desc = L["The original GuildOS look: flat and dark, with no leather or brass."] },
+    alliance = { name = "Alliance", desc = L["Deep royal blue with silver and gold trim."] },
+    parchment = { name = "Parchment", desc = L["Light cream and tan with dark brown text, like an old ledger page. Class colours are darkened so they read on cream."] },
     forever = { name = "WoW: Forever",
                 desc = L["The game's own bronze frames, tabs and buttons. A beta: tell us what looks off."] },
 }
@@ -86,6 +91,30 @@ Style.FOREVER_PALETTE = {
     goldHover = rgb(1.000, 0.878, 0.302), goldActive = rgb(0.851, 0.698, 0.000),
 }
 
+-- The flat themes. Each paints exactly as the "guildos" style does, in its own palette; none of them wears
+-- the Outlaw leather, brass emblem or western fonts (the EKO theme is switched off for them in Resolve).
+-- `palette` nil: the palette GuildOS shipped with.
+Style.THEMES = {
+    classic = {},
+    alliance = { palette = {
+        bg = rgb(0.043, 0.071, 0.133), panel = rgb(0.067, 0.110, 0.200), popup = rgb(0.090, 0.145, 0.251),
+        well = rgb(0.031, 0.051, 0.098), line = rgb(0.416, 0.337, 0.141), lineHi = rgb(0.749, 0.612, 0.239),
+        text = rgb(0.933, 0.949, 0.984), textSoft = rgb(0.682, 0.741, 0.839), label = rgb(0.553, 0.620, 0.753),
+        labelDim = rgb(0.384, 0.451, 0.604), disabled = rgb(0.239, 0.286, 0.400),
+        gold = rgb(0.878, 0.722, 0.298), goldHover = rgb(0.929, 0.784, 0.384), goldActive = rgb(0.769, 0.616, 0.220),
+        onGold = rgb(0.043, 0.071, 0.133),
+    } },
+    parchment = { light = true, classScale = 0.55, palette = {
+        bg = rgb(0.894, 0.847, 0.737), panel = rgb(0.827, 0.765, 0.627), popup = rgb(0.937, 0.898, 0.796),
+        well = rgb(0.953, 0.918, 0.835), line = rgb(0.722, 0.643, 0.490), lineHi = rgb(0.545, 0.439, 0.282),
+        text = rgb(0.169, 0.122, 0.078), textSoft = rgb(0.353, 0.275, 0.188), label = rgb(0.431, 0.345, 0.239),
+        labelDim = rgb(0.545, 0.463, 0.345), disabled = rgb(0.620, 0.561, 0.451),
+        gold = rgb(0.604, 0.337, 0.071), goldHover = rgb(0.690, 0.404, 0.110), goldActive = rgb(0.502, 0.271, 0.047),
+        onGold = rgb(0.984, 0.953, 0.878),
+        ok = rgb(0.184, 0.490, 0.227), danger = rgb(0.690, 0.227, 0.180),
+    } },
+}
+
 ----------------------------------------------------------------------
 -- Atlases
 ----------------------------------------------------------------------
@@ -126,7 +155,8 @@ end
 -- The registry
 ----------------------------------------------------------------------
 function Style:Has(id)
-    if id == "guildos" then return true end
+    if Style.RETIRED[id] then return false end
+    if id == "guildos" or Style.THEMES[id] then return true end
     if id ~= "forever" then return false end
     for _, n in ipairs(KEY_ATLASES) do
         if not atlasInfo(n) then return false end
@@ -146,6 +176,53 @@ function Style:Name(id) return INFO[id] and INFO[id].name or tostring(id) end
 function Style:Description(id) return INFO[id] and INFO[id].desc or "" end
 function Style:Current() return self.current end
 
+-- A light theme: dark text on cream. Safe to ask from any file at load, before Resolve has run.
+function Style:IsLight()
+    local id = self.current or (type(GuildOSDB) == "table" and GuildOSDB.style) or nil
+    local theme = id and not Style.RETIRED[id] and Style.THEMES[id]
+    return theme and theme.light and true or false
+end
+
+-- A colour code for text. On a light theme the bright colours made for dark windows (lime, pale yellow,
+-- white) are brought down to a lightness that reads on cream; dark ones and the dark themes are untouched.
+local function lightFix(r, g, b)
+    local lum = 0.299 * r + 0.587 * g + 0.114 * b
+    if lum <= 0.38 then return r, g, b end
+    local f = 0.38 / lum
+    return r * f, g * f, b * f
+end
+function GuildOS.Esc(hex)
+    if not GuildOS.Style:IsLight() then return "|cff" .. hex end
+    local r, g, b = tonumber(hex:sub(1, 2), 16), tonumber(hex:sub(3, 4), 16), tonumber(hex:sub(5, 6), 16)
+    if not (r and g and b) then return "|cff" .. hex end
+    r, g, b = lightFix(r / 255, g / 255, b / 255)
+    return string.format("|cff%02x%02x%02x", math.floor(r * 255 + 0.5), math.floor(g * 255 + 0.5), math.floor(b * 255 + 0.5))
+end
+function GuildOS.LightFix(r, g, b)
+    if GuildOS.Style:IsLight() then return lightFix(r, g, b) end
+    return r, g, b
+end
+
+-- Colours for tooltip lines. The game's tooltip stays dark on every theme, so on a light theme the palette's
+-- dark brown text would not show on it: these are the light equivalents. GuildOS.Tip.text.r etc., read live.
+local TIP_LIGHT = {
+    text = { 0.93, 0.90, 0.84 }, textSoft = { 0.78, 0.72, 0.60 }, label = { 0.72, 0.64, 0.50 },
+    labelDim = { 0.60, 0.54, 0.42 }, silver = { 0.78, 0.72, 0.60 }, textDim = { 0.72, 0.64, 0.50 },
+    disabled = { 0.50, 0.46, 0.40 }, gold = { 0.90, 0.72, 0.30 }, accent = { 0.90, 0.72, 0.30 },
+    ok = { 0.49, 0.85, 0.56 }, green = { 0.49, 0.85, 0.56 }, danger = { 0.94, 0.48, 0.45 }, red = { 0.94, 0.48, 0.45 },
+    warn = { 0.91, 0.60, 0.35 }, info = { 0.36, 0.58, 0.81 },
+}
+GuildOS.Tip = setmetatable({}, { __index = function(_, k)
+    local l = TIP_LIGHT[k]
+    if l and GuildOS.Style:IsLight() then return { r = l[1], g = l[2], b = l[3], a = 1 } end
+    return GuildOS.Colors[k]
+end })
+
+-- The gold of text colour codes: the light yellow on dark themes, the deep amber of the Parchment accent on cream.
+function GuildOS.GoldEsc()
+    return GuildOS.Style:IsLight() and "|cff9a5612" or "|cffe6b84a"
+end
+
 -- Saves the account's choice; it is used from the next load on.
 function Style:Choose(id)
     if not INFO[id] then return false, "unknown" end
@@ -161,13 +238,31 @@ function Style:Resolve()
     local want = type(GuildOSDB) == "table" and GuildOSDB.style or nil
     local id = (want and self:Has(want)) and want or self.DEFAULT
     self.current, self.gameFont = id, nil
-    if want and want ~= id then
+    if want and want ~= id and not Style.RETIRED[want] then
         GuildOS:Print(string.format(L["The %s style is not available on this client; using %s."],
             self:Name(want), self:Name(id)))
     end
     if id == "forever" then
         GuildOS:RepointColors(self.FOREVER_PALETTE)
         self.gameFont = true
+    end
+    local theme = Style.THEMES[id]
+    if theme then
+        -- Off with the Outlaw leather and fonts first (it puts GuildOS's own palette back), then the theme's.
+        if GuildOS.EKO and GuildOS.EKO.ApplyTheme then
+            GuildOS.EKO:ApplyTheme(false)
+            if GuildOS.EKO.ApplyFonts then GuildOS.EKO:ApplyFonts(false) end
+        end
+        if theme.palette then GuildOS:RepointColors(theme.palette) end
+        -- On cream the pale class colours (priest white, rogue yellow, hunter green) vanish: darken them.
+        if theme.classScale then
+            Style.classOriginal = Style.classOriginal or {}
+            for class, c in pairs(GuildOS.ClassColors) do
+                local o = Style.classOriginal[class]
+                if not o then o = { r = c.r, g = c.g, b = c.b }; Style.classOriginal[class] = o end
+                c.r, c.g, c.b = o.r * theme.classScale, o.g * theme.classScale, o.b * theme.classScale
+            end
+        end
     end
     return id
 end

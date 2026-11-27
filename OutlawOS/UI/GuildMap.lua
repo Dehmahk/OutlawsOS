@@ -80,8 +80,8 @@ local function AcquirePin(i)
     pin:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:AddLine(self.pinName or "?", self.cr or 1, self.cg or 1, self.cb or 1)
-        if self.zoneText then GameTooltip:AddLine(self.zoneText, C.silver.r, C.silver.g, C.silver.b) end
-        if self.subText then GameTooltip:AddLine(self.subText, C.textDim.r, C.textDim.g, C.textDim.b) end
+        if self.zoneText then GameTooltip:AddLine(self.zoneText, GuildOS.Tip.silver.r, GuildOS.Tip.silver.g, GuildOS.Tip.silver.b) end
+        if self.subText then GameTooltip:AddLine(self.subText, GuildOS.Tip.textDim.r, GuildOS.Tip.textDim.g, GuildOS.Tip.textDim.b) end
         GameTooltip:Show()
     end)
     pin:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -229,7 +229,7 @@ local function BuildListFrame()
     f:SetSize(240, 360)
     f:SetPoint("TOPLEFT", 40, -200)
     f:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = GuildOS.UI:Edge(f) })
-    f:SetBackdropColor(0.058, 0.058, 0.075, 0.98)
+    f:SetBackdropColor(GuildOS.Colors.bg.r, GuildOS.Colors.bg.g, GuildOS.Colors.bg.b, 0.98)
     f:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, C.border.a)
     UI:StylePopup(f)
     f:SetFrameStrata("FULLSCREEN_DIALOG")   -- above the world map window
@@ -352,7 +352,7 @@ local function BuildDotsFrame()
     f:SetScript("OnEnter", function(self)
         if not self.here or #self.here == 0 then return end
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine(L["Guildmates in your zone"], C.gold.r, C.gold.g, C.gold.b)
+        GameTooltip:AddLine(L["Guildmates in your zone"], GuildOS.Tip.gold.r, GuildOS.Tip.gold.g, GuildOS.Tip.gold.b)
         for _, p in ipairs(self.here) do
             local cr, cg, cb = GuildOS:GetClassColor(p.class)
             GameTooltip:AddLine(p.name, cr, cg, cb)

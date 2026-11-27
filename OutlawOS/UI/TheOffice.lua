@@ -390,7 +390,7 @@ local function showExport(text)
         f:SetPoint("CENTER")
         f:SetFrameStrata("DIALOG")
         f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-        f:SetBackdropColor(0.05, 0.05, 0.07, 0.97)
+        f:SetBackdropColor(GuildOS.Colors.well.r, GuildOS.Colors.well.g, GuildOS.Colors.well.b, 0.97)
         f:SetBackdropBorderColor(0.4, 0.4, 0.45, 1)
         f:EnableMouse(true)
         f:SetMovable(true)
@@ -646,7 +646,7 @@ function Office:BuildSub(panel)
 
     refresh = function()
         local per = Office.PERIODS[periodIdx]
-        periodBtn:SetText(L[per.label])
+        periodBtn.label:SetText(L[per.label])
         snapshot = Office:Snapshot(per.key)
         draw()
     end

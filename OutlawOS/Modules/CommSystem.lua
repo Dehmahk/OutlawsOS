@@ -556,6 +556,9 @@ function CommSystem:_Answer()
         -- Everyone also re-sends its own My Toon record, so a member who logged in after it was saved gets it.
         if GuildOS.MySpecs then GuildOS:SafeCall(GuildOS.MySpecs.PublishOwn) end
 
+        -- OutlawOS: the leaders' shared records and the check-in lists (UI/EKO.lua).
+        if GuildOS.EKO and GuildOS.EKO.AnswerRequest then GuildOS:SafeCall(GuildOS.EKO.AnswerRequest, GuildOS.EKO) end
+
         -- Officers also send the alt/main link table. This REQUEST handler
         -- is what a member's automatic login-time pull (and the periodic
         -- re-REQUEST ticker) lands on, so this is what lets a member who

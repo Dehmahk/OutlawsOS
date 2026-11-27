@@ -119,7 +119,7 @@ end
 -- The former unlabelled 20px "status" column folded into `name`: the
 -- online dot is drawn inside the name cell, so it is not something the
 -- user can lose to a narrow window.
-local DASH = "|cff666666-|r"
+local DASH = GuildOS.Esc("666666") .. "-|r"
 local function textOr(s) return (s and s ~= "") and s or nil end
 local function officer() return GuildOS:IsOfficer() end
 local function enabled(feature) return GuildOS:IsFeatureEnabled(feature) end
@@ -172,7 +172,7 @@ local COLUMNS = {
           return GuildOS.GuildManager:GetDaysOffline(d.index)
       end,
       text = function(v, d)
-          if d.isOnline then return L["|cff4CFF4CNow|r"] end
+          if d.isOnline then return GuildOS:ColorText(L["Now"], 0.3, 1, 0.3) end
           return GuildOS:TimeAgo(time() - math.floor(v * 86400)), C.silver
       end },
 
@@ -346,6 +346,7 @@ local SCROLL_GUTTER = 18        -- rows stop short of the scrollbar
 -- Everything above the first row: KPI band, toolbar, column header, rule.
 local TABLE_RESERVED = KPI_BAND_HEIGHT + 28 + HEADER_HEIGHT + 1
 local KPI_GAP = 10
+local KPI_MIN_CARD = 140      -- a card never gets narrower than this; the band wraps to more rows instead
 local KPI_MARGIN = 12
 -- Global frame names must stay unique if a builder ever runs twice. The
 -- first instance keeps the historical names so nothing that hardcodes them breaks.
@@ -1500,20 +1501,39 @@ function GuildOS:CreateRosterPanel(parent, host)
     UI:MakeResponsive(parent, function(_, w, h)
         -- KPI band. Same drop-by-priority rule as the table, so the cards
         -- vanish in a chosen order instead of sliding off the edge.
-        local kpi = UI:ResolveColumns(KPI_SPEC, w - KPI_MARGIN * 2, KPI_GAP)
-        for _, entry in ipairs(kpi) do
+        -- The cards wrap onto more rows as the window narrows, so each keeps room for its text; the band
+        -- grows with them and everything under it moves down.
+        local availW = math.max(1, w - KPI_MARGIN * 2)
+        local perRow = math.max(1, math.min(#KPI_SPEC, math.floor((availW + KPI_GAP) / (KPI_MIN_CARD + KPI_GAP))))
+        local rows = math.ceil(#KPI_SPEC / perRow)
+        -- Spread the cards evenly over the rows (9 cards in 2 rows is 5 + 4, not 8 + 1).
+        perRow = math.ceil(#KPI_SPEC / rows)
+        local cardW = math.floor((availW - KPI_GAP * (perRow - 1)) / perRow)
+        local cardH = KPI_BAND_HEIGHT - 16
+        for i, entry in ipairs(KPI_SPEC) do
             local card = host.kpiCards[entry.key]
             if card then
-                card:SetShown(entry.shown)
-                if entry.shown then
-                    card:ClearAllPoints()
-                    card:SetPoint("TOPLEFT", KPI_MARGIN + entry.x, -8)
-                    card:SetWidth(entry.w)
-                    -- Text stays inside the card at any width: it is cut at the edge, never drawn over the next card.
-                    for _, fs in ipairs(card.kpiTexts or {}) do fs:SetWidth(math.max(10, entry.w - 20)) end
-                end
+                local col, row = (i - 1) % perRow, math.floor((i - 1) / perRow)
+                card:Show()
+                card:ClearAllPoints()
+                card:SetPoint("TOPLEFT", KPI_MARGIN + col * (cardW + KPI_GAP), -(8 + row * (cardH + 8)))
+                card:SetWidth(cardW)
+                -- Text stays inside the card at any width: it is cut at the edge, never drawn over the next card.
+                for _, fs in ipairs(card.kpiTexts or {}) do fs:SetWidth(math.max(10, cardW - 20)) end
             end
         end
+        local bandH = 8 + rows * (cardH + 8)
+        kpiBand:SetHeight(bandH)
+        bandLine:ClearAllPoints()
+        bandLine:SetPoint("TOPLEFT", 0, -bandH)
+        bandLine:SetPoint("TOPRIGHT", 0, -bandH)
+        rail:ClearAllPoints()
+        rail:SetPoint("TOPLEFT", 0, -bandH)
+        rail:SetPoint("BOTTOMLEFT", 0, 0)
+        tableArea:ClearAllPoints()
+        tableArea:SetPoint("TOPLEFT", RAIL_WIDTH, -bandH)
+        tableArea:SetPoint("BOTTOMRIGHT", 0, 0)
+        host.tableReserved = bandH + 28 + HEADER_HEIGHT + 1
 
         host:LayoutToolbar(w - RAIL_WIDTH)
         host:ScrollRanks(0)   -- a taller window may leave the rank list room to spare: clamp its scroll
@@ -1538,7 +1558,7 @@ function GuildOS:CreateRosterPanel(parent, host)
         end
 
         -- Rows: how many fit, and where their cells sit.
-        host.AcquireRows(UI:ResolveRows(h - TABLE_RESERVED, ROW_HEIGHT, 0))
+        host.AcquireRows(UI:ResolveRows(h - (host.tableReserved or TABLE_RESERVED), ROW_HEIGHT, 0))
         for i = 1, host.visibleRows do
             host.rows[i]:ApplyColumns(layout)
         end
@@ -1802,7 +1822,7 @@ function UpdateRosterRow(row, data)
     elseif level >= GuildOS.Client.maxLevel - 10 then
         lr, lg, lb = C.green.r, C.green.g, C.green.b
     else
-        lr, lg, lb = C.white.r, C.white.g, C.white.b
+        lr, lg, lb = C.textSoft.r, C.textSoft.g, C.textSoft.b
     end
     row.levelText:SetTextColor(textColor(lr, lg, lb))
     row.levelText:SetText(level)
@@ -1819,7 +1839,7 @@ function UpdateRosterRow(row, data)
     if data.avgIlvl and data.avgIlvl > 0 then
         row.ilvlText:SetText(GuildOS:FormatItemLevel(data.avgIlvl))
     else
-        row.ilvlText:SetText("|cff666666-|r")
+        row.ilvlText:SetText(GuildOS.Esc("666666") .. "-|r")
     end
 
     -- Professions
@@ -1843,12 +1863,12 @@ function UpdateRosterRow(row, data)
         row.zoneText:SetTextColor(textColor(C.silver.r, C.silver.g, C.silver.b))
         row.zoneText:SetText(data.zone)
     else
-        row.zoneText:SetText("|cff666666-|r")
+        row.zoneText:SetText(GuildOS.Esc("666666") .. "-|r")
     end
 
     -- Last seen
     if data.isOnline then
-        row.lastSeenText:SetText(L["|cff4CFF4CNow|r"])
+        row.lastSeenText:SetText(GuildOS:ColorText(L["Now"], C.ok.r, C.ok.g, C.ok.b))
     elseif data.lastUpdate > 0 then
         row.lastSeenText:SetText(GuildOS:TimeAgo(data.lastUpdate))
     else
@@ -1890,7 +1910,7 @@ local function BuildColumnsPanel()
     f:SetClampedToScreen(true)
     f:EnableMouse(true)
     f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = GuildOS.UI:Edge(f) })
-    f:SetBackdropColor(0.058, 0.058, 0.075, 0.98)
+    f:SetBackdropColor(GuildOS.Colors.bg.r, GuildOS.Colors.bg.g, GuildOS.Colors.bg.b, 0.98)
     f:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, C.border.a)
     UI:StylePopup(f)
     tinsert(UISpecialFrames, "GuildOSColumnsPanel")
@@ -2227,7 +2247,7 @@ function ShowRowTooltip(row)
     local cr, cg, cb = GuildOS:GetClassColor(data.class)
     GameTooltip:AddLine(data.name, cr, cg, cb)
     GameTooltip:AddLine(string.format(L["Level %d %s %s"], data.level, data.race, data.classDisplay), 0.8, 0.8, 0.8)
-    GameTooltip:AddLine(data.rank, C.text.r, C.text.g, C.text.b)
+    GameTooltip:AddLine(data.rank, GuildOS.Tip.text.r, GuildOS.Tip.text.g, GuildOS.Tip.text.b)
 
     -- Officers: the trial's state first, the thing they came to the card for.
     if GuildOS:IsOfficer() and GuildOS.TrialTracker then
@@ -2237,7 +2257,7 @@ function ShowRowTooltip(row)
             local state = GuildOS.TrialTracker:GetState(tkey)
             local daysRem = GuildOS.TrialTracker:GetDaysRemaining(tkey)
             local stateText = (state == "trial" and daysRem) and string.format(L["%d days left"], daysRem) or tostring(state or "?")
-            GameTooltip:AddLine(string.format(L["Trial: %s"], stateText), C.gold.r, C.gold.g, C.gold.b)
+            GameTooltip:AddLine(string.format(L["Trial: %s"], stateText), GuildOS.Tip.gold.r, GuildOS.Tip.gold.g, GuildOS.Tip.gold.b)
         end
     end
 
@@ -2253,10 +2273,10 @@ function ShowRowTooltip(row)
             end
             table.sort(alts)
             if links[me] then
-                GameTooltip:AddLine("Alt of " .. main, C.gold.r, C.gold.g, C.gold.b)
-                if #alts > 0 then GameTooltip:AddLine("Other alts: " .. table.concat(alts, ", "), C.silver.r, C.silver.g, C.silver.b, true) end
+                GameTooltip:AddLine("Alt of " .. main, GuildOS.Tip.gold.r, GuildOS.Tip.gold.g, GuildOS.Tip.gold.b)
+                if #alts > 0 then GameTooltip:AddLine("Other alts: " .. table.concat(alts, ", "), GuildOS.Tip.silver.r, GuildOS.Tip.silver.g, GuildOS.Tip.silver.b, true) end
             elseif #alts > 0 then
-                GameTooltip:AddLine("Alts: " .. table.concat(alts, ", "), C.gold.r, C.gold.g, C.gold.b, true)
+                GameTooltip:AddLine("Alts: " .. table.concat(alts, ", "), GuildOS.Tip.gold.r, GuildOS.Tip.gold.g, GuildOS.Tip.gold.b, true)
             end
         end
     end
@@ -2264,19 +2284,19 @@ function ShowRowTooltip(row)
     if GuildOS.EKO and GuildOS.EKO.TooltipLines then
         local ok, lines = pcall(GuildOS.EKO.TooltipLines, GuildOS.EKO, data)
         if ok then
-            for _, l in ipairs(lines) do GameTooltip:AddLine(l[1], C.text.r, C.text.g, C.text.b, l.wrap and true or false) end
+            for _, l in ipairs(lines) do GameTooltip:AddLine(l[1], GuildOS.Tip.text.r, GuildOS.Tip.text.g, GuildOS.Tip.text.b, l.wrap and true or false) end
         end
     end
 
     -- What this member earned for the guild (issue #216).
     for _, title in ipairs(GuildOS.Achievements and GuildOS.Achievements:Of(data.key) or {}) do
-        GameTooltip:AddLine(title, C.text.r, C.text.g, C.text.b)
+        GameTooltip:AddLine(title, GuildOS.Tip.text.r, GuildOS.Tip.text.g, GuildOS.Tip.text.b)
     end
 
     -- First seen by Guild OS (approximate "member since")
     local firstSeen = GuildOS.GetFirstSeen and GuildOS:GetFirstSeen(data.key)
     if firstSeen then
-        GameTooltip:AddLine(string.format(L["Tracked since %s"], date("%b %d", firstSeen)), C.silver.r, C.silver.g, C.silver.b)
+        GameTooltip:AddLine(string.format(L["Tracked since %s"], date("%b %d", firstSeen)), GuildOS.Tip.silver.r, GuildOS.Tip.silver.g, GuildOS.Tip.silver.b)
     end
 
     -- Talent spec
@@ -2291,7 +2311,7 @@ function ShowRowTooltip(row)
 
     if data.zone and data.zone ~= "" then
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(string.format(L["Zone: %s"], data.zone), C.silver.r, C.silver.g, C.silver.b)
+        GameTooltip:AddLine(string.format(L["Zone: %s"], data.zone), GuildOS.Tip.silver.r, GuildOS.Tip.silver.g, GuildOS.Tip.silver.b)
     end
 
     if data.note and data.note ~= "" then
@@ -2301,13 +2321,13 @@ function ShowRowTooltip(row)
     -- Gear summary
     if data.avgIlvl and data.avgIlvl > 0 then
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(string.format(L["Average Item Level: %s"], data.avgIlvl), C.text.r, C.text.g, C.text.b)
+        GameTooltip:AddLine(string.format(L["Average Item Level: %s"], data.avgIlvl), GuildOS.Tip.text.r, GuildOS.Tip.text.g, GuildOS.Tip.text.b)
     end
 
     -- Professions detail
     if data.professions and #data.professions > 0 then
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(L["Professions:"], C.text.r, C.text.g, C.text.b)
+        GameTooltip:AddLine(L["Professions:"], GuildOS.Tip.text.r, GuildOS.Tip.text.g, GuildOS.Tip.text.b)
         for _, prof in ipairs(data.professions) do
             local profColor = prof.isPrimary and C.text or C.silver
             local line = prof.rank and string.format("  %s %d/%d", L[prof.name], prof.rank, prof.maxRank or 0)
@@ -2355,13 +2375,20 @@ function ShowRowTooltip(row)
         end
     end
 
+    -- The version the member last checked in with (OutlawOS's own check-in). When it is known it is the one
+    -- version line; the older sources (the stored addon data) only speak when it is not.
+    local ekoVer
+    if GuildOS.EKO and GuildOS.EKO.OutlawVersionFor and data.name then
+        local okV, v = pcall(GuildOS.EKO.OutlawVersionFor, GuildOS.EKO, data.name)
+        if okV then ekoVer = v end
+    end
     if not data.hasAddonData then
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(L["Player does not have OutlawOS installed"], C.red.r, C.red.g, C.red.b)
-    elseif data.addonVersion and data.addonVersion ~= GuildOS.VERSION and CompareVersions(data.addonVersion, GuildOS.VERSION) < 0 then
+        GameTooltip:AddLine(L["Player does not have OutlawOS installed"], GuildOS.Tip.red.r, GuildOS.Tip.red.g, GuildOS.Tip.red.b)
+    elseif not ekoVer and data.addonVersion and data.addonVersion ~= GuildOS.VERSION and CompareVersions(data.addonVersion, GuildOS.VERSION) < 0 then
         -- An older client is worth a line for everyone; a newer or equal one goes in the footer, for officers.
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(string.format(L["OutlawOS v%s (outdated)"], data.addonVersion), C.red.r, C.red.g, C.red.b)
+        GameTooltip:AddLine(string.format(L["OutlawOS v%s (outdated)"], data.addonVersion), GuildOS.Tip.red.r, GuildOS.Tip.red.g, GuildOS.Tip.red.b)
     end
 
     -- Wishlist info (native)
@@ -2370,7 +2397,7 @@ function ShowRowTooltip(row)
         if wData and wData.wishlist and #wData.wishlist > 0 then
             local wColor = GuildOS.Wishlist and GuildOS.Wishlist.TypeColors.wishlist or { r=0.3, g=0.7, b=1.0 }
             GameTooltip:AddLine(" ")
-            GameTooltip:AddLine(L["Wishlist:"], C.text.r, C.text.g, C.text.b)
+            GameTooltip:AddLine(L["Wishlist:"], GuildOS.Tip.text.r, GuildOS.Tip.text.g, GuildOS.Tip.text.b)
             local shown = math.min(#wData.wishlist, 5)
             for j = 1, shown do
                 local item = wData.wishlist[j]
@@ -2387,26 +2414,27 @@ function ShowRowTooltip(row)
 
     GameTooltip:AddLine(" ")
     -- Officers see the client version here, grey; a newer one says so.
-    if GuildOS:IsOfficer() and data.hasAddonData and data.addonVersion then
+    if not ekoVer and GuildOS:IsOfficer() and data.hasAddonData and data.addonVersion then
         if data.addonVersion ~= GuildOS.VERSION and CompareVersions(data.addonVersion, GuildOS.VERSION) > 0 then
             GameTooltip:AddLine(string.format(L["OutlawOS v%s (newer than yours)"], data.addonVersion), 0.5, 0.5, 0.5)
         else
             GameTooltip:AddLine(string.format("OutlawOS v%s", data.addonVersion), 0.5, 0.5, 0.5)
         end
     end
-    -- OutlawOS: the version this member last checked in with, or that they are not installed.
+    -- OutlawOS: the version this member last checked in with. "Not installed" is said once: the line above
+    -- already says it when the stored data has no addon at all.
     if GuildOS.EKO and GuildOS.EKO.OutlawVersionFor and data.name then
-        local okV, ov = pcall(GuildOS.EKO.OutlawVersionFor, GuildOS.EKO, data.name)
-        if okV then
-            if not ov then
-                GameTooltip:AddLine("OutlawOS not installed", C.red.r, C.red.g, C.red.b)
-            elseif ov == GuildOS.EKO.PATCH_VERSION then
-                GameTooltip:AddLine("OutlawOS v" .. ov, C.green.r, C.green.g, C.green.b)
-            elseif CompareVersions(ov, GuildOS.EKO.PATCH_VERSION) < 0 then
-                GameTooltip:AddLine("OutlawOS v" .. ov .. " (outdated)", C.warn.r, C.warn.g, C.warn.b)
-            else
-                GameTooltip:AddLine("OutlawOS v" .. ov .. " (newer than yours)", 0.5, 0.5, 0.5)
+        local ov = ekoVer
+        if not ov then
+            if data.hasAddonData then
+                GameTooltip:AddLine("OutlawOS: no recent check-in", GuildOS.Tip.red.r, GuildOS.Tip.red.g, GuildOS.Tip.red.b)
             end
+        elseif ov == GuildOS.EKO.PATCH_VERSION then
+            GameTooltip:AddLine("OutlawOS v" .. ov, GuildOS.Tip.green.r, GuildOS.Tip.green.g, GuildOS.Tip.green.b)
+        elseif CompareVersions(ov, GuildOS.EKO.PATCH_VERSION) < 0 then
+            GameTooltip:AddLine("OutlawOS v" .. ov .. " (outdated)", GuildOS.Tip.warn.r, GuildOS.Tip.warn.g, GuildOS.Tip.warn.b)
+        else
+            GameTooltip:AddLine("OutlawOS v" .. ov .. " (newer than yours)", 0.5, 0.5, 0.5)
         end
     end
     GameTooltip:AddLine(L["Left-click: details, right-click: actions"], 0.5, 0.5, 0.5)
@@ -2995,7 +3023,7 @@ function GuildOS:CreateRecruitmentPanel(parent, _mainFrame)
             end
 
             if info.enabled then
-                statusLabel:SetText("|TInterface\\COMMON\\Indicator-Green:14|t |cff4CFF4C" .. L["Guild is actively recruiting!"] .. "|r")
+                statusLabel:SetText("|TInterface\\COMMON\\Indicator-Green:14|t " .. GuildOS.Esc("4CFF4C") .. L["Guild is actively recruiting!"] .. "|r")
             else
                 statusLabel:SetText("|TInterface\\COMMON\\Indicator-Red:14|t |cffFF6644" .. L["Not currently recruiting"] .. "|r")
             end
@@ -3868,7 +3896,7 @@ function GuildOS:CreateRecruitmentPanel(parent, _mainFrame)
         f:SetSize(420, 250)
         f:SetPoint("CENTER")
         f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = UI:Edge(f) })
-        f:SetBackdropColor(0.058, 0.058, 0.075, 0.98)
+        f:SetBackdropColor(GuildOS.Colors.bg.r, GuildOS.Colors.bg.g, GuildOS.Colors.bg.b, 0.98)
         f:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, C.border.a)
         UI:StylePopup(f)
         f:SetFrameStrata("DIALOG")

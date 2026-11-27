@@ -1638,6 +1638,18 @@ function Calendar:RequestAllianceSlot(eventId, guildName, role, note)
     if sent == 0 then
         return false, L["No officer of that guild is online right now. Try the alliance channel."]
     end
+    -- A request that gets no answer used to vanish without a word. Remember it, and say so if nothing
+    -- comes back in three minutes (an answer, yes or no, clears it in _ReceiveSignupResult).
+    Calendar._asked = Calendar._asked or {}
+    local token = GetServerTime()
+    Calendar._asked[eventId] = { guild = guildName, at = token }
+    GuildOS.Compat.After(180, function()
+        local a = Calendar._asked and Calendar._asked[eventId]
+        if a and a.at == token then
+            Calendar._asked[eventId] = nil
+            GuildOS:Print(string.format(L["No answer yet from %s to your slot request. Their officers may be away: try the alliance chat, or ask again later."], guildName))
+        end
+    end)
     return true
 end
 
@@ -1717,6 +1729,7 @@ function Calendar:_ReceiveSignup(data, sender, senderGuild)
 end
 
 function Calendar:_ReceiveSignupResult(data, senderGuild)
+    if Calendar._asked then Calendar._asked[data.eventId or ""] = nil end   -- answered, so no reminder
     local why = data.why
     if data.ok then
         GuildOS:Print(string.format(L["%s approved your slot request."], senderGuild or "?"))

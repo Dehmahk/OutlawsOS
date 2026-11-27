@@ -220,6 +220,7 @@ function GuildOS:GetClassColorHex(class)
 end
 
 function GuildOS:ColorText(text, r, g, b)
+    if GuildOS.LightFix then r, g, b = GuildOS.LightFix(r, g, b) end
     return string.format("|cff%02x%02x%02x%s|r", r * 255, g * 255, b * 255, text)
 end
 
@@ -1074,7 +1075,7 @@ function GuildOS:ShowProfessionReminder(staleProfessions)
         edgeFile = "Interface\\Buttons\\WHITE8x8",
         edgeSize = GuildOS.UI:Edge(frame),
     })
-    frame:SetBackdropColor(0.066, 0.066, 0.084, 0.95)
+    frame:SetBackdropColor(GuildOS.Colors.bg.r, GuildOS.Colors.bg.g, GuildOS.Colors.bg.b, 0.95)
     frame:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 0.8)
     frame:SetMovable(true)
     frame:EnableMouse(true)
