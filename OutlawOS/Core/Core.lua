@@ -181,11 +181,14 @@ local function dbRealm()
     local realm = GuildOS:GuildRealm()
     if not realm or realm == "" then
         realm = "CAMWOW US2 Realm 7 PvE"
-        -- EKO patch: say so once, so a blank realm never goes unnoticed again.
+        -- EKO patch: officers are told once, so a blank realm never goes unnoticed. Everyone else
+        -- is left alone: the fallback is harmless and the red text only worried people.
         if not GuildOS._ekoRealmWarned then
             GuildOS._ekoRealmWarned = true
             GuildOS.Compat.After(10, function()
-                GuildOS:Print("|cffFF4444EKO: the game reported a blank realm name. Your guild data was loaded from the normal save anyway. If anything looks missing, tell an officer.|r")
+                if GuildOS:IsOfficer() then
+                    GuildOS:Print("EKO: the game reported a blank realm name, so OutlawOS used the guild's normal save. Nothing to fix unless data looks missing.")
+                end
             end)
         end
     end

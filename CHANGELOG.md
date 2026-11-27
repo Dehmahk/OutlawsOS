@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.41.32
+
+### Blank realm message
+- The "game reported a blank realm name" line in red is now shown to officers only, in plain text, and says nothing needs fixing unless data looks missing. Other members no longer see it. The fallback to the guild's normal save is unchanged.
+
 ## 1.41.31
 
 ### Minimap button
