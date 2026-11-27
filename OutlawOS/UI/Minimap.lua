@@ -185,7 +185,7 @@ function GuildOS:CreateMinimapButton()
     btn:SetScript("OnEnter", function(self)
         ring:SetVertexColor(RingColor(true))
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:AddLine("|cffFFD700Guild|r |cffD4AC0DOS|r  |cff666666by Chehul|r")
+        GameTooltip:AddLine("|cffFFD700Outlaw|r|cffD4AC0DOS|r  |cff666666v" .. tostring(GuildOS.VERSION or "") .. "|r")
         GameTooltip:AddLine(L["Left-click: open"], 0.8, 0.8, 0.8)
         GameTooltip:AddLine(L["Right-click: menu"], 0.8, 0.8, 0.8)
         GameTooltip:AddLine(L["Drag: move button"], 0.5, 0.5, 0.5)
@@ -216,6 +216,40 @@ function GuildOS:CreateMinimapButton()
     GuildOS.Compat.After(1, function() UpdatePosition(btn) end)
 
     self.minimapButton = btn
+
+    -- A Broker launcher, for the minimap-button bags and bars (ElvUI, Titan Panel, Bazooka and the like)
+    -- that list addons by LibDataBroker rather than by looking for a button on the minimap. Only when
+    -- one of them brought the library: nothing is bundled and nothing is needed without it.
+    local ok, LDB = pcall(function() return LibStub and LibStub("LibDataBroker-1.1", true) end)
+    if ok and LDB and not self.brokerObject then
+        self.brokerObject = LDB:NewDataObject("OutlawOS", {
+            type = "launcher",
+            text = "OutlawOS",
+            icon = MEDIA .. "minimap-logo",
+            OnClick = function(frame, mouseButton)
+                if mouseButton == "RightButton" then
+                    ShowMinimapMenu()
+                else
+                    GuildOS:ToggleRoster()
+                end
+            end,
+            OnTooltipShow = function(tip)
+                tip:AddLine("|cffFFD700Outlaw|r|cffD4AC0DOS|r")
+                tip:AddLine(L["Left-click: open"], 0.8, 0.8, 0.8)
+                tip:AddLine(L["Right-click: menu"], 0.8, 0.8, 0.8)
+            end,
+        })
+    end
+
+    -- Once per account: where the button is and how to bring it back, for the player who never noticed
+    -- it, or hid it and forgot (a button bag can swallow it too).
+    local cfg = GetMinimapCfg()
+    if not cfg.told then
+        cfg.told = true
+        GuildOS.Compat.After(8, function()
+            GuildOS:Print(L["The OutlawOS button is by the minimap: left-click opens it, right-click is the menu. If you do not see it, type /outlawos minimap."])
+        end)
+    end
 
     -- Wire the live guild map presence layer (minimap zone dots + refresh hook)
     -- now that the minimap definitely exists. Safe to call once.

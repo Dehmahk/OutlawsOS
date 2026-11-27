@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.41.31
+
+### Minimap button
+- The tooltip says "OutlawOS" and the version (it said "Guild OS by Chehul").
+- OutlawOS now shows up in minimap-button bags and bar addons that use Broker (ElvUI, Titan Panel, Bazooka and similar), with left-click to open and right-click for the menu.
+- One time per account, a chat line says where the button is and that `/outlawos minimap` brings it back if it is hidden.
+
 ## 1.41.30
 
 ### Calendar
