@@ -3097,7 +3097,7 @@ end
 -- settings' test. It was two windows of fixed columns (the loot frame and the roll tracker).
 ----------------------------------------------------------------------
 local TABLE_W, TABLE_H       = 800, 480
-local TABLE_MIN_W, TABLE_MIN_H = 600, 360
+local TABLE_MIN_W, TABLE_MIN_H = 740, 360   -- the answer strip needs 480px on the right of the list
 local TABLE_LIST_W           = 214   -- the items' column
 local TABLE_ROW_H            = 22
 local TABLE_ITEM_H           = 34
@@ -3280,7 +3280,7 @@ function LootMaster:BuildLootTable()
     forAnswer:SetPoint("LEFT", forBox, "RIGHT", 6, 0)
     local forBid = lootEditBox(strip, 56, true, 7)
     forBid:SetPoint("LEFT", forAnswer, "RIGHT", 6, 0)
-    local forEnter = UI:CreateButton(strip, L["Enter answer"], 100, 22)
+    local forEnter = UI:CreateButton(strip, L["Enter answer"], 92, 22)
     forEnter:SetPoint("LEFT", forBid, "RIGHT", 6, 0)
     local function entered(row, why, n)
         if not row then GuildOS:Print("|cffFF4444" .. LootMaster:WhyNot(why, n) .. "|r") end
@@ -3312,9 +3312,15 @@ function LootMaster:BuildLootTable()
         b:SetScript("OnLeave", function() GameTooltip:Hide() end)
         mine[i] = b
     end
-    mine[2]:SetPoint("RIGHT", strip, "RIGHT", 0, 0)
+    -- The loot master's own answer sits on the item's line, top right: beside the strip it ran into the
+    -- "Enter answer" button, and the strip already needs most of the width.
+    for _, b in ipairs(mine) do b:SetHeight(20) end
+    mine[2]:SetPoint("TOPRIGHT", right, "TOPRIGHT", 0, 0)
     mine[1]:SetPoint("RIGHT", mine[2], "LEFT", -4, 0)
     mineLabel:SetPoint("RIGHT", mine[1], "LEFT", -6, 0)
+    f.itemText:ClearAllPoints()
+    f.itemText:SetPoint("TOPLEFT", 0, 0)
+    f.itemText:SetPoint("RIGHT", mineLabel, "LEFT", -8, 0)
     f.strip, f.forBox, f.forAnswer, f.forBid, f.mine, f.forEnter = strip, forBox, forAnswer, forBid, mine, forEnter
 
     -- The candidates.

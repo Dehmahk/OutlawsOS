@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.41.35
+
+### Loot table
+- "Enter answer" no longer sits on top of your own MS and OS buttons. Your roll buttons moved to the item's line, top right, and the window can no longer be made narrower than the row of buttons needs.
+
 ## 1.41.34
 
 ### Companion
