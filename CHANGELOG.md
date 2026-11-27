@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.41.29
+
+### Fixes
+- Footer: "/outlawos help" no longer runs into "Blizzard". The links are measured after the font is applied.
+- Calendar: the selected day's event titles line up with the left edge (they were centred), and the first event's title is no longer cut off at the top.
+
 ## 1.41.28
 
 ### Memory

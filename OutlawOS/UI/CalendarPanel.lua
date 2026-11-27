@@ -831,7 +831,8 @@ function GuildOS:CreateCalendarSub(panel)
     holderBg:SetAllPoints()
     holderBg:SetColorTexture(C.well.r, C.well.g, C.well.b, 0.35)
     local scrollFrame, scrollChild = UI:CreateScrollFrame(holder, "GuildOSCalendarScroll")
-    scrollFrame:SetAllPoints()   -- fill the holder; without this the scroll viewport is 0x0 and clips all content
+    scrollFrame:SetPoint("TOPLEFT", 0, -5)   -- 5px of air at the top, so the first event's title is not clipped
+    scrollFrame:SetPoint("BOTTOMRIGHT", 0, 0)   -- fills the rest of the holder; at 0x0 the viewport would clip all content
     -- The child keeps the list's width, less the bar's gutter; the rows hang from both its top corners.
     UI:BindScrollChildWidth(scrollFrame, scrollChild)
     f.child = scrollChild
@@ -1018,6 +1019,7 @@ function GuildOS:CreateCalendarSub(panel)
                 .. tint("(" .. (e.size or DEFAULT_SIZE) .. ")", soft) .. shareMark .. repMark,
                 12, C.text.r, C.text.g, C.text.b)
             head:SetPoint("TOPLEFT", 0, -yy)
+            head:SetJustifyH("LEFT")   -- was centred in its box, so the title sat in from the left edge
             -- Room for the action buttons at the right: a long title wraps before it reaches them.
             head:SetWidth(math.max(160, (f.detailW or 600) - 270))
             head:SetWordWrap(true)

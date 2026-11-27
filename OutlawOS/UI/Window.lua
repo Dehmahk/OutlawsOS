@@ -676,6 +676,9 @@ local function createWindow()
         for _, item in ipairs(FOOTER) do
             local link = self.footItems[item.key]
             link:Hide()
+            -- Measured now, with the skin's font applied: at creation the text can be narrower than it
+            -- ends up, and the links then ran into each other ("/outlawos helpBlizzard").
+            link:SetWidth(math.ceil(link.label:GetStringWidth()) + 2 * LINK_PAD)
             spec[#spec + 1] = { key = item.key, min = link:GetWidth(), weight = 0, priority = item.priority }
         end
         local room = w - 2 * FOOT_PAD + LINK_PAD - GRIP - math.ceil(version:GetStringWidth()) - FOOT_GAP
