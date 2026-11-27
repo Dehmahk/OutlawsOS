@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.41.36
+
+### Loot table
+- The loot table window had no background, so the game world showed through it. It now has the same solid background as the other popups.
+
 ## 1.41.35
 
 ### Loot table
