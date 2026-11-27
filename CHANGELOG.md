@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.41.34
+
+### Companion
+- The bridge folder (GuildOS) also keeps saving the data as SavedVariables\\GuildOS.lua, the file the Guild OS companion app reads. Since the rename the data was only saved as OutlawOS.lua, so the companion saw "the addon has written nothing yet" and Sync now did nothing. The data is the same, written to both files, so saving takes a little longer on /reload and logout.
+
 ## 1.41.33
 
 ### Companion

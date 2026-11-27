@@ -18,7 +18,7 @@ GuildOS.ADDON_NAME        = "OutlawOS"
 GuildOS.NAMESPACE         = "GuildOS"
 
 -- ── Version ───────────────────────────────────────────────────────
-GuildOS.VERSION           = "1.41.33"  -- kept in sync with GuildOS.toc by the release workflow
+GuildOS.VERSION           = "1.41.34"  -- kept in sync with GuildOS.toc by the release workflow
 GuildOS.COMM_VERSION      = 1
 
 -- ── SavedVariables ────────────────────────────────────────────────
