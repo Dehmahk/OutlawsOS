@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.41.40
+
+### Roster
+- The Avg activity card is hidden while the guild's average is under 60%, and comes back on its own once it passes that. The other cards spread out to fill the row meanwhile.
+
 ## 1.41.39
 
 ### Group finder

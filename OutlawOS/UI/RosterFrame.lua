@@ -333,6 +333,10 @@ local KPI_SPEC = {
     { key = "addon",   min = 116, weight = 1, priority = 50 },
 }
 
+-- The Avg activity card is left off the roster while the guild's average is below this, so a low
+-- number is not the first thing a visitor sees. It comes back by itself once the average passes it.
+local ACTIVITY_SHOW_MIN = 60
+
 local ROW_HEIGHT = 24          -- the sketch's table row (#377)
 local HEADER_HEIGHT = 36
 local RAIL_WIDTH = 156          -- left filter/segment rail (roster dashboard)
@@ -1475,6 +1479,11 @@ function GuildOS:CreateRosterPanel(parent, host)
         if self.kpiAddon then self.kpiAddon:SetText(numWithAddon) end
         if self.kpiActivity and GuildOS.EKOActivityAverage then
             local pct, n = GuildOS:EKOActivityAverage(7)   -- EKO patch: everyone, logins per day
+            local hide = not (pct and pct >= ACTIVITY_SHOW_MIN)
+            if hide ~= self.hideActivity then
+                self.hideActivity = hide
+                UI:Relayout(parent)
+            end
             self.kpiActivity:SetText(pct and (math.floor(pct + 0.5) .. "%") or "—")
             if self.kpiActivitySub then
                 self.kpiActivitySub:SetText(n > 0 and ("over " .. n .. " day" .. (n == 1 and "" or "s")) or "no data yet")
@@ -1504,13 +1513,18 @@ function GuildOS:CreateRosterPanel(parent, host)
         -- The cards wrap onto more rows as the window narrows, so each keeps room for its text; the band
         -- grows with them and everything under it moves down.
         local availW = math.max(1, w - KPI_MARGIN * 2)
-        local perRow = math.max(1, math.min(#KPI_SPEC, math.floor((availW + KPI_GAP) / (KPI_MIN_CARD + KPI_GAP))))
-        local rows = math.ceil(#KPI_SPEC / perRow)
+        local specs = {}
+        for _, entry in ipairs(KPI_SPEC) do
+            if not (entry.key == "activity" and host.hideActivity) then specs[#specs + 1] = entry end
+        end
+        if host.hideActivity and host.kpiCards.activity then host.kpiCards.activity:Hide() end
+        local perRow = math.max(1, math.min(#specs, math.floor((availW + KPI_GAP) / (KPI_MIN_CARD + KPI_GAP))))
+        local rows = math.ceil(#specs / perRow)
         -- Spread the cards evenly over the rows (9 cards in 2 rows is 5 + 4, not 8 + 1).
-        perRow = math.ceil(#KPI_SPEC / rows)
+        perRow = math.ceil(#specs / rows)
         local cardW = math.floor((availW - KPI_GAP * (perRow - 1)) / perRow)
         local cardH = KPI_BAND_HEIGHT - 16
-        for i, entry in ipairs(KPI_SPEC) do
+        for i, entry in ipairs(specs) do
             local card = host.kpiCards[entry.key]
             if card then
                 local col, row = (i - 1) % perRow, math.floor((i - 1) / perRow)
