@@ -2,7 +2,7 @@
 ## Title: |cffFFD700OutlawOS|r |cff888888Guild Manager|r
 ## Notes: Guild manager for WoW: Forever and Retail: roster, raid attendance, cores, recruitment and professions
 ## Author: Chehul (danielcosta42)
-## Version: 1.41.40
+## Version: 1.41.41
 ## SavedVariables: GuildOSDB
 ## DefaultState: enabled
 ## IconTexture: Interface\AddOns\OutlawOS\Media\minimap-logo

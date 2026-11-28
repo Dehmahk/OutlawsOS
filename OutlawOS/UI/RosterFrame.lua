@@ -337,6 +337,9 @@ local KPI_SPEC = {
 -- number is not the first thing a visitor sees. It comes back by itself once the average passes it.
 local ACTIVITY_SHOW_MIN = 60
 
+-- The Avg attendance card has nothing to count until raids start, so it stays off the roster until then (Dec 9 2026).
+local ATTENDANCE_SHOW_FROM = time({ year = 2026, month = 12, day = 9, hour = 0 })
+
 local ROW_HEIGHT = 24          -- the sketch's table row (#377)
 local HEADER_HEIGHT = 36
 local RAIL_WIDTH = 156          -- left filter/segment rail (roster dashboard)
@@ -1515,9 +1518,12 @@ function GuildOS:CreateRosterPanel(parent, host)
         local availW = math.max(1, w - KPI_MARGIN * 2)
         local specs = {}
         for _, entry in ipairs(KPI_SPEC) do
-            if not (entry.key == "activity" and host.hideActivity) then specs[#specs + 1] = entry end
+            local off = (entry.key == "activity" and host.hideActivity)
+                or (entry.key == "att" and time() < ATTENDANCE_SHOW_FROM)
+            if not off then specs[#specs + 1] = entry end
         end
         if host.hideActivity and host.kpiCards.activity then host.kpiCards.activity:Hide() end
+        if time() < ATTENDANCE_SHOW_FROM and host.kpiCards.att then host.kpiCards.att:Hide() end
         local perRow = math.max(1, math.min(#specs, math.floor((availW + KPI_GAP) / (KPI_MIN_CARD + KPI_GAP))))
         local rows = math.ceil(#specs / perRow)
         -- Spread the cards evenly over the rows (9 cards in 2 rows is 5 + 4, not 8 + 1).

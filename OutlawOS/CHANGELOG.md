@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.41.41
+
+### Roster
+- The Avg attendance card is hidden until Dec 9 2026, when raids start.
+
 ## 1.41.40
 
 ### Roster
