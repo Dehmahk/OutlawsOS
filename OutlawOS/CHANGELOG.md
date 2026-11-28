@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.41.43
+
+### Fixes
+- Audit Log: typing in the Person or Search box, or flipping the filters a few dozen times, ended in a "stack overflow" error. The list built a fresh set of rows on every refresh and never reused them; it now keeps one set of rows and refills it.
+
 ## 1.41.42
 
 ### Leadership

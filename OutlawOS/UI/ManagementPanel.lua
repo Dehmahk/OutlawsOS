@@ -562,8 +562,11 @@ local function BuildLogSub(panel)
         UI:SetSelected(sortBtn, st.sort ~= 1)
     end
 
+    -- The rows are made once and refilled. A frame can never be destroyed, so a row built on every refresh
+    -- (a refresh per keystroke in the filters) piled up hidden frames until ClearContent's GetChildren
+    -- returned more values than Lua's stack holds: "stack overflow".
+    local pool, emptyFS = {}, nil
     refresh = function()
-        ClearContent(content)
         setLabels()
         st.person = personBox:GetText() or ""
         st.text = textBox:GetText() or ""
@@ -573,35 +576,46 @@ local function BuildLogSub(panel)
         countFS:SetText(#entries .. " / " .. #all)
         local yOff = 0
         for idx, e in ipairs(entries) do
-            local row = MakeRow(content, yOff, idx)
-
-            local whenFS = UI:CreateText(row, GuildOS:DateText(e.timestamp or 0, " %H:%M"), 9, C.textDim.r, C.textDim.g, C.textDim.b)
-            whenFS:SetPoint("LEFT", 8, 0)
-
+            local r = pool[idx]
+            if not r then
+                local row = MakeRow(content, yOff, idx)
+                r = { row = row }
+                r.whenFS = UI:CreateText(row, "", 9, C.textDim.r, C.textDim.g, C.textDim.b)
+                r.whenFS:SetPoint("LEFT", 8, 0)
+                r.actFS = UI:CreateText(row, "", 10, C.silver.r, C.silver.g, C.silver.b)
+                r.actFS:SetPoint("LEFT", 90, 0)
+                r.descFS = UI:CreateText(row, "", 10, C.silver.r, C.silver.g, C.silver.b)
+                r.descFS:SetPoint("LEFT", 170, 0)
+                r.descFS:SetPoint("RIGHT", -150, 0)
+                r.descFS:SetJustifyH("LEFT")
+                r.descFS:SetWordWrap(false)
+                r.byFS = UI:CreateText(row, "", 9, C.textDim.r, C.textDim.g, C.textDim.b)
+                r.byFS:SetPoint("RIGHT", -10, 0)
+                pool[idx] = r
+            end
+            r.row:Show()
+            r.whenFS:SetText(GuildOS:DateText(e.timestamp or 0, " %H:%M"))
             local meta = ACTION_LABELS[e.action] or { txt = e.action or "?", color = "silver" }
             local col = C[meta.color] or C.silver
-            local actFS = UI:CreateText(row, meta.txt, 10, col.r, col.g, col.b)
-            actFS:SetPoint("LEFT", 90, 0)
-
+            r.actFS:SetText(meta.txt)
+            r.actFS:SetTextColor(col.r, col.g, col.b)
             -- Who it was done to, in `text` against the detail's softer one: not gold (#371).
             local tgt = e.target and ("|cff" .. hex(C.text) .. e.target .. "|r ") or ""
-            local detail = e.detail and tostring(e.detail) or ""
-            local descFS = UI:CreateText(row, tgt .. detail, 10, C.silver.r, C.silver.g, C.silver.b)
-            descFS:SetPoint("LEFT", 170, 0)
-            descFS:SetPoint("RIGHT", -150, 0)
-            descFS:SetJustifyH("LEFT")
-            descFS:SetWordWrap(false)
-
-            local byFS = UI:CreateText(row, L["by "] .. (e.author or "?"), 9, C.textDim.r, C.textDim.g, C.textDim.b)
-            byFS:SetPoint("RIGHT", -10, 0)
-
+            r.descFS:SetText(tgt .. (e.detail and tostring(e.detail) or ""))
+            r.byFS:SetText(L["by "] .. (e.author or "?"))
             yOff = yOff + ROW_H + 2
         end
+        for i = #entries + 1, #pool do pool[i].row:Hide() end
 
+        if not emptyFS then
+            emptyFS = UI:CreateText(content, "", 11, C.silver.r, C.silver.g, C.silver.b)
+            emptyFS:SetPoint("TOPLEFT", 0, -4)
+        end
         if #entries == 0 then
-            local msg = #all == 0 and L["No actions logged yet."] or L["Nothing matches these filters."]
-            local empty = UI:CreateText(content, msg, 11, C.silver.r, C.silver.g, C.silver.b)
-            empty:SetPoint("TOPLEFT", 0, -4)
+            emptyFS:SetText(#all == 0 and L["No actions logged yet."] or L["Nothing matches these filters."])
+            emptyFS:Show()
+        else
+            emptyFS:Hide()
         end
         content:SetHeight(math.max(1, yOff))
     end
