@@ -348,15 +348,25 @@ EKO.ROLE_RANK = {
 
 EKO.LEADERS = {
     { name = "Raistlin Danuz", role = "Officer" },
-    { name = "Gigglebyte Fizzlebang", role = "Officer" },
     { name = "Korgran Ironborne", role = "Officer" },
     { name = "Donut Glitterblast", role = "Officer" },
     { name = "Essanance Serilia", role = "Raid Leader" },
     { name = "Genevieve Hunt", role = "Event Organizer" },
     { name = "Wizzly Crusher", role = "Recruiter" },
-    { name = "Skadi Miniheals", role = "Recruiter" },
     { name = "Exadus Arrowstorm", role = "Recruiter" },
 }
+
+-- Leaders who are still in the guild. The roster has to be loaded, otherwise nobody would match
+-- and the whole list would vanish. Second return is how many were left out.
+function EKO:ActiveLeaders(roster)
+    roster = roster or self:Roster()
+    if not roster or not next(roster) then return self.LEADERS, 0 end
+    local out, hidden = {}, 0
+    for _, l in ipairs(self.LEADERS) do
+        if roster[l.name] then out[#out + 1] = l else hidden = hidden + 1 end
+    end
+    return out, hidden
+end
 
 local NUDGE = "Hey! You've been leveling great and you're close to Outlaw rank. Last step is joining our Discord: discord.gg/AdD9kFnQWu. Once you're in, /register your character and you're set!"
 
@@ -595,7 +605,8 @@ function EKO:BuildCircleSub(panel)
         local roster = EKO:Roster()
         header(child, { { "LEADER", 4 }, { "ROLE", 180 }, { "RANK", 310 }, { "LAST ONLINE", 450 }, { "OATH", 560 }, { "NOTES", 610 } }, 0)
         local y = 22
-        for i, ldr in ipairs(EKO.LEADERS) do
+        local leaders, hiddenLeaders = EKO:ActiveLeaders(roster)
+        for i, ldr in ipairs(leaders) do
             local st = db.circle[ldr.name] or {}
             db.circle[ldr.name] = st
             local m = roster[ldr.name]
@@ -637,7 +648,7 @@ function EKO:BuildCircleSub(panel)
             end
             y = y + 32
         end
-        local foot = UI:CreateText(child, "Oath: tick it once they've reacted in #the-oath. Rank checks use the live roster. A yellow ! means their rank doesn't match their role yet.", 10, C.textSoft.r, C.textSoft.g, C.textSoft.b)
+        local foot = UI:CreateText(child, "Oath: tick it once they've reacted in #the-oath. Rank checks use the live roster. A yellow ! means their rank doesn't match their role yet." .. (hiddenLeaders > 0 and string.format(" %d leader(s) hidden because they're no longer in the guild.", hiddenLeaders) or ""), 10, C.textSoft.r, C.textSoft.g, C.textSoft.b)
         foot:SetPoint("TOPLEFT", 4, -(y + 8))
         foot:SetPoint("TOPRIGHT", -4, -(y + 8))
         foot:SetJustifyH("LEFT")
@@ -966,7 +977,7 @@ function EKO:SuggestData()
             d.soon[#d.soon + 1] = { m = m, key = act.key, left = left, meets = meets, gained = gained }
         end
     end
-    for _, l in ipairs(self.LEADERS) do
+    for _, l in ipairs(self:ActiveLeaders(roster)) do
         local m = roster[l.name]
         if m and not m.online and (m.hoursOff or 0) >= self.LEADER_AWAY_DAYS * 24 then
             d.leadersAway[#d.leadersAway + 1] = { m = m, role = l.role }
@@ -4091,7 +4102,7 @@ ev:SetScript("OnEvent", function()
             if t >= EKO.TRIAL_END - 3 * DAY and t <= EKO.TRIAL_END + 7 * DAY then
                 local db = EKO:DB()
                 local open = 0
-                for _, l in ipairs(EKO.LEADERS) do
+                for _, l in ipairs(EKO:ActiveLeaders()) do
                     local st = db and db.circle[l.name]
                     if not (st and st.result) then open = open + 1 end
                 end

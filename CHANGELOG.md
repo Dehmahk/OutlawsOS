@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.41.42
+
+### Leadership
+- Inner Circle no longer lists leaders who have left the guild: Gigglebyte Fizzlebang and Skadi Miniheals are removed, and anyone else who leaves drops off on their own (a note under the list says how many are hidden).
+
 ## 1.41.41
 
 ### Roster
