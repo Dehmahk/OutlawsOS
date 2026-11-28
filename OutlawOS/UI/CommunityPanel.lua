@@ -205,7 +205,7 @@ local function BuildActivitySub(panel)
     -- Pinned lines, placed each refresh: what is open now, what is coming, the next achievement,
     -- a welcome, and the notices that live in Bulletin.
     local openText = UI:CreateText(child, "", 12, C.text.r, C.text.g, C.text.b)
-    local openRide = UI:CreateButton(child, L["Ride Out"], 84, 20)
+    local openRide = UI:CreateButton(child, L["Group Up"], 84, 20)
     UI:SetButtonVariant(openRide, "ghost")
     openRide:SetScript("OnClick", function() UI:OpenWindow("groups", "active") end)
     local openCta = UI:CreateButton(child, L["Call to Arms"], 110, 20)

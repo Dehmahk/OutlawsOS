@@ -717,7 +717,7 @@ local function openComposer(act, mode)
     composer:Open(act, mode)
 end
 
--- Opens the composer from outside the panel (the Tavern's Ride Out buttons).
+-- Opens the composer from outside the panel (the Tavern's Group Up buttons).
 function GuildOS.OpenGroupComposer(act, mode)
     openComposer(act, mode)
 end

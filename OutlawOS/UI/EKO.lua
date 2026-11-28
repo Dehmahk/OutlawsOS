@@ -1852,7 +1852,7 @@ end
 ----------------------------------------------------------------------
 -- OUTLAW EXTRAS (Nov 21): Wanted posters, Bounty Hunter of the Month, Raffle, Location of the Week,
 -- Notoriety, Ledger seals, rank lore, anniversaries, the Ledger signing, farewell lines, strikes,
--- Quote the Code, the Outlaw Gazette, the recruit ad rotator, Ride Out, Safehouses, the Tavern and
+-- Quote the Code, the Outlaw Gazette, the recruit ad rotator, Group Up, Safehouses, the Tavern and
 -- Campfire nights. Shared state goes out on one sync domain, "ekomisc", accepted only from officers.
 ----------------------------------------------------------------------
 local GOLDC = GuildOS.GoldEsc()
@@ -3110,7 +3110,7 @@ function EKO:BuildRaffleSub(panel)
 end
 
 ----------------------------------------------------------------------
--- The Gilded Feather > Tavern: who's where, Ride Out, Safehouses, Campfire nights
+-- The Gilded Feather > Tavern: who's where, Group Up, Safehouses, Campfire nights
 ----------------------------------------------------------------------
 function EKO:BuildTavernSub(panel)
     local UI, C = GuildOS.UI, GuildOS.Colors
@@ -3149,9 +3149,9 @@ function EKO:BuildTavernSub(panel)
         end
         if online == 0 then txt(child, "Nobody online right now (or the roster hasn't loaded yet).", 0, y, width, 12, C.textSoft); y = y + 22 end
 
-        -- Ride Out
+        -- Group Up
         y = y + 14
-        sectionAt(child, "RIDE OUT  ·  find a crew for a bounty", y); y = y + 26
+        sectionAt(child, "GROUP UP  ·  find a crew for a bounty", y); y = y + 26
         local bt = EKO:Bounties()
         local list = bt and EKO:ParseBounties(bt.text) or {}
         if #list == 0 then
@@ -3161,7 +3161,7 @@ function EKO:BuildTavernSub(panel)
             for _, bnt in ipairs(list) do
                 local act = EKO:BountyActId(bnt.name)
                 local looking = EKO:BountyLooking(act)
-                local label = "Ride out: " .. bnt.name .. (looking > 0 and string.format(L["  (%d looking)"], looking) or "")
+                local label = "Group up: " .. bnt.name .. (looking > 0 and string.format(L["  (%d looking)"], looking) or "")
                 local b = btn(child, label, 0, function()
                     if act and GuildOS.OpenGroupComposer then
                         GuildOS.OpenGroupComposer(act, "seek")

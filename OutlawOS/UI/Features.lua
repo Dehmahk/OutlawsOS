@@ -78,7 +78,7 @@ UI:RegisterFeature({
 -- The guild's own group finder (issue #341): what is being formed, who is looking, and the game's
 -- activities as tiles. /outlawos avail opens it.
 UI:RegisterFeature({
-    id = "groups", label = "Ride Out", order = 52,  -- EKO patch (lore)
+    id = "groups", label = "Group Up", order = 52,  -- EKO patch (lore)
     subs = { "active", "dungeon", "raid", "other" },
     build = function(c, win) GuildOS:CreateGroupsPanel(c, win) end,
 })

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.41.39
+
+### Group finder
+- "Ride Out" is now "Group Up": the tab, the Tavern button and its heading.
+
 ## 1.41.38
 
 ### Recruit scanner
